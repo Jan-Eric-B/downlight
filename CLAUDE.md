@@ -2,6 +2,10 @@
 
 A small, lightweight Markdown viewer.
 
+## Coding standards
+
+Writing or reviewing code follows `CODING_STANDARDS.md`.
+
 ## Commits
 
 Commit messages follow Conventional Commits and are a single short subject line, for example `feat(find): highlight matches as you type`.
