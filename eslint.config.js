@@ -18,4 +18,17 @@ export default defineConfig(
     files: ["**/*.js"],
     extends: [tseslint.configs.disableTypeChecked],
   },
+  {
+    // The repo's scripts run in Node.
+    files: ["scripts/**/*.js"],
+    languageOptions: {
+      globals: {
+        Buffer: "readonly",
+        console: "readonly",
+        fetch: "readonly",
+        process: "readonly",
+        WebSocket: "readonly",
+      },
+    },
+  },
 );

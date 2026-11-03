@@ -11,7 +11,9 @@
     "check:lint": "eslint . && cargo clippy --workspace --all-targets --locked -- -D warnings",
     "check:types": "tsc",
     "check:deny": "cargo deny check",
-    "test": "cargo test --workspace --locked"
+    "test": "cargo test --workspace --locked",
+    "documents": "node scripts/generate-documents.js",
+    "measure": "node scripts/measure.js"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.12.4",

@@ -13,3 +13,11 @@ body {
   padding: 32px;
   background-color: transparent;
 }
+
+/* Lays out and paints only the blocks near the view, so showing a 1 MB document never holds up
+   the page for more than 100 ms (measured in ticket 02). Until a block has been shown, its height
+   is estimated; after that it is remembered. */
+.markdown-body > * {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 3em;
+}
