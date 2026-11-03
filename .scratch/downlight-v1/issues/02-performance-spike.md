@@ -14,7 +14,8 @@ Spec: [Downlight v1](../spec.md)
   - [ ] cold start to first paint for the 100 KB document (target: under 1.0 s);
   - [ ] first paint of a second window in the same process (target: under 300 ms). Until ticket 08 exists, the skeleton may open two files given in one launch;
   - [ ] the 1 MB documents: the longest page task (target: the window never stops answering for more than 100 ms) and the time until fully shown (target: under 2 s);
-  - [ ] memory across all processes, recorded with no ceiling.
+  - [ ] memory across all processes, recorded with no ceiling;
+  - [ ] how much of first paint the read and render of the document take, for the 100 KB and 1 MB documents. Today they start only after the webview has started, loaded the page and run `main.ts`, though none of that work needs the webview. Whether to start them earlier, and how, is decided from the result.
 - [ ] Mica checked and the findings recorded: it shows in the native title bar; with "Transparency effects" off the background is solid; in high contrast it is solid and readable; whether the window flashes white while it opens.
 - [ ] If cold first paint is at most 1.5 s: ADR 0002 is written, saying why rendering happens in Rust with comrak and not with a JavaScript renderer in the page.
 - [ ] If cold first paint is over 1.5 s: work stops here, the results are reported to the user, and the stack is reopened before any other ticket starts.

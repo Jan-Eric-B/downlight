@@ -8,11 +8,11 @@ Spec: [Downlight v1](../spec.md)
 
 **Status:** ready-for-agent
 
-- [ ] The core's watching takes a document's path and reports Changed, Gone and Back. It watches the file's folder and reports a change 150 ms after the last event.
+- [ ] The app's watching takes a document's path and reports Changed, Gone and Back. It watches the file's folder and reports a change 150 ms after the last event. On Changed and Back the app reads the file again and passes its bytes to the core's render.
 - [ ] Saving in place and saving by renaming a new file over the old one both reload the document.
 - [ ] After a reload, the block that was at the top of the view (found by its line number) is at the top again.
 - [ ] F5 and Ctrl+R reload by hand.
 - [ ] When the file is deleted or moved, a bar says "File deleted or moved" and the last render stays visible.
 - [ ] When the file comes back, the document reloads and the bar goes away.
 - [ ] Reload is in the right-click menu.
-- [ ] Core tests with real temporary files cover a rewrite in place, a rename over the file, a delete and a recreate. A page test covers which block a reload anchors to.
+- [ ] App tests of the watching (`cargo test`, no window) with real temporary files cover a rewrite in place, a rename over the file, a delete and a recreate. A page test covers which block a reload anchors to.

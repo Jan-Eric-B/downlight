@@ -4,7 +4,7 @@ The rules for Downlight's code that no tool checks. Formatting, lints and strict
 
 ## Structure
 
-- **Three parts, one direction.** The core crate reads, decodes, renders, resolves links and watches files; it has no Tauri dependency and knows nothing about windows. The app crate owns the process, windows, menus, settings and everything that touches the OS. The page shows what the core rendered and handles the reader's input. The page talks only to the app, and the app calls the core.
+- **Three parts, one direction.** The core crate decodes, renders and resolves links; it reads and watches no document files, has no Tauri dependency and knows nothing about windows. The app crate owns the process, windows, menus, settings and everything that touches the OS: it reads and watches a document's file and passes its bytes to the core. The page shows what the core rendered and handles the reader's input. The page talks only to the app, and the app calls the core.
 - **Folders by feature.** Name folders and modules after features (`render`, `links`, `watch`, `find`), and keep a feature's types, logic and tests together, so a feature is found by its name.
 - **Deep modules.** Each module has a small interface that hides a lot: a caller of render passes bytes and a path and gets HTML back, never comrak options. A public item exists because something outside its module calls it.
 - **One module per OS.** Code that calls OS APIs (editor launch, Mica, revealing a file) lives in the app's per-OS module behind one interface, and everything else stays OS-neutral. `unsafe` code lives only there.
@@ -33,7 +33,7 @@ The rules for Downlight's code that no tool checks. Formatting, lints and strict
 
 ## Tests
 
-- Tests sit at the seams the spec names: the core's public interface (`cargo test`), and the page's document view and Find (Vitest with happy-dom). They drive the public interface, check what a caller can observe, and use the real comrak, ammonia and webview.
+- Tests sit at the seams the spec names: the core's public interface and the app's watching (`cargo test`), and the page's document view and Find (Vitest with happy-dom). They drive the public interface, check what a caller can observe, and use the real comrak, ammonia and webview.
 - A test's name states the behavior it checks, such as `reload_with_same_task_count_keeps_ticks`.
 
 ## Dependencies

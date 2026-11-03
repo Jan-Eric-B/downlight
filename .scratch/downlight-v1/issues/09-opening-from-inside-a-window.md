@@ -14,3 +14,7 @@ Spec: [Downlight v1](../spec.md)
 - [ ] A window started without a file shows "Open file" and "or drop a file here".
 - [ ] Right-clicking the document opens a native menu with Open and Copy, and Ctrl+C copies the selection.
 - [ ] Later tickets can add a command to the menu in one place.
+
+## Comments
+
+**2026-11-03, review.** In the walking skeleton, the render command (`render_document` in `app/src/document.rs`) reads the one process-wide `CommandLineDocument`. Here a window's document changes with Ctrl+O and dropping, and a window can start without one, so the render command reads the document of the window that calls it, from the per-window state ticket 08 adds. The render command moves into its own module, which finishes splitting `app/src/document.rs` by feature.

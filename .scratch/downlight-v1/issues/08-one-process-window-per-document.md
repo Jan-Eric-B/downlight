@@ -15,3 +15,7 @@ Spec: [Downlight v1](../spec.md)
 - [ ] The process exits when its last window closes; there is no tray icon.
 - [ ] A missing or unreadable file shows its error in the window.
 - [ ] Ctrl+W closes the window.
+
+## Comments
+
+**2026-11-03, review.** The walking skeleton keeps one process-wide `CommandLineDocument` in Tauri's managed state and opens one window with the fixed label `"document"` (`app/src/main.rs`, `app/src/document.rs`). This ticket keys the document state and the window label per window, and moves the command line and window code out of `app/src/document.rs` into a module each.

@@ -24,6 +24,10 @@ _Avoid_: Check, complete, done
 Showing the document again after its file changed, at the same reading position.
 _Avoid_: Refresh
 
+**Rendered document**:
+A document's file turned into the sanitized HTML the page shows. Only the core makes one.
+_Avoid_: Output, HTML string
+
 **Line number**:
 The line of the file where a rendered block starts, shown in the margin. The rendered page has no line numbers of its own.
 _Avoid_: Row, source line

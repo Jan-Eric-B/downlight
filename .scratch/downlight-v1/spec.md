@@ -130,7 +130,7 @@ Downlight renders Markdown in Rust (comrak) and shows the result in the system w
 82. As the maintainer, I want the stack's performance measured in a spike before any feature work, so that the choice of Tauri, comrak and the system webview rests on numbers.
 83. As the maintainer, I want rendering chosen by file format behind one entry point, with Markdown the only format in v1, so that adding CSV or SVG later is one new module.
 84. As the maintainer, I want code that differs per OS kept in one module per OS, so that the macOS and Linux ports touch only those modules.
-85. As the maintainer, I want the reading, rendering and link logic in a crate with no Tauri dependency, so that its tests are fast and don't need a window.
+85. As the maintainer, I want the rendering and link logic in a crate with no Tauri dependency, so that its tests are fast and don't need a window.
 
 ## Implementation Decisions
 
@@ -144,7 +144,7 @@ Downlight renders Markdown in Rust (comrak) and shows the result in the system w
 
 ### Modules
 
-**Core** (a crate with no Tauri dependency). It does the reading, rendering, link and watching work, and its public interface is the main test seam:
+**Core** (a crate with no Tauri dependency). It does the rendering and link work but reads and watches no document files, and its public interface is the main test seam:
 
 - **Render**: takes a file's bytes and its path, and returns the rendered document: sanitized HTML in which every block carries its **line number** (the line of the file where it starts, from comrak's source positions). Rendering is chosen by file format; Markdown is the only format in v1.
   - Decoding: a byte order mark decides (UTF-8, UTF-16 LE, UTF-16 BE); otherwise valid UTF-8 is UTF-8; otherwise Windows-1252.
@@ -160,16 +160,16 @@ Downlight renders Markdown in Rust (comrak) and shows the result in the system w
   - nothing.
 
   A file is Markdown when it has one of the six extensions. Paths on network shares are treated like local paths, since they only connect when clicked.
-- **Watching**: takes a document's path and reports Changed, Gone and Back. It watches the file's folder rather than the file, so that saves by rename are seen, and reports a change 150 ms after the last event.
 
 **App** (the Tauri crate):
 
 - **One process.** A second launch passes its paths to the running process and exits; the process exits when its last window closes. A document that is already open (paths compared after resolving them, ignoring case on Windows) has its window brought to the front instead of opening a second one.
-- **Opening.** Explorer and the command line open a new window. Ctrl+O and dropping a file show the document in the current window and record it in Back history, as following a link does. A window started without a file shows the empty state.
+- **Opening.** Explorer and the command line open a new window. Ctrl+O and dropping a file show the document in the current window and record it in Back history, as following a link does. A window started without a file shows the empty state. The app reads the document's file and passes its bytes to the core's Render.
+- **Watching.** The app watches each shown document's file: given its path, it reports Changed, Gone and Back. It watches the file's folder rather than the file, so that saves by rename are seen, and reports a change 150 ms after the last event. On Changed and Back it reads the file again and passes its bytes to the core's Render; the page then shows the result as a reload.
 - **Windows.**
   - Native title bar. The title is the file name, its parent folder, then "Downlight".
   - A new window takes the size of the last window that closed and is offset down and to the right of the active window.
-  - Rendering runs off the main thread, so the window keeps answering while a large document renders.
+  - Reading, rendering and watching run off the main thread, so the window keeps answering while a large document renders.
 - **Mica.** On Windows 11 the window is transparent with the Mica window effect, and the page draws no background of its own, so the document sits on Mica. Code blocks, tables and quotes keep github-markdown-css's fills. Windows 10 and Linux get a solid background. macOS vibrancy comes with the macOS port.
 - **Settings.** A small file in the app's config folder holds the chosen editor, the zoom level and the last window size. There is no settings window.
 - **Edit.** Ctrl+E opens the document in the chosen editor if one is set and still exists. Otherwise it uses the program the system uses for `.txt` files, started through the shell's handler API so that the packaged Notepad on Windows 11 works. Otherwise it uses Notepad. "Choose editor..." opens a file dialog for a program and remembers the choice.
@@ -243,7 +243,7 @@ If the cold start takes more than 1.5 s, the stack is reopened before any featur
 - **Core** (`cargo test`): the main seam.
   - Render tests feed Markdown in and check the HTML: decoding (byte order marks, UTF-8, Windows-1252), the GFM features, alerts, footnotes, heading anchors, emoji, the front matter block, the highlighting classes, line numbers on blocks, the sanitizing (what is removed and what is kept), remote images kept, images on network shares removed, and relative images resolved.
   - Link resolution is a table of document paths and targets with the action each one gives.
-  - Watching uses real temporary files: a rewrite in place, a rename over the file, a delete, a recreate. There are only a few of these tests, since each waits about 150 ms.
+- **App watching** (`cargo test`): the app's watching takes a path and reports events, so its tests need no window. They use real temporary files: a rewrite in place, a rename over the file, a delete, a recreate. There are only a few of these tests, since each waits about 150 ms.
 - **Page** (Vitest with happy-dom):
   - Document view: showing a document, a reload with the same number of task items (ticks kept), a reload with a different number (ticks cleared), Back and Forward (ticks restored), and which block a reload anchors to.
   - Find: the count, the current match, next and previous, wrapping, Esc.
