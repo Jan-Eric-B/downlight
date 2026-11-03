@@ -12,18 +12,12 @@ mod window;
 
 use std::path::Path;
 
-use tauri::{Manager as _, WindowEvent};
+use tauri::Manager as _;
 
 use window::OpenWindows;
 
 fn main() -> tauri::Result<()> {
     let timing = timing::Timing::from_env();
-    // Without the current folder a relative path stays relative, and reading it reports the
-    // problem to the reader.
-    let documents = command_line::document_paths(
-        std::env::args_os(),
-        &std::env::current_dir().unwrap_or_default(),
-    );
 
     tauri::Builder::default()
         // First, so that a second launch hands over its documents and exits before anything
@@ -33,10 +27,9 @@ fn main() -> tauri::Result<()> {
             // only if the window opens later, off the main thread.
             let app = app.clone();
             tauri::async_runtime::spawn_blocking(move || {
-                let documents = command_line::document_paths(args, Path::new(&folder));
-                if let Err(error) = window::open_documents(&app, &documents) {
-                    // Ticket 19 shows this to the reader.
-                    eprintln!("Can't open a window: {error}");
+                // Ticket 19 shows these to the reader; release builds have no console.
+                for failure in window::open_launch(&app, args, Path::new(&folder)) {
+                    eprintln!("{failure}");
                 }
             });
         }))
@@ -48,13 +41,26 @@ fn main() -> tauri::Result<()> {
             timing::report_first_paint,
             timing::report_long_task,
         ])
-        .on_window_event(|window, event| {
-            if let WindowEvent::Destroyed = event {
-                window.state::<OpenWindows>().forget(window.label());
+        .on_window_event(window::forget_when_destroyed)
+        .setup(|app| {
+            // Without the current folder a relative path stays relative, and reading it reports
+            // the problem to the reader.
+            let folder = std::env::current_dir().unwrap_or_default();
+            let failures = window::open_launch(app.handle(), std::env::args_os(), &folder);
+            // Ticket 19 shows these to the reader; release builds have no console.
+            for failure in &failures {
+                eprintln!("{failure}");
             }
-        })
-        .setup(move |app| {
-            window::open_documents(app.handle(), &documents)?;
+            // Only closing the last window ends the process, so without one it would never end.
+            // No window open means every window failed, so the failures say why.
+            if app.webview_windows().is_empty() {
+                let message = failures
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                return Err(message.into());
+            }
             Ok(())
         })
         .run(tauri::generate_context!())

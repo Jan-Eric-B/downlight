@@ -5,7 +5,7 @@
 mod windows;
 
 #[cfg(windows)]
-pub use windows::{document_key, process_start, with_backdrop};
+pub use windows::{fold_case, process_start, with_backdrop};
 
 /// Other systems get a plain window until their ports.
 #[cfg(not(windows))]
@@ -22,11 +22,9 @@ pub fn process_start() -> Option<std::time::SystemTime> {
     None
 }
 
-/// Other systems resolve the path and compare it as it is until their ports, which know whether
-/// their file systems ignore case.
+/// Other systems compare paths as they are until their ports, which know whether their file
+/// systems ignore case.
 #[cfg(not(windows))]
-pub fn document_key(document: &std::path::Path) -> std::path::PathBuf {
-    std::fs::canonicalize(document)
-        .or_else(|_| std::path::absolute(document))
-        .unwrap_or_else(|_| document.to_owned())
+pub fn fold_case(path: std::path::PathBuf) -> std::path::PathBuf {
+    path
 }

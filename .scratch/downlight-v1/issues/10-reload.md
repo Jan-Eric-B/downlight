@@ -16,3 +16,7 @@ Spec: [Downlight v1](../spec.md)
 - [ ] When the file comes back, the document reloads and the bar goes away.
 - [ ] Reload is in the right-click menu.
 - [ ] App tests of the watching (`cargo test`, no window) with real temporary files cover a rewrite in place, a rename over the file, a delete and a recreate. A page test covers which block a reload anchors to.
+
+## Comments
+
+**2026-11-03, architecture review.** Reload is the second piece of work the timing switch measures (its read, render and anchoring, as `CODING_STANDARDS.md` asks for work that grows with a document's size). Today each measurement needs a public struct and a `Timing` method of its own: `app/src/document.rs` keeps its own `SystemTime` and `Instant` to fill `ReadAndRenderTimes` (`app/src/timing.rs`), and `open_window` in `app/src/window.rs` builds the `?timing` page URL itself. Before adding Reload's measurement, give `Timing` stages, for example `timing.stages(window, "reload")` with `.lap("read")` and `.lap("render")` and a report when it ends, so the clock work stays in `timing.rs` and the read-and-render measurement uses the same call. `Timing` can hand out the page URL too. The line format `timing <window> <event> key=value ...` is what `scripts/measure.js` reads, so keep it. Expected size: about 70 lines across `timing.rs`, `document.rs` and `window.rs`.
