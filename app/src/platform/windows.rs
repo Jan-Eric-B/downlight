@@ -1,3 +1,5 @@
+use std::io;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use tauri::window::{Effect, EffectsBuilder};
@@ -14,6 +16,35 @@ pub fn with_backdrop<'a, R: Runtime, M: Manager<R>>(
     builder
         .transparent(true)
         .effects(EffectsBuilder::new().effect(Effect::Mica).build())
+}
+
+/// What two paths to the same document have in common: the path with links, `..` and short names
+/// resolved, in one case, since Windows file names ignore case. A missing file keeps its name as
+/// given, in its resolved folder.
+pub fn document_key(document: &Path) -> PathBuf {
+    let resolved = std::fs::canonicalize(document)
+        .or_else(|_| match (document.parent(), document.file_name()) {
+            (Some(folder), Some(name)) => {
+                std::fs::canonicalize(folder).map(|folder| folder.join(name))
+            }
+            _ => Err(io::ErrorKind::NotFound.into()),
+        })
+        .or_else(|_| std::path::absolute(document))
+        .unwrap_or_else(|_| document.to_owned());
+    // NTFS compares names by upper-casing each character on its own, so a character whose upper
+    // case is longer, such as ß, stays as it is.
+    resolved
+        .to_string_lossy()
+        .chars()
+        .map(|c| {
+            let mut upper = c.to_uppercase();
+            match (upper.next(), upper.next()) {
+                (Some(single), None) => single,
+                _ => c,
+            }
+        })
+        .collect::<String>()
+        .into()
 }
 
 /// When Windows created this process, so first paint counts the loader's work before `main` too.

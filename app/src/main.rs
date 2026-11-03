@@ -4,24 +4,57 @@
 // A GUI app in release builds, so `downlight <file>` opens no console and doesn't hold the shell.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod command_line;
 mod document;
 mod platform;
 mod timing;
+mod window;
+
+use std::path::Path;
+
+use tauri::{Manager as _, WindowEvent};
+
+use window::OpenWindows;
 
 fn main() -> tauri::Result<()> {
     let timing = timing::Timing::from_env();
-    let command_line_documents = document::CommandLineDocuments::from_args(std::env::args_os());
+    // Without the current folder a relative path stays relative, and reading it reports the
+    // problem to the reader.
+    let documents = command_line::document_paths(
+        std::env::args_os(),
+        &std::env::current_dir().unwrap_or_default(),
+    );
 
     tauri::Builder::default()
+        // First, so that a second launch hands over its documents and exits before anything
+        // else starts (ADR 0001).
+        .plugin(tauri_plugin_single_instance::init(|app, args, folder| {
+            // The second launch waits until this returns, so `downlight <file>` returns at once
+            // only if the window opens later, off the main thread.
+            let app = app.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                let documents = command_line::document_paths(args, Path::new(&folder));
+                if let Err(error) = window::open_documents(&app, &documents) {
+                    // Ticket 19 shows this to the reader.
+                    eprintln!("Can't open a window: {error}");
+                }
+            });
+        }))
         .manage(timing)
-        .manage(command_line_documents)
+        .manage(OpenWindows::default())
         .invoke_handler(tauri::generate_handler![
             document::render_document,
+            window::close_window,
             timing::report_first_paint,
             timing::report_long_task,
         ])
-        .setup(|app| {
-            document::open_first_window(app.handle())?;
+        .on_window_event(|window, event| {
+            if let WindowEvent::Destroyed = event {
+                window.state::<OpenWindows>().forget(window.label());
+            }
+        })
+        .setup(move |app| {
+            window::open_documents(app.handle(), &documents)?;
             Ok(())
         })
         .run(tauri::generate_context!())

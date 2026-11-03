@@ -1,6 +1,7 @@
 // Writes the test documents that performance is measured on (ticket 02) to target/documents/:
-// 100 KB and 1 MB of Markdown with a table and a code block about every 30 lines, and 1 MB of
-// prose only. The text is pseudo-random from a fixed seed, so every run writes the same files.
+// 100 KB and 1 MB of Markdown with a table and a code block about every 30 lines, a second
+// 100 KB document of that kind for a further window, and 1 MB of prose only. The text is
+// pseudo-random from a fixed seed, so every run writes the same files.
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -12,6 +13,7 @@ const DOCUMENTS_FOLDER = join(import.meta.dirname, "..", "target", "documents");
 
 export const DOCUMENTS = {
   mixed100kb: join(DOCUMENTS_FOLDER, "mixed-100kb.md"),
+  mixed100kbOther: join(DOCUMENTS_FOLDER, "mixed-100kb-other.md"),
   mixed1mb: join(DOCUMENTS_FOLDER, "mixed-1mb.md"),
   prose1mb: join(DOCUMENTS_FOLDER, "prose-1mb.md"),
 };
@@ -149,6 +151,7 @@ export function writeDocuments() {
   writeFileSync(DOCUMENTS.mixed100kb, generate(100 * KB, 1, mixedSection));
   writeFileSync(DOCUMENTS.mixed1mb, generate(MB, 2, mixedSection));
   writeFileSync(DOCUMENTS.prose1mb, generate(MB, 3, proseParagraph));
+  writeFileSync(DOCUMENTS.mixed100kbOther, generate(100 * KB, 4, mixedSection));
 }
 
 if (import.meta.main) {

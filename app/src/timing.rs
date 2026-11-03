@@ -13,9 +13,9 @@ use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, SystemTime};
 
 use serde::Deserialize;
-use tauri::{Manager as _, State, WebviewWindow};
+use tauri::{State, WebviewWindow};
 
-use crate::{document, platform};
+use crate::platform;
 
 const SWITCH: &str = "DOWNLIGHT_TIMING";
 
@@ -110,12 +110,6 @@ impl Timing {
             ],
         );
     }
-
-    /// Reports a failure on the same stream as the timings, where the person measuring sees it.
-    fn failure(&self, window: &str, event: &str, error: &dyn std::fmt::Display) {
-        let Some(clock) = &self.clock else { return };
-        clock.write(&format!("timing {window} {event} error={error}"));
-    }
 }
 
 impl Clock {
@@ -194,24 +188,13 @@ impl LongTaskKind {
     }
 }
 
-/// The page reports a window's first paint. With timing on, the next document from the command
-/// line then opens, so that its window measures a further window in a running process.
-///
-/// Async, so it runs off the main thread: creating a window from a synchronous command
-/// deadlocks on Windows.
 #[tauri::command]
-pub async fn report_first_paint(
+pub fn report_first_paint(
     window: WebviewWindow,
     marks: FirstPaintMarks,
     timing: State<'_, Timing>,
-) -> Result<(), ()> {
+) {
     timing.first_paint(window.label(), &marks);
-    if timing.is_on()
-        && let Err(error) = document::open_next_window(window.app_handle(), window.label())
-    {
-        timing.failure(window.label(), "next-window", &error);
-    }
-    Ok(())
 }
 
 #[tauri::command]

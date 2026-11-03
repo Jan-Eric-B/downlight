@@ -2,9 +2,11 @@ import { invoke } from "@tauri-apps/api/core";
 import "github-markdown-css/github-markdown.css";
 import "./document.css";
 import { epochMs, reportFirstPaint, watchLongTasks } from "./timing";
+import { closeOnCtrlW } from "./window";
 
 const scriptStart = epochMs();
 watchLongTasks();
+closeOnCtrlW();
 
 const view = document.createElement("article");
 view.className = "markdown-body";

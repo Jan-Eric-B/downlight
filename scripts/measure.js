@@ -7,6 +7,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { performance } from "node:perf_hooks";
 import { setTimeout as sleep } from "node:timers/promises";
 import { DOCUMENTS, writeDocuments } from "./generate-documents.js";
 
@@ -26,10 +27,12 @@ const SETTLE_MS = 3_000;
 const DEBUG_PORT = 9333;
 
 /**
- * Starts Downlight with the timing switch on and collects its reports until `windows` painted,
- * then, with `scroll`, scrolls through the first window's document.
+ * Starts Downlight with the timing switch on and collects its reports until its windows painted.
+ * Each of `laterDocuments` is then opened by a further launch, which hands it to the running
+ * process (ADR 0001), and the run waits for its window to paint too. With `scroll`, it then
+ * scrolls through the first window's document.
  */
-async function run(documents, windows, { scroll = false } = {}) {
+async function run(documents, { scroll = false, laterDocuments = [] } = {}) {
   const env = { ...process.env, DOWNLIGHT_TIMING: "1" };
   if (scroll) {
     env.WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = `--remote-debugging-port=${DEBUG_PORT}`;
@@ -47,23 +50,30 @@ async function run(documents, windows, { scroll = false } = {}) {
     buffered = lines.pop() ?? "";
     for (const line of lines) {
       const report = parse(line);
-      if (report) reports.push(report);
+      // When the script saw it, for measures that start in the script, such as a launch.
+      if (report) reports.push({ ...report, seen: performance.now() });
     }
   });
   try {
-    const painted = () =>
-      reports.filter((r) => r.event === "first-paint").length >= windows;
     const deadline = Date.now() + RUN_TIMEOUT_MS;
-    while (!painted()) {
-      if (Date.now() > deadline)
-        throw new Error(`No first paint within ${RUN_TIMEOUT_MS} ms`);
-      if (child.exitCode !== null)
-        throw new Error(`Downlight exited with ${child.exitCode}`);
-      await sleep(20);
+    const painted = async (count) => {
+      while (reports.filter((r) => r.event === "first-paint").length < count) {
+        if (Date.now() > deadline)
+          throw new Error(`No first paint within ${RUN_TIMEOUT_MS} ms`);
+        if (child.exitCode !== null)
+          throw new Error(`Downlight exited with ${child.exitCode}`);
+        await sleep(20);
+      }
+    };
+    await painted(documents.length);
+    const launches = [];
+    for (const document of laterDocuments) {
+      launches.push(await launch(document, env));
     }
+    await painted(documents.length + laterDocuments.length);
     if (scroll) await scrollThrough();
     await sleep(SETTLE_MS);
-    return { reports, memory: memoryOf(child.pid) };
+    return { reports, memory: memoryOf(child.pid), launches };
   } finally {
     execFileSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
       stdio: "ignore",
@@ -71,6 +81,17 @@ async function run(documents, windows, { scroll = false } = {}) {
     // Lets WebView2 release its user data folder before the next run starts.
     await sleep(1_000);
   }
+}
+
+/** Runs a further launch on `document`: when it started, and the ms until it exited. */
+async function launch(document, env) {
+  const started = performance.now();
+  const child = spawn(EXECUTABLE, [document], { env, stdio: "ignore" });
+  await new Promise((resolve, reject) => {
+    child.on("exit", resolve);
+    child.on("error", reject);
+  });
+  return { started, returned: performance.now() - started };
 }
 
 /**
@@ -181,12 +202,12 @@ function median(values) {
 }
 
 /** Runs a case RUNS times after one discarded run and returns the measures of each run. */
-async function measure(name, documents, windows, measures, options) {
+async function measure(name, documents, measures, options) {
   console.error(`${name}: warming up`);
-  await run(documents, windows, options);
+  await run(documents, options);
   const runs = [];
   for (let i = 1; i <= RUNS; i++) {
-    const result = await run(documents, windows, options);
+    const result = await run(documents, options);
     const values = measures(result);
     console.error(`${name}: run ${i}: ${JSON.stringify(values)}`);
     runs.push(values);
@@ -260,9 +281,15 @@ function firstWindow({ reports, memory }) {
   };
 }
 
-function secondWindow({ reports, memory }) {
+function secondWindow({ reports, memory, launches }) {
   const { paint, measures } = windowMeasures(reports, memory, "document-1");
-  return { firstPaintSinceWindow: paint.since_window, ...measures };
+  return {
+    secondLaunchReturns: launches[0].returned,
+    // What the reader waits for: the hand-off to the running process and the new window.
+    firstPaintSinceLaunch: paint.seen - launches[0].started,
+    firstPaintSinceWindow: paint.since_window,
+    ...measures,
+  };
 }
 
 function scrolled({ reports, memory }) {
@@ -297,21 +324,21 @@ if (!existsSync(EXECUTABLE)) {
 }
 writeDocuments();
 const cases = [
-  await measure("100 KB", [DOCUMENTS.mixed100kb], 1, firstWindow),
-  await measure("1 MB mixed", [DOCUMENTS.mixed1mb], 1, firstWindow),
-  await measure("1 MB prose", [DOCUMENTS.prose1mb], 1, firstWindow),
+  await measure("100 KB", [DOCUMENTS.mixed100kb], firstWindow),
+  await measure("1 MB mixed", [DOCUMENTS.mixed1mb], firstWindow),
+  await measure("1 MB prose", [DOCUMENTS.prose1mb], firstWindow),
 ];
 const second = await measure(
   "Second window, 100 KB",
-  [DOCUMENTS.mixed100kb, DOCUMENTS.mixed100kb],
-  2,
+  [DOCUMENTS.mixed100kb],
   secondWindow,
+  { laterDocuments: [DOCUMENTS.mixed100kbOther] },
 );
 const scrolling = [
-  await measure("1 MB mixed", [DOCUMENTS.mixed1mb], 1, scrolled, {
+  await measure("1 MB mixed", [DOCUMENTS.mixed1mb], scrolled, {
     scroll: true,
   }),
-  await measure("1 MB prose", [DOCUMENTS.prose1mb], 1, scrolled, {
+  await measure("1 MB prose", [DOCUMENTS.prose1mb], scrolled, {
     scroll: true,
   }),
 ];
