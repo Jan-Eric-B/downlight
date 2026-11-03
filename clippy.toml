@@ -1,0 +1,8 @@
+# The workspace lints that keep panics out of the app don't apply to tests, where a panic is how
+# a test fails. These cover #[test] functions and #[cfg(test)] modules, including #[test]
+# functions under tests/. A helper function in a tests/ file is not covered and needs its own
+# allow. `todo` stays a warning in tests: a todo! left in a test means the test isn't finished.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-dbg-in-tests = true

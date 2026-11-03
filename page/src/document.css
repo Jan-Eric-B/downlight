@@ -1,0 +1,15 @@
+/* The window sits on Mica, so the page draws no background of its own.
+   github-markdown-css keeps its fills on code blocks, tables and quotes. */
+html,
+body {
+  margin: 0;
+  background: transparent;
+}
+
+.markdown-body {
+  box-sizing: border-box;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 32px;
+  background-color: transparent;
+}

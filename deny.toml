@@ -1,0 +1,42 @@
+# cargo-deny: dependencies must carry a GPL-3.0-compatible license and have no known security
+# advisories. Run by `npm run check`.
+
+[graph]
+# v1 ships for Windows x64 only (spec: Platforms). Add targets with the macOS and Linux ports.
+targets = ["x86_64-pc-windows-msvc"]
+
+[advisories]
+# Vulnerabilities, unsound and unmaintained crates fail the check; an ignore needs a reason.
+ignore = []
+
+[licenses]
+# Each of these is compatible with GPL-3.0, whichever of GPL-3.0-only or -or-later Downlight
+# chooses (still open, see ticket 01).
+allow = [
+  "0BSD",
+  "Apache-2.0",
+  "BSD-2-Clause",
+  "CC0-1.0",
+  "MIT",
+  "MIT-0",
+  "MPL-2.0",
+  "Unicode-3.0",
+  "Unicode-DFS-2016",
+  "Unlicense",
+  "Zlib",
+]
+
+[licenses.private]
+# The workspace's own crates are unpublished and licensed by LICENSE.
+ignore = true
+
+[bans]
+# Tauri's tree carries several versions of some crates; that isn't ours to fix.
+multiple-versions = "allow"
+wildcards = "deny"
+# Path dependencies between the workspace's unpublished crates carry no version.
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

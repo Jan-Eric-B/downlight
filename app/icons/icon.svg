@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Placeholder: a light shining down onto a page. Source for `npx tauri icon`. -->
+  <rect x="64" y="64" width="896" height="896" rx="192" fill="#1f6feb"/>
+  <path d="M352 224h320l-64 160H416z" fill="#ffffff"/>
+  <path d="M416 384h192l144 288H272z" fill="#ffffff" opacity="0.35"/>
+  <rect x="272" y="704" width="480" height="64" rx="32" fill="#ffffff"/>
+</svg>

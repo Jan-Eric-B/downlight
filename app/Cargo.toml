@@ -1,0 +1,19 @@
+[package]
+name = "downlight"
+description = "Downlight, a small, fast viewer for Markdown files."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[build-dependencies]
+tauri-build = { version = "2.7.4", features = [] }
+
+[dependencies]
+downlight-core = { path = "../core" }
+serde = "1.0.229"
+# No default features, for size: drops dynamic-acl and compression. The Linux port adds x11 and
+# dbus back.
+tauri = { version = "2.12.5", default-features = false, features = ["wry", "common-controls-v6"] }
+
+[lints]
+workspace = true
