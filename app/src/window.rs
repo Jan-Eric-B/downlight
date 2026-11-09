@@ -8,7 +8,8 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::{fmt, io};
 
 use tauri::{
-    AppHandle, Manager as _, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent,
+    AppHandle, Emitter as _, Manager as _, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+    WindowEvent,
 };
 
 use crate::timing::Timing;
@@ -16,86 +17,107 @@ use crate::{command_line, platform};
 
 const APP_NAME: &str = "Downlight";
 
+/// The event that tells a window's page its window shows another document now.
+const DOCUMENT_SHOWN: &str = "document-shown";
+
 /// Which window shows which document, by window label. The app's managed state.
 #[derive(Default)]
 pub struct OpenWindows {
-    labelled: Mutex<LabelledDocuments>,
+    table: Mutex<WindowTable>,
 }
 
+/// Every open window by label, whether it shows a document or none.
 #[derive(Default)]
-struct LabelledDocuments {
+struct WindowTable {
     /// Labels are `document-0`, `document-1` and so on, never reused while the process runs.
     labels_issued: usize,
-    documents: HashMap<String, ShownDocument>,
+    /// Every open window, with the document it shows now; None while it shows none.
+    shown: HashMap<String, Option<ShownDocument>>,
 }
 
 struct ShownDocument {
-    /// As the launch named it, for reading and the title.
+    /// As the launch, the dialog or the drop named it, for reading and the title.
     path: PathBuf,
     /// For finding the window when the document is opened again.
     key: PathBuf,
 }
 
 /// The window a document is to be shown in.
+#[derive(Debug, Clone, Copy)]
+pub enum Target<'a> {
+    /// A new window, as for a launch from the file manager or the command line.
+    NewWindow,
+    /// The window with this label, as for Ctrl+O and dropping a file.
+    Window(&'a str),
+}
+
+/// What showing a document changed, by window label. The caller acts on it: it opens a new
+/// window, or titles a changed one and tells its page.
 #[derive(Debug, PartialEq, Eq)]
 enum Claim {
     /// A new window with this label shows the document; the caller opens it.
     New(String),
+    /// The window with this label shows the document now.
+    Changed(String),
     /// The document is already open in the window with this label.
     AlreadyOpen(String),
+    /// The target window has closed.
+    WindowGone,
 }
 
 impl OpenWindows {
-    /// Finds the window that shows `document`, or names a new window for it. Checking and naming
-    /// happen under one lock, so two launches with the same document open one window.
-    fn claim(&self, document: &Path) -> Claim {
-        let key = document_key(document);
-        let mut windows = self.lock();
-        if let Some(label) = windows
-            .documents
-            .iter()
-            .find_map(|(label, shown)| (shown.key == key).then(|| label.clone()))
+    /// Records that `target` shows `document` (None: no document), unless the document is open
+    /// already. Looking up and recording happen under one lock, so two requests for the same
+    /// document end up in one window.
+    fn claim(&self, document: Option<&Path>, target: Target<'_>) -> Claim {
+        let shown = document.map(|path| ShownDocument {
+            path: path.to_owned(),
+            key: document_key(path),
+        });
+        let mut table = self.lock();
+        if let Some(shown) = &shown
+            && let Some(label) = table.window_showing(&shown.key)
         {
             return Claim::AlreadyOpen(label);
         }
-        let label = windows.next_label();
-        windows.documents.insert(
-            label.clone(),
-            ShownDocument {
-                path: document.to_owned(),
-                key,
+        match target {
+            Target::NewWindow => {
+                let label = table.next_label();
+                table.shown.insert(label.clone(), shown);
+                Claim::New(label)
+            }
+            Target::Window(label) => match table.shown.get_mut(label) {
+                Some(entry) => {
+                    *entry = shown;
+                    Claim::Changed(label.to_owned())
+                }
+                None => Claim::WindowGone,
             },
-        );
-        Claim::New(label)
-    }
-
-    /// Names a new window that shows no document.
-    fn claim_empty(&self) -> String {
-        self.lock().next_label()
+        }
     }
 
     pub fn document_of(&self, window: &str) -> Option<PathBuf> {
         self.lock()
-            .documents
+            .shown
             .get(window)
-            .map(|shown| shown.path.clone())
+            .and_then(|shown| shown.as_ref().map(|shown| shown.path.clone()))
     }
 
     /// Forgets a window that closed or never opened, so its document opens anew.
     fn forget(&self, window: &str) {
-        self.lock().documents.remove(window);
+        self.lock().shown.remove(window);
     }
 
-    fn lock(&self) -> MutexGuard<'_, LabelledDocuments> {
+    fn lock(&self) -> MutexGuard<'_, WindowTable> {
         // The map stays valid even if a thread panicked while holding the lock.
-        self.labelled.lock().unwrap_or_else(PoisonError::into_inner)
+        self.table.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
 
 /// What two paths to the same document have in common: the path with links, `..` and short names
 /// resolved, in the case the file system compares names in. A missing file keeps its name as
-/// given, in its resolved folder; with its folder missing too, the path stays as given, which the
-/// command line already made absolute.
+/// given, in its resolved folder; with its folder missing too, the path stays as given, absolute
+/// already, as launches, the open dialog and dropping all give it.
 fn document_key(document: &Path) -> PathBuf {
     let resolved = std::fs::canonicalize(document)
         .or_else(|_| {
@@ -108,7 +130,16 @@ fn document_key(document: &Path) -> PathBuf {
     platform::fold_case(resolved)
 }
 
-impl LabelledDocuments {
+impl WindowTable {
+    fn window_showing(&self, key: &Path) -> Option<String> {
+        self.shown.iter().find_map(|(label, shown)| {
+            shown
+                .as_ref()
+                .is_some_and(|shown| shown.key == key)
+                .then(|| label.clone())
+        })
+    }
+
     fn next_label(&mut self) -> String {
         let label = format!("document-{}", self.labels_issued);
         self.labels_issued += 1;
@@ -151,35 +182,43 @@ pub fn open_launch(
     args: impl IntoIterator<Item = impl Into<OsString>>,
     launching_folder: &Path,
 ) -> Vec<LaunchFailure> {
-    let open_windows = app.state::<OpenWindows>();
     let documents = command_line::document_paths(args, launching_folder);
-    if documents.is_empty() {
-        return open_window(app, &open_windows.claim_empty(), APP_NAME)
-            .err()
-            .map(|error| LaunchFailure {
-                document: None,
-                error,
-            })
-            .into_iter()
-            .collect();
-    }
+    let documents = if documents.is_empty() {
+        vec![None]
+    } else {
+        documents.into_iter().map(Some).collect()
+    };
     documents
         .into_iter()
         .filter_map(|document| {
-            let shown = match open_windows.claim(&document) {
-                Claim::New(label) => {
-                    open_window(app, &label, &title_of(&document)).inspect_err(|_| {
-                        open_windows.forget(&label);
-                    })
-                }
-                Claim::AlreadyOpen(label) => bring_to_front(app, &label),
-            };
-            shown.err().map(|error| LaunchFailure {
-                document: Some(document),
-                error,
-            })
+            show(app, document.as_deref(), Target::NewWindow)
+                .err()
+                .map(|error| LaunchFailure { document, error })
         })
         .collect()
+}
+
+/// Shows `document` (None: no document) in `target`, the one way a window gets or changes its
+/// document. A document that is open already has its window brought to the front instead, so a
+/// document is shown in at most one window. A new window opens titled after the document; a
+/// window shown another document gets that document's title and a `document-shown` event, on
+/// which its page renders the document.
+pub fn show(app: &AppHandle, document: Option<&Path>, target: Target<'_>) -> tauri::Result<()> {
+    let open_windows = app.state::<OpenWindows>();
+    match open_windows.claim(document, target) {
+        Claim::New(label) => open_window(app, &label, &title_of(document)).inspect_err(|_| {
+            open_windows.forget(&label);
+        }),
+        Claim::Changed(label) => {
+            let window = app
+                .get_webview_window(&label)
+                .ok_or(tauri::Error::WindowNotFound)?;
+            window.set_title(&title_of(document))?;
+            app.emit_to(label.as_str(), DOCUMENT_SHOWN, ())
+        }
+        Claim::AlreadyOpen(label) => bring_to_front(app, &label),
+        Claim::WindowGone => Err(tauri::Error::WindowNotFound),
+    }
 }
 
 /// Forgets a closed window's document, so opening the document again opens a new window.
@@ -221,12 +260,16 @@ pub fn close_window(window: WebviewWindow) -> tauri::Result<()> {
 }
 
 /// `README.md - docs - Downlight`: the folder tells documents with the same name apart in Alt+Tab
-/// and on the taskbar.
-fn title_of(document: &Path) -> String {
+/// and on the taskbar. A window that shows no document (None) is titled `Downlight`.
+fn title_of(document: Option<&Path>) -> String {
+    let Some(document) = document else {
+        return APP_NAME.to_owned();
+    };
     let file = document
         .file_name()
         .map_or_else(|| document.display(), |name| Path::new(name).display());
-    // The command line made the path absolute, so only a drive root has no folder.
+    // Launches, the open dialog and dropping all give absolute paths, so only a drive root has no
+    // folder.
     match document.parent() {
         // A drive root has no name of its own, so it shows as itself.
         Some(folder) => {
@@ -247,94 +290,177 @@ mod tests {
 
     /// A file that exists: the app crate's own manifest.
     fn manifest() -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml")
+        app_file("Cargo.toml")
     }
 
-    fn label_of(claim: &Claim) -> &str {
-        match claim {
-            Claim::New(label) | Claim::AlreadyOpen(label) => label,
+    fn app_file(name: &str) -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join(name)
+    }
+
+    /// Opens a new window for `document` (None: an empty window) and returns its label.
+    #[expect(
+        clippy::panic,
+        reason = "a helper isn't a #[test] function, and its panic fails the test that called it"
+    )]
+    fn open_new(windows: &OpenWindows, document: Option<&Path>) -> String {
+        match windows.claim(document, Target::NewWindow) {
+            Claim::New(label) => label,
+            other => panic!("expected a new window, got {other:?}"),
         }
     }
 
     #[test]
     fn first_claim_of_a_document_names_a_new_window_that_shows_it() {
         let windows = OpenWindows::default();
-        let Claim::New(label) = windows.claim(&manifest()) else {
-            panic!("the document isn't open yet");
-        };
+        let label = open_new(&windows, Some(&manifest()));
         assert_eq!(windows.document_of(&label), Some(manifest()));
     }
 
     #[test]
     fn open_document_claimed_again_gives_its_window() {
         let windows = OpenWindows::default();
-        let first = windows.claim(&manifest());
+        let first = open_new(&windows, Some(&manifest()));
         assert_eq!(
-            windows.claim(&manifest()),
-            Claim::AlreadyOpen(label_of(&first).to_owned())
+            windows.claim(Some(&manifest()), Target::NewWindow),
+            Claim::AlreadyOpen(first)
         );
     }
 
     #[test]
     fn open_document_is_found_ignoring_case() {
         let windows = OpenWindows::default();
-        let first = windows.claim(&manifest());
-        let upper = Path::new(env!("CARGO_MANIFEST_DIR")).join("CARGO.TOML");
+        let first = open_new(&windows, Some(&manifest()));
         assert_eq!(
-            windows.claim(&upper),
-            Claim::AlreadyOpen(label_of(&first).to_owned())
+            windows.claim(Some(&app_file("CARGO.TOML")), Target::NewWindow),
+            Claim::AlreadyOpen(first)
         );
     }
 
     #[test]
     fn open_document_is_found_through_a_parent_folder_step() {
         let windows = OpenWindows::default();
-        let first = windows.claim(&manifest());
-        let roundabout = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("src")
-            .join("..")
-            .join("Cargo.toml");
+        let first = open_new(&windows, Some(&manifest()));
+        let roundabout = app_file("src").join("..").join("Cargo.toml");
         assert_eq!(
-            windows.claim(&roundabout),
-            Claim::AlreadyOpen(label_of(&first).to_owned())
+            windows.claim(Some(&roundabout), Target::NewWindow),
+            Claim::AlreadyOpen(first)
         );
     }
 
     #[test]
     fn missing_document_claimed_again_in_other_case_gives_its_window() {
         let windows = OpenWindows::default();
-        let folder = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let first = windows.claim(&folder.join("missing.md"));
+        let first = open_new(&windows, Some(&app_file("missing.md")));
         assert_eq!(
-            windows.claim(&folder.join("MISSING.md")),
-            Claim::AlreadyOpen(label_of(&first).to_owned())
+            windows.claim(Some(&app_file("MISSING.md")), Target::NewWindow),
+            Claim::AlreadyOpen(first)
         );
     }
 
     #[test]
     fn other_document_opens_another_window() {
         let windows = OpenWindows::default();
-        let first = windows.claim(&manifest());
-        let other = windows.claim(&Path::new(env!("CARGO_MANIFEST_DIR")).join("build.rs"));
-        assert!(matches!(&other, Claim::New(label) if label != label_of(&first)));
+        let first = open_new(&windows, Some(&manifest()));
+        let other = open_new(&windows, Some(&app_file("build.rs")));
+        assert_ne!(first, other);
     }
 
     #[test]
     fn forgotten_window_gives_its_document_a_new_window() {
         let windows = OpenWindows::default();
-        let first = windows.claim(&manifest());
-        windows.forget(label_of(&first));
-        assert!(matches!(windows.claim(&manifest()), Claim::New(_)));
-        assert_eq!(windows.document_of(label_of(&first)), None);
+        let first = open_new(&windows, Some(&manifest()));
+        windows.forget(&first);
+        assert!(matches!(
+            windows.claim(Some(&manifest()), Target::NewWindow),
+            Claim::New(_)
+        ));
+        assert_eq!(windows.document_of(&first), None);
     }
 
     #[test]
     fn empty_windows_are_never_the_same_window() {
         let windows = OpenWindows::default();
-        let first = windows.claim_empty();
-        let second = windows.claim_empty();
+        let first = open_new(&windows, None);
+        let second = open_new(&windows, None);
         assert_ne!(first, second);
         assert_eq!(windows.document_of(&first), None);
+    }
+
+    #[test]
+    fn window_without_a_document_is_titled_downlight() {
+        assert_eq!(title_of(None), "Downlight");
+    }
+
+    #[test]
+    fn empty_window_shows_the_document_it_is_given() {
+        let windows = OpenWindows::default();
+        let label = open_new(&windows, None);
+        assert_eq!(
+            windows.claim(Some(&manifest()), Target::Window(&label)),
+            Claim::Changed(label.clone())
+        );
+        assert_eq!(windows.document_of(&label), Some(manifest()));
+    }
+
+    #[test]
+    fn window_shows_another_document_in_place_of_its_own() {
+        let windows = OpenWindows::default();
+        let label = open_new(&windows, Some(&manifest()));
+        let other = app_file("build.rs");
+        assert_eq!(
+            windows.claim(Some(&other), Target::Window(&label)),
+            Claim::Changed(label.clone())
+        );
+        assert_eq!(windows.document_of(&label), Some(other));
+    }
+
+    #[test]
+    fn document_a_window_gave_up_opens_anew() {
+        let windows = OpenWindows::default();
+        let label = open_new(&windows, Some(&manifest()));
+        windows.claim(Some(&app_file("build.rs")), Target::Window(&label));
+        assert!(matches!(
+            windows.claim(Some(&manifest()), Target::NewWindow),
+            Claim::New(_)
+        ));
+    }
+
+    #[test]
+    fn document_shown_in_a_window_is_found_there_again() {
+        let windows = OpenWindows::default();
+        let label = open_new(&windows, None);
+        windows.claim(Some(&manifest()), Target::Window(&label));
+        assert_eq!(
+            windows.claim(Some(&app_file("CARGO.TOML")), Target::NewWindow),
+            Claim::AlreadyOpen(label)
+        );
+    }
+
+    #[test]
+    fn document_open_in_another_window_stays_there() {
+        let windows = OpenWindows::default();
+        let first = open_new(&windows, Some(&manifest()));
+        let second = open_new(&windows, Some(&app_file("build.rs")));
+        assert_eq!(
+            windows.claim(Some(&manifest()), Target::Window(&second)),
+            Claim::AlreadyOpen(first)
+        );
+        assert_eq!(windows.document_of(&second), Some(app_file("build.rs")));
+    }
+
+    #[test]
+    fn showing_in_a_closed_window_changes_nothing() {
+        let windows = OpenWindows::default();
+        let label = open_new(&windows, None);
+        windows.forget(&label);
+        assert_eq!(
+            windows.claim(Some(&manifest()), Target::Window(&label)),
+            Claim::WindowGone
+        );
+        assert!(matches!(
+            windows.claim(Some(&manifest()), Target::NewWindow),
+            Claim::New(_)
+        ));
     }
 
     #[test]
@@ -361,7 +487,7 @@ mod tests {
     #[test]
     fn title_names_the_file_then_its_folder_then_downlight() {
         assert_eq!(
-            title_of(Path::new(r"C:\work\docs\README.md")),
+            title_of(Some(Path::new(r"C:\work\docs\README.md"))),
             "README.md - docs - Downlight"
         );
     }
@@ -369,7 +495,7 @@ mod tests {
     #[test]
     fn title_of_a_file_at_a_drive_root_names_the_drive() {
         assert_eq!(
-            title_of(Path::new(r"C:\README.md")),
+            title_of(Some(Path::new(r"C:\README.md"))),
             r"README.md - C:\ - Downlight"
         );
     }

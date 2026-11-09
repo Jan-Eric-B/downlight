@@ -21,3 +21,63 @@ body {
   content-visibility: auto;
   contain-intrinsic-size: auto 3em;
 }
+
+/* A window without a document: "Open file" in the middle of the window. It is a markdown-body too,
+   so it takes github-markdown-css's font and its light or dark colors. */
+.empty-window {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+}
+
+.empty-window[hidden] {
+  display: none;
+}
+
+.empty-window button {
+  padding: 5px 16px;
+  border: 1px solid var(--borderColor-default);
+  border-radius: 6px;
+  background-color: var(--bgColor-muted);
+  color: var(--fgColor-default);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.empty-window button:hover {
+  background-color: var(--bgColor-neutral-muted);
+}
+
+.empty-window button:focus-visible {
+  outline: 2px solid var(--borderColor-accent-emphasis);
+  outline-offset: 2px;
+}
+
+.empty-window p {
+  margin: 8px 0 0;
+  color: var(--fgColor-muted);
+}
+
+/* A short message at the bottom of the window, such as why a dropped file didn't open. It sits on
+   a solid background, since the document may be under it. */
+.notice {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  left: 24px;
+  width: fit-content;
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 8px 16px;
+  border: 1px solid var(--borderColor-default);
+  border-radius: 6px;
+  background-color: var(--bgColor-default);
+  box-shadow: 0 4px 12px rgb(0 0 0 / 20%);
+}
+
+.notice[hidden] {
+  display: none;
+}

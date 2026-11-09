@@ -11,7 +11,7 @@ use tauri::{State, WebviewWindow};
 use crate::timing::{ReadAndRenderTimes, Timing};
 use crate::window::OpenWindows;
 
-/// Reads and renders the calling window's document.
+/// Reads and renders the calling window's document, or gives None while the window shows none.
 ///
 /// The page passes nothing: the path comes from the app's own state, so the page can't ask for
 /// other files. The work runs on a blocking thread, off the main thread, so the window keeps
@@ -21,15 +21,15 @@ pub async fn render_document(
     window: WebviewWindow,
     open_windows: State<'_, OpenWindows>,
     timing: State<'_, Timing>,
-) -> Result<RenderedDocument, DocumentError> {
-    let path = open_windows
-        .document_of(window.label())
-        .ok_or(DocumentError::NoDocument)?;
+) -> Result<Option<RenderedDocument>, DocumentError> {
+    let Some(path) = open_windows.document_of(window.label()) else {
+        return Ok(None);
+    };
     let (document, times) = tauri::async_runtime::spawn_blocking(move || read_and_render(&path))
         .await
         .map_err(|source| DocumentError::ReadAndRenderStopped { source })??;
     timing.read_and_render(window.label(), &times);
-    Ok(document)
+    Ok(Some(document))
 }
 
 fn read_and_render(path: &Path) -> Result<(RenderedDocument, ReadAndRenderTimes), DocumentError> {
@@ -52,7 +52,6 @@ fn read_and_render(path: &Path) -> Result<(RenderedDocument, ReadAndRenderTimes)
 /// Why the window can't show its document. The page shows the message to the reader.
 #[derive(Debug)]
 pub enum DocumentError {
-    NoDocument,
     Read {
         path: PathBuf,
         source: io::Error,
@@ -66,7 +65,6 @@ pub enum DocumentError {
 impl fmt::Display for DocumentError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::NoDocument => write!(f, "No document to show. Run downlight <file>."),
             Self::Read { path, source } => write!(f, "Can't read {}: {source}", path.display()),
             Self::ReadAndRenderStopped { source } => {
                 write!(f, "Reading and rendering the document stopped: {source}")

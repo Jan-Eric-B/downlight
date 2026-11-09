@@ -5,8 +5,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod command_line;
-mod document;
+mod menu;
+mod open;
 mod platform;
+mod render;
 mod timing;
 mod window;
 
@@ -36,12 +38,18 @@ fn main() -> tauri::Result<()> {
         .manage(timing)
         .manage(OpenWindows::default())
         .invoke_handler(tauri::generate_handler![
-            document::render_document,
+            render::render_document,
+            open::open_document,
+            menu::show_document_menu,
             window::close_window,
             timing::report_first_paint,
             timing::report_long_task,
         ])
-        .on_window_event(window::forget_when_destroyed)
+        .on_menu_event(menu::forward_choice)
+        .on_window_event(|window, event| {
+            window::forget_when_destroyed(window, event);
+            open::show_when_dropped(window, event);
+        })
         .setup(|app| {
             // Without the current folder a relative path stays relative, and reading it reports
             // the problem to the reader.

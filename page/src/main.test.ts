@@ -1,4 +1,4 @@
-import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
+import { clearMocks, mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import { afterEach, expect, test } from "vitest";
 import readme from "../../core/tests/fixtures/readme.html?raw";
 
@@ -8,6 +8,7 @@ afterEach(() => {
 });
 
 test("shows the document the core rendered", async () => {
+  mockWindows("document-0");
   mockIPC((command) => (command === "render_document" ? readme : undefined));
 
   // The page starts when its script loads, and the import waits until it shows the document.

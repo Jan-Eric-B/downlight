@@ -10,6 +10,9 @@ tauri-build = { version = "2.7.4", features = [] }
 
 [dependencies]
 downlight-core = { path = "../core" }
+# The open dialog. No default features: they are Linux's portal and Wayland, which the Linux port
+# adds back.
+rfd = { version = "0.18.0", default-features = false }
 serde = "1.0.229"
 # No default features, for size: drops dynamic-acl and compression. The Linux port adds x11 and
 # dbus back.

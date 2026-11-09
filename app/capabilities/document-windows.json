@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "document-windows",
+  "description": "The page hears from the app: another document to show, a command chosen in the right-click menu, a short message. Listening to events is all it may do beyond the app's own commands.",
+  "windows": ["document-*"],
+  "permissions": ["core:event:allow-listen"]
+}
