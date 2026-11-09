@@ -3,6 +3,8 @@
 
 #![forbid(unsafe_code)]
 
+mod format;
 mod render;
 
+pub use format::{MARKDOWN_EXTENSIONS, is_markdown};
 pub use render::{RenderedDocument, render};
