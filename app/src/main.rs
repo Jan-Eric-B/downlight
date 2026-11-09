@@ -13,15 +13,18 @@ mod timing;
 mod window;
 
 use std::path::Path;
+use std::process::ExitCode;
 
 use tauri::Manager as _;
 
 use window::OpenWindows;
 
-fn main() -> tauri::Result<()> {
+const APP_NAME: &str = "Downlight";
+
+fn main() -> ExitCode {
     let timing = timing::Timing::from_env();
 
-    tauri::Builder::default()
+    let ran = tauri::Builder::default()
         // First, so that a second launch hands over its documents and exits before anything
         // else starts (ADR 0001).
         .plugin(tauri_plugin_single_instance::init(|app, args, folder| {
@@ -29,9 +32,10 @@ fn main() -> tauri::Result<()> {
             // only if the window opens later, off the main thread.
             let app = app.clone();
             tauri::async_runtime::spawn_blocking(move || {
-                // Ticket 19 shows these to the reader; release builds have no console.
-                for failure in window::open_launch(&app, args, Path::new(&folder)) {
-                    eprintln!("{failure}");
+                let failures = window::open_launch(&app, args, Path::new(&folder));
+                // The second launch has returned by now, so this process tells the reader.
+                if let Some(report) = window::failure_report(&failures) {
+                    platform::show_error(&report);
                 }
             });
         }))
@@ -56,21 +60,26 @@ fn main() -> tauri::Result<()> {
             // the problem to the reader.
             let folder = std::env::current_dir().unwrap_or_default();
             let failures = window::open_launch(app.handle(), std::env::args_os(), &folder);
-            // Ticket 19 shows these to the reader; release builds have no console.
-            for failure in &failures {
-                eprintln!("{failure}");
-            }
+            let Some(report) = window::failure_report(&failures) else {
+                return Ok(());
+            };
             // Only closing the last window ends the process, so without one it would never end.
-            // No window open means every window failed, so the failures say why.
+            // The process ends here rather than by returning an error, which Tauri turns into a
+            // panic that a release build, with no console, ends without a word (ticket 19).
             if app.webview_windows().is_empty() {
-                let message = failures
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                return Err(message.into());
+                platform::show_error(&report);
+                std::process::exit(1);
             }
+            // Off the main thread, so the windows that did open keep working while the box is up.
+            std::thread::spawn(move || platform::show_error(&report));
             Ok(())
         })
-        .run(tauri::generate_context!())
+        .run(tauri::generate_context!());
+    match ran {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            platform::show_error(&format!("{APP_NAME} can't start: {error}"));
+            ExitCode::FAILURE
+        }
+    }
 }

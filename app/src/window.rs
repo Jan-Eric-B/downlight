@@ -14,9 +14,7 @@ use tauri::{
 };
 
 use crate::timing::Timing;
-use crate::{command_line, platform};
-
-const APP_NAME: &str = "Downlight";
+use crate::{APP_NAME, command_line, platform};
 
 /// The event that tells a window's page its window shows another document now.
 const DOCUMENT_SHOWN: &str = "document-shown";
@@ -169,6 +167,18 @@ impl fmt::Display for LaunchFailure {
             None => write!(f, "Can't open a window: {}", self.error),
         }
     }
+}
+
+/// What the reader is told about a launch's failures, one per line; None when every window
+/// opened.
+pub fn failure_report(failures: &[LaunchFailure]) -> Option<String> {
+    (!failures.is_empty()).then(|| {
+        failures
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n")
+    })
 }
 
 /// Shows the documents a launch names (`downlight <file>...`), the first launch's or one handed
@@ -527,6 +537,32 @@ mod tests {
             error: tauri::Error::WindowNotFound,
         };
         assert_eq!(failure.to_string(), "Can't open a window: window not found");
+    }
+
+    #[test]
+    fn report_names_each_failure_on_a_line_of_its_own() {
+        let failures = [
+            LaunchFailure {
+                document: Some(PathBuf::from(r"C:\work\a.md")),
+                error: tauri::Error::WindowNotFound,
+            },
+            LaunchFailure {
+                document: Some(PathBuf::from(r"C:\work\b.md")),
+                error: tauri::Error::WindowNotFound,
+            },
+        ];
+        assert_eq!(
+            failure_report(&failures).as_deref(),
+            Some(
+                "Can't open a window for C:\\work\\a.md: window not found\n\
+                 Can't open a window for C:\\work\\b.md: window not found"
+            )
+        );
+    }
+
+    #[test]
+    fn launch_without_failures_has_nothing_to_report() {
+        assert_eq!(failure_report(&[]), None);
     }
 
     #[test]

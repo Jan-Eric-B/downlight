@@ -5,7 +5,13 @@
 mod windows;
 
 #[cfg(windows)]
-pub use windows::{fold_case, has_backdrop, process_start, with_backdrop};
+pub use windows::{fold_case, has_backdrop, process_start, show_error, with_backdrop};
+
+/// Other systems print the error on stderr until their ports give it a native dialog.
+#[cfg(not(windows))]
+pub fn show_error(message: &str) {
+    eprintln!("{message}");
+}
 
 /// Other systems get a plain window until their ports.
 #[cfg(not(windows))]

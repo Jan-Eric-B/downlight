@@ -5,6 +5,11 @@ use tauri::window::{Effect, EffectsBuilder};
 use tauri::{Manager, Runtime, WebviewWindowBuilder};
 use windows_sys::Win32::Foundation::FILETIME;
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, GetProcessTimes};
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    MB_ICONERROR, MB_OK, MB_SETFOREGROUND, MessageBoxW,
+};
+
+use crate::APP_NAME;
 
 /// Windows 11's first build. Mica needs it; Windows 10 has no Mica, and Tauri drops the effect
 /// there without an error, which would leave a transparent window see-through.
@@ -41,6 +46,29 @@ pub fn fold_case(path: PathBuf) -> PathBuf {
         })
         .collect::<String>()
         .into()
+}
+
+/// Shows an error in a message box and returns once the reader has dismissed it. It needs no
+/// window of Downlight's, so it works when no window could open, and release builds have no
+/// console to print to.
+pub fn show_error(message: &str) {
+    let text = wide(message);
+    let caption = wide(APP_NAME);
+    // SAFETY: both strings are NUL-terminated UTF-16 buffers that outlive the call, and a null
+    // owner window is allowed: the box then belongs to no window.
+    unsafe {
+        MessageBoxW(
+            std::ptr::null_mut(),
+            text.as_ptr(),
+            caption.as_ptr(),
+            MB_OK | MB_ICONERROR | MB_SETFOREGROUND,
+        );
+    }
+}
+
+/// `s` as the NUL-terminated UTF-16 string Windows' wide APIs take.
+fn wide(s: &str) -> Vec<u16> {
+    s.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
 /// When Windows created this process, so first paint counts the loader's work before `main` too.
