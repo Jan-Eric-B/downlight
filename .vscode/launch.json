@@ -1,0 +1,48 @@
+{
+  // F5 debugs the first configuration; Ctrl+F5 runs it without the debugger. CodeLLDB builds the
+  // app with cargo, and the "vite: dev" task serves the page. Rust breakpoints work; the page is
+  // debugged in the window's own developer tools.
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Downlight: README.md",
+      "type": "lldb",
+      "request": "launch",
+      "cargo": { "args": ["build", "-p", "downlight", "--bin", "downlight"] },
+      "args": ["${workspaceFolder}/README.md"],
+      "cwd": "${workspaceFolder}",
+      "sourceLanguages": ["rust"],
+      "preLaunchTask": "vite: dev"
+    },
+    {
+      "name": "Downlight: the file open in the editor",
+      "type": "lldb",
+      "request": "launch",
+      "cargo": { "args": ["build", "-p", "downlight", "--bin", "downlight"] },
+      "args": ["${file}"],
+      "cwd": "${workspaceFolder}",
+      "sourceLanguages": ["rust"],
+      "preLaunchTask": "vite: dev"
+    },
+    {
+      "name": "Downlight: no document",
+      "type": "lldb",
+      "request": "launch",
+      "cargo": { "args": ["build", "-p", "downlight", "--bin", "downlight"] },
+      "cwd": "${workspaceFolder}",
+      "sourceLanguages": ["rust"],
+      "preLaunchTask": "vite: dev"
+    },
+    {
+      "name": "Downlight: README.md with the timing switch",
+      "type": "lldb",
+      "request": "launch",
+      "cargo": { "args": ["build", "-p", "downlight", "--bin", "downlight"] },
+      "args": ["${workspaceFolder}/README.md"],
+      "cwd": "${workspaceFolder}",
+      "env": { "DOWNLIGHT_TIMING": "1" },
+      "sourceLanguages": ["rust"],
+      "preLaunchTask": "vite: dev"
+    }
+  ]
+}

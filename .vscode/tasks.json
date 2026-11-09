@@ -1,0 +1,22 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      // A debug build loads the page from Vite's dev server (devUrl in app/tauri.conf.json), so
+      // every launch configuration starts it first. It keeps running between debug sessions.
+      "label": "vite: dev",
+      "type": "npm",
+      "script": "dev",
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "vite",
+        "pattern": { "regexp": "^never matches$" },
+        "background": {
+          "beginsPattern": "> vite",
+          "endsPattern": "ready in"
+        }
+      },
+      "presentation": { "reveal": "silent", "panel": "dedicated" }
+    }
+  ]
+}
