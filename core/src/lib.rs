@@ -3,6 +3,7 @@
 
 #![forbid(unsafe_code)]
 
+mod decode;
 mod format;
 mod render;
 

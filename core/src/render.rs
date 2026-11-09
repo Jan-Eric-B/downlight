@@ -3,6 +3,8 @@ use std::path::Path;
 use comrak::nodes::{Node, NodeCodeBlock, NodeValue};
 use comrak::{Arena, Options, format_html, parse_document};
 
+use crate::decode::decode;
+
 /// A document rendered to HTML by [`render`].
 ///
 /// Only `render` makes one, so HTML that reaches the page has always passed through the core's
@@ -29,6 +31,9 @@ impl serde::Serialize for RenderedDocument {
 /// footnotes, alerts, GitHub's heading anchors, emoji shortcodes, and front matter as a YAML code
 /// block. Every block carries its line number in `data-sourcepos` (`line:column-line:column`).
 ///
+/// The bytes are decoded first: a byte order mark decides the encoding (UTF-8, UTF-16 LE or BE),
+/// otherwise valid UTF-8 is UTF-8, and anything else is Windows-1252.
+///
 /// Markdown is the only format in v1; the path will pick the format by extension and resolve
 /// relative images against the document's folder. Raw HTML in the document is left out of the
 /// result until ticket 06 adds sanitizing.
@@ -40,8 +45,7 @@ pub fn render(
     )]
     path: &Path,
 ) -> RenderedDocument {
-    // Ticket 05 replaces this with decoding by byte order mark, UTF-8, then Windows-1252.
-    let text = String::from_utf8_lossy(bytes);
+    let text = decode(bytes);
     let options = github_options();
     let arena = Arena::new();
     let root = parse_document(&arena, &text, &options);
@@ -150,6 +154,64 @@ mod tests {
 
         assert!(!html.contains("<script"), "{html}");
         assert!(html.contains("After"), "{html}");
+    }
+
+    fn html_of_bytes(bytes: &[u8]) -> String {
+        render(bytes, Path::new("README.md")).as_str().to_owned()
+    }
+
+    #[test]
+    fn file_written_by_windows_powershell_5_1_out_file_shows_correctly() {
+        // `'# Größe', '', 'Café' | Out-File ps.md` in Windows PowerShell 5.1.26100: UTF-16 LE
+        // with a byte order mark and CRLF line endings.
+        let bytes = [
+            0xff, 0xfe, 0x23, 0x00, 0x20, 0x00, 0x47, 0x00, 0x72, 0x00, 0xf6, 0x00, 0xdf, 0x00,
+            0x65, 0x00, 0x0d, 0x00, 0x0a, 0x00, 0x0d, 0x00, 0x0a, 0x00, 0x43, 0x00, 0x61, 0x00,
+            0x66, 0x00, 0xe9, 0x00, 0x0d, 0x00, 0x0a, 0x00,
+        ];
+        let html = html_of_bytes(&bytes);
+        // A mark that showed would come before the `#`, and the line would be no heading.
+        assert!(html.starts_with("<h1 "), "{html}");
+        assert!(html.contains(">Größe<a "), "{html}");
+        assert!(html.contains(">Café</p>"), "{html}");
+    }
+
+    #[test]
+    fn utf_8_byte_order_mark_decides_and_does_not_show() {
+        let html = html_of_bytes(b"\xef\xbb\xbf# Gr\xc3\xb6\xc3\x9fe\n");
+        assert!(html.starts_with("<h1 "), "{html}");
+        assert!(html.contains(">Größe<a "), "{html}");
+    }
+
+    #[test]
+    fn utf_16_be_byte_order_mark_decides_and_does_not_show() {
+        let html = html_of_bytes(&[
+            0xfe, 0xff, 0x00, 0x23, 0x00, 0x20, 0x00, 0x47, 0x00, 0x72, 0x00, 0xf6, 0x00, 0xdf,
+            0x00, 0x65, 0x00, 0x0a,
+        ]);
+        assert!(html.starts_with("<h1 "), "{html}");
+        assert!(html.contains(">Größe<a "), "{html}");
+    }
+
+    #[test]
+    fn byte_order_mark_decides_even_when_the_rest_is_not_in_its_encoding() {
+        // Windows-1252 bytes behind a UTF-8 mark: the mark decides, and nothing is retried.
+        let html = html_of_bytes(b"\xef\xbb\xbfGr\xf6\xdfe\n");
+        assert!(html.contains(">Gr\u{fffd}\u{fffd}e</p>"), "{html}");
+    }
+
+    #[test]
+    fn valid_utf_8_without_a_byte_order_mark_is_read_as_utf_8() {
+        // As Windows-1252 these bytes would read "GrÃ¶ÃŸe".
+        let html = html_of_bytes(b"Gr\xc3\xb6\xc3\x9fe\n");
+        assert!(html.contains(">Größe</p>"), "{html}");
+    }
+
+    #[test]
+    fn windows_1252_file_with_umlauts_shows_umlauts() {
+        // "Größe: 5 €" in Windows-1252, which is no valid UTF-8.
+        let html = html_of_bytes(b"Gr\xf6\xdfe: 5 \x80\n");
+        assert!(html.contains(">Größe: 5 €</p>"), "{html}");
     }
 
     fn html_of(markdown: &str) -> String {
