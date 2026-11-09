@@ -11,7 +11,10 @@
     "check:lint": "eslint . && cargo clippy --workspace --all-targets --locked -- -D warnings",
     "check:types": "tsc",
     "check:deny": "cargo deny check",
-    "test": "cargo test --workspace --locked",
+    "test": "npm run test:rust && npm run test:page",
+    "test:rust": "cargo test --workspace --locked",
+    "test:page": "vitest run",
+    "fixtures": "cargo test -p downlight-core --test rendered_fixtures --locked -- --ignored",
     "documents": "node scripts/generate-documents.js",
     "measure": "node scripts/measure.js"
   },
@@ -23,9 +26,11 @@
     "@eslint/js": "^10.0.1",
     "@tauri-apps/cli": "^2.12.4",
     "eslint": "^10.14.0",
+    "happy-dom": "^21.0.4",
     "prettier": "^3.9.10",
     "typescript": "~6.0.3",
     "typescript-eslint": "^8.72.1",
-    "vite": "^8.3.5"
+    "vite": "^8.3.5",
+    "vitest": "^5.1.0"
   }
 }

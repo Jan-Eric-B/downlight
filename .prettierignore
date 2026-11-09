@@ -1,3 +1,5 @@
 # Prose written by hand; Prettier would reflow its tables and lists.
 *.md
 package-lock.json
+# Written by the core's render; the core's test compares them byte for byte.
+core/tests/fixtures/
