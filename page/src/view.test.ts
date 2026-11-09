@@ -10,13 +10,21 @@ let commands: string[] = [];
 /** What `render_document` gives, in turn; the last answer repeats. */
 let documents: (() => Promise<string | null>)[] = [];
 
+/** The page's text when it asked the app to show its window, or undefined until then. */
+let textWhenShown: string | undefined;
+
 beforeEach(() => {
   mockWindows("document-0");
   commands = [];
   documents = [];
+  textWhenShown = undefined;
   mockIPC(
     (command) => {
       commands.push(command);
+      if (command === "show_window") {
+        textWhenShown = document.body.textContent;
+        return undefined;
+      }
       if (command !== "render_document") return undefined;
       const next = documents.length > 1 ? documents.shift() : documents[0];
       return next?.();
@@ -119,6 +127,34 @@ test("a document that can't be read shows why", async () => {
   expect(document.querySelector("article")?.textContent).toContain(
     "Can't read C:\\docs\\gone.md",
   );
+});
+
+test("the window shows once its document is in it", async () => {
+  documents = [() => Promise.resolve(readme)];
+  await startDocumentView(0);
+
+  await vi.waitFor(() => {
+    expect(textWhenShown).toContain("Lamplighter");
+  });
+  expect(commands.filter((c) => c === "show_window")).toHaveLength(1);
+});
+
+test("a window without a document shows once it offers to open one", async () => {
+  documents = [() => Promise.resolve(null)];
+  await startDocumentView(0);
+
+  await vi.waitFor(() => {
+    expect(textWhenShown).toContain("Open file");
+  });
+});
+
+test("a window whose document can't be read shows once it says why", async () => {
+  documents = [() => Promise.reject(new Error("Can't read C:\\docs\\gone.md"))];
+  await startDocumentView(0);
+
+  await vi.waitFor(() => {
+    expect(textWhenShown).toContain("Can't read C:\\docs\\gone.md");
+  });
 });
 
 test("a notice from the app shows for a few seconds", async () => {

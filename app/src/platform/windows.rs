@@ -6,9 +6,18 @@ use tauri::{Manager, Runtime, WebviewWindowBuilder};
 use windows_sys::Win32::Foundation::FILETIME;
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, GetProcessTimes};
 
-/// Puts Mica behind the whole window. The window and its webview are transparent and the page
-/// draws no background of its own, so the document sits on Mica. `Effect::Mica` follows the
-/// system's light or dark mode.
+/// Windows 11's first build. Mica needs it; Windows 10 has no Mica, and Tauri drops the effect
+/// there without an error, which would leave a transparent window see-through.
+const FIRST_BUILD_WITH_MICA: u32 = 22000;
+
+/// Whether windows get a backdrop, Mica: Windows 11 and later.
+pub fn has_backdrop() -> bool {
+    windows_version::OsVersion::current().build >= FIRST_BUILD_WITH_MICA
+}
+
+/// Puts Mica behind the whole window, for windows where `has_backdrop()` is true. The window and
+/// its webview are then transparent, and the page, told so by the app, draws no background of its
+/// own, so the document sits on Mica. `Effect::Mica` follows the system's light or dark mode.
 pub fn with_backdrop<'a, R: Runtime, M: Manager<R>>(
     builder: WebviewWindowBuilder<'a, R, M>,
 ) -> WebviewWindowBuilder<'a, R, M> {

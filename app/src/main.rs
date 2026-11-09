@@ -42,6 +42,7 @@ fn main() -> tauri::Result<()> {
             open::open_document,
             menu::show_document_menu,
             window::close_window,
+            window::show_window,
             timing::report_first_paint,
             timing::report_long_task,
         ])

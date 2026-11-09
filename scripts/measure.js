@@ -57,9 +57,13 @@ async function run(documents, { scroll = false, laterDocuments = [] } = {}) {
   try {
     const deadline = Date.now() + RUN_TIMEOUT_MS;
     const painted = async (count) => {
-      while (reports.filter((r) => r.event === "first-paint").length < count) {
+      // A window counts once it has painted and been shown.
+      const done = (event) => reports.filter((r) => r.event === event).length;
+      while (done("first-paint") < count || done("window-shown") < count) {
         if (Date.now() > deadline)
-          throw new Error(`No first paint within ${RUN_TIMEOUT_MS} ms`);
+          throw new Error(
+            `No first paint or shown window within ${RUN_TIMEOUT_MS} ms`,
+          );
         if (child.exitCode !== null)
           throw new Error(`Downlight exited with ${child.exitCode}`);
         await sleep(20);
@@ -268,8 +272,12 @@ function firstWindow({ reports, memory }) {
     "document-0",
   );
   const [opening] = reportsOf(reports, "document-0", "window-opening");
+  const [shown] = reportsOf(reports, "document-0", "window-shown");
   return {
     firstPaint: paint.at,
+    // The window opens hidden and shows after its first frame (ticket 04), so the reader sees
+    // the document from here.
+    shown: shown.at,
     windowOpening: opening.at,
     navigation: paint.navigation,
     script: paint.script,
@@ -283,11 +291,15 @@ function firstWindow({ reports, memory }) {
 
 function secondWindow({ reports, memory, launches }) {
   const { paint, measures } = windowMeasures(reports, memory, "document-1");
+  const [opening] = reportsOf(reports, "document-1", "window-opening");
+  const [shown] = reportsOf(reports, "document-1", "window-shown");
   return {
     secondLaunchReturns: launches[0].returned,
     // What the reader waits for: the hand-off to the running process and the new window.
     firstPaintSinceLaunch: paint.seen - launches[0].started,
-    firstPaintSinceWindow: paint.since_window,
+    shownSinceLaunch: shown.seen - launches[0].started,
+    firstPaintSinceWindow: paint.at - opening.at,
+    shownSinceWindow: shown.at - opening.at,
     ...measures,
   };
 }

@@ -5,7 +5,7 @@
 mod windows;
 
 #[cfg(windows)]
-pub use windows::{fold_case, process_start, with_backdrop};
+pub use windows::{fold_case, has_backdrop, process_start, with_backdrop};
 
 /// Other systems get a plain window until their ports.
 #[cfg(not(windows))]
@@ -13,6 +13,12 @@ pub fn with_backdrop<'a, R: tauri::Runtime, M: tauri::Manager<R>>(
     builder: tauri::WebviewWindowBuilder<'a, R, M>,
 ) -> tauri::WebviewWindowBuilder<'a, R, M> {
     builder
+}
+
+/// Other systems get a solid background until their ports; macOS vibrancy comes with its port.
+#[cfg(not(windows))]
+pub fn has_backdrop() -> bool {
+    false
 }
 
 /// Other systems don't report when the process started until their ports; timing then counts

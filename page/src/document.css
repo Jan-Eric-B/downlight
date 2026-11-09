@@ -1,9 +1,28 @@
-/* The window sits on Mica, so the page draws no background of its own.
-   github-markdown-css keeps its fills on code blocks, tables and quotes. */
-html,
+/* Light or dark follows Windows. color-scheme also makes the scroll bar follow it. Where the
+   window has no Mica (Windows 10, other systems) the page draws a solid background: GitHub's,
+   github-markdown-css's --bgColor-default, which it defines only inside .markdown-body. */
+:root {
+  color-scheme: light dark;
+  background: light-dark(#ffffff, #0d1117);
+}
+
+/* On a backdrop (the app says so, see backdrop.ts), Mica on Windows, the page draws no background
+   of its own, so the document sits on Mica. github-markdown-css keeps its fills on code blocks
+   and tables. With transparency effects off, Windows draws Mica as a solid color itself. */
+:root.backdrop {
+  background: transparent;
+}
+
+/* High contrast: the reader's own background, under the reader's own text colors. */
+@media (forced-colors: active) {
+  :root,
+  :root.backdrop {
+    background: Canvas;
+  }
+}
+
 body {
   margin: 0;
-  background: transparent;
 }
 
 .markdown-body {

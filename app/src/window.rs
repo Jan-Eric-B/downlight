@@ -5,10 +5,11 @@ use std::collections::HashMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::time::Duration;
 use std::{fmt, io};
 
 use tauri::{
-    AppHandle, Emitter as _, Manager as _, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+    AppHandle, Emitter as _, Manager as _, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
     WindowEvent,
 };
 
@@ -228,22 +229,57 @@ pub fn forget_when_destroyed(window: &tauri::Window, event: &WindowEvent) {
     }
 }
 
+/// How long a window may stay hidden waiting for its page to ask to be shown. Cold first paint
+/// is about 1 s (ticket 02), so this only fires when the page never asks, and keeps a window
+/// that would otherwise stay invisible, and the process with it, from staying so.
+const LONGEST_HIDDEN: Duration = Duration::from_secs(5);
+
+/// Opens a window, hidden until its page has drawn its first frame (`show_window`), so it never
+/// shows WebView2's white or an empty frame while the webview starts (ticket 04).
 fn open_window(app: &AppHandle, label: &str, title: &str) -> tauri::Result<()> {
     let timing = app.state::<Timing>();
     timing.window_opening(label);
-    // The page turns on its own timing reports when it sees the query.
-    let url = if timing.is_on() {
-        WebviewUrl::App("index.html?timing".into())
+    // Decided once, so the page drops its background exactly when the window is transparent.
+    let backdrop = platform::has_backdrop();
+    let url = WebviewUrl::App(page_path(timing.is_on(), backdrop).into());
+    let builder = WebviewWindowBuilder::new(app, label, url)
+        .title(title)
+        .visible(false);
+    let builder = if backdrop {
+        platform::with_backdrop(builder)
     } else {
-        WebviewUrl::default()
+        builder
     };
-    let builder = WebviewWindowBuilder::new(app, label, url).title(title);
-    platform::with_backdrop(builder).build()?;
+    let window = builder.build()?;
+    std::thread::spawn(move || {
+        std::thread::sleep(LONGEST_HIDDEN);
+        // The window may have closed meanwhile, and then there is nothing to show.
+        if window.is_visible().is_ok_and(|visible| !visible) {
+            let _ = window.show();
+        }
+    });
     Ok(())
 }
 
+/// The page and what it is told in its query: `timing` turns on its timing reports, and
+/// `backdrop` says the window is transparent over the system's backdrop (Mica on Windows), so the
+/// page draws no background of its own.
+fn page_path(timing: bool, backdrop: bool) -> String {
+    let flags = [("timing", timing), ("backdrop", backdrop)]
+        .into_iter()
+        .filter_map(|(flag, on)| on.then_some(flag))
+        .collect::<Vec<_>>();
+    if flags.is_empty() {
+        "index.html".to_owned()
+    } else {
+        format!("index.html?{}", flags.join("&"))
+    }
+}
+
 fn bring_to_front(app: &AppHandle, label: &str) -> tauri::Result<()> {
-    // A window that is still being built has no handle yet, and comes up in front anyway.
+    // A window that is still being built has no handle yet. One that is built but still hidden
+    // ignores set_focus (tao does nothing for a window that isn't visible). Either way it comes up
+    // in front when its page asks to be shown (`show_window`).
     let Some(window) = app.get_webview_window(label) else {
         return Ok(());
     };
@@ -257,6 +293,15 @@ fn bring_to_front(app: &AppHandle, label: &str) -> tauri::Result<()> {
 #[tauri::command]
 pub fn close_window(window: WebviewWindow) -> tauri::Result<()> {
     window.close()
+}
+
+/// The page asks for this once it has drawn its first frame, with its document, the empty state
+/// or the error in it. Until then the window is hidden (`open_window`).
+#[tauri::command]
+pub fn show_window(window: WebviewWindow, timing: State<'_, Timing>) -> tauri::Result<()> {
+    window.show()?;
+    timing.window_shown(window.label());
+    Ok(())
 }
 
 /// `README.md - docs - Downlight`: the folder tells documents with the same name apart in Alt+Tab
@@ -482,6 +527,14 @@ mod tests {
             error: tauri::Error::WindowNotFound,
         };
         assert_eq!(failure.to_string(), "Can't open a window: window not found");
+    }
+
+    #[test]
+    fn page_is_told_about_timing_and_backdrop() {
+        assert_eq!(page_path(false, false), "index.html");
+        assert_eq!(page_path(true, false), "index.html?timing");
+        assert_eq!(page_path(false, true), "index.html?backdrop");
+        assert_eq!(page_path(true, true), "index.html?timing&backdrop");
     }
 
     #[test]

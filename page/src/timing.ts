@@ -6,9 +6,9 @@ import { invoke } from "@tauri-apps/api/core";
 const isOn = new URLSearchParams(location.search).has("timing");
 
 // A report that can't reach the app has nowhere else to go; `npm run measure` then stops with
-// "No first paint", which is where the person measuring sees it.
+// "No first paint or shown window", which is where the person measuring sees it.
 const send = (command: string, args: Record<string, unknown>) => {
-  void invoke(command, args);
+  invoke(command, args).catch(() => undefined);
 };
 
 /** Tasks and frames longer than this keep the window from answering too long (the spec's target). */
@@ -51,23 +51,13 @@ interface FirstPaintMarks {
   documentRequested: number;
   documentReceived: number;
   documentInserted: number;
+  /** When the frame after the document was inserted was done. */
+  firstFrame: number;
 }
 
-/**
- * Reports first paint once the frame that shows the inserted document is done: the task queued
- * from `requestAnimationFrame` runs after that frame's style, layout and paint.
- */
 export function reportFirstPaint(marks: FirstPaintMarks): void {
   if (!isOn) return;
-  requestAnimationFrame(() => {
-    setTimeout(() => {
-      send("report_first_paint", {
-        marks: {
-          ...marks,
-          navigationStart: performance.timeOrigin,
-          firstFrame: epochMs(),
-        },
-      });
-    }, 0);
+  send("report_first_paint", {
+    marks: { ...marks, navigationStart: performance.timeOrigin },
   });
 }

@@ -4,6 +4,18 @@ import { listenToApp } from "./events";
 import { showNotice } from "./notice";
 import { epochMs, reportFirstPaint } from "./timing";
 
+/**
+ * Resolves once the next frame is done: the task queued from `requestAnimationFrame` runs after
+ * that frame's style, layout and paint.
+ */
+function afterNextFrame(): Promise<void> {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => {
+      setTimeout(resolve, 0);
+    });
+  });
+}
+
 /** What a window without a document shows: a way to open one. */
 function createEmptyState(): HTMLElement {
   const empty = document.createElement("main");
@@ -67,12 +79,20 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
 
   const documentRequested = epochMs();
   const documentReceived = await showDocument();
+  const documentInserted = epochMs();
+  // The window opens hidden and shows once the frame with its document, the empty state or the
+  // error is drawn, so it never flashes white or shows an empty frame (ticket 04).
+  await afterNextFrame();
+  const firstFrame = epochMs();
+  // If this fails, the app shows the window after a few seconds anyway.
+  invoke("show_window").catch(() => undefined);
   if (documentReceived !== undefined) {
     reportFirstPaint({
       scriptStart,
       documentRequested,
       documentReceived,
-      documentInserted: epochMs(),
+      documentInserted,
+      firstFrame,
     });
   }
 }

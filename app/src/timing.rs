@@ -5,11 +5,11 @@
 //! documents.
 //!
 //! Every report is one line, `timing <window> <event> key=value ...`. Points in time are in ms
-//! since the process started; durations are in ms.
+//! since the process started; durations are in ms. All points share that one clock, so a reader
+//! of the reports finds the time between two events by subtracting them, as `npm run measure`
+//! does for a further window's cost from its `window-opening`.
 
-use std::collections::HashMap;
 use std::io::Write as _;
-use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, SystemTime};
 
 use serde::Deserialize;
@@ -19,16 +19,10 @@ use crate::platform;
 
 const SWITCH: &str = "DOWNLIGHT_TIMING";
 
-/// Whether the timing switch is on, and the clock it reports against.
+/// Whether the timing switch is on, and the process start that reports count from.
 pub struct Timing {
-    /// `None` while the switch is off.
-    clock: Option<Clock>,
-}
-
-/// The points in time that reports count from: the process start and each window's opening.
-struct Clock {
-    process_start_ms: f64,
-    windows_opened_ms: Mutex<HashMap<String, f64>>,
+    /// In ms since the Unix epoch; `None` while the switch is off.
+    process_start_ms: Option<f64>,
 }
 
 /// When reading and rendering a document started, and how long each took.
@@ -42,35 +36,36 @@ impl Timing {
     /// Reads the switch from the environment. Call it first thing in `main`: without the OS's
     /// process start time, timing counts from this call.
     pub fn from_env() -> Self {
-        let clock = std::env::var_os(SWITCH).map(|_| Clock {
-            process_start_ms: epoch_ms_of(
-                platform::process_start().unwrap_or_else(SystemTime::now),
-            ),
-            windows_opened_ms: Mutex::default(),
-        });
-        Self { clock }
+        let process_start_ms = std::env::var_os(SWITCH)
+            .map(|_| epoch_ms_of(platform::process_start().unwrap_or_else(SystemTime::now)));
+        Self { process_start_ms }
     }
 
     pub fn is_on(&self) -> bool {
-        self.clock.is_some()
+        self.process_start_ms.is_some()
     }
 
-    /// Notes that a window starts opening; its first paint is also counted from here, which is
-    /// what a further window in a running process costs.
+    /// Notes that a window starts opening, which is where a further window in a running process
+    /// starts to cost the reader.
     pub fn window_opening(&self, window: &str) {
-        let Some(clock) = &self.clock else { return };
-        let now = epoch_ms_of(SystemTime::now());
-        clock.windows_opened().insert(window.to_owned(), now);
-        clock.report(window, "window-opening", &[("at", clock.since_start(now))]);
+        self.report_now(window, "window-opening");
+    }
+
+    /// Notes that a window was shown. It opens hidden and shows once its page has drawn its first
+    /// frame, so for the reader first paint is not before this.
+    pub fn window_shown(&self, window: &str) {
+        self.report_now(window, "window-shown");
     }
 
     pub fn read_and_render(&self, window: &str, times: &ReadAndRenderTimes) {
-        let Some(clock) = &self.clock else { return };
-        clock.report(
+        let Some(start) = self.process_start_ms else {
+            return;
+        };
+        report(
             window,
             "read-and-render",
             &[
-                ("at", clock.since_start(epoch_ms_of(times.started))),
+                ("at", epoch_ms_of(times.started) - start),
                 ("read", times.read.as_secs_f64() * 1000.0),
                 ("render", times.render.as_secs_f64() * 1000.0),
             ],
@@ -78,64 +73,53 @@ impl Timing {
     }
 
     fn first_paint(&self, window: &str, marks: &FirstPaintMarks) {
-        let Some(clock) = &self.clock else { return };
-        let opened = clock
-            .windows_opened()
-            .get(window)
-            .copied()
-            .unwrap_or(clock.process_start_ms);
-        clock.report(
+        let Some(start) = self.process_start_ms else {
+            return;
+        };
+        report(
             window,
             "first-paint",
             &[
-                ("at", clock.since_start(marks.first_frame)),
-                ("since_window", marks.first_frame - opened),
-                ("navigation", clock.since_start(marks.navigation_start)),
-                ("script", clock.since_start(marks.script_start)),
-                ("requested", clock.since_start(marks.document_requested)),
-                ("received", clock.since_start(marks.document_received)),
-                ("inserted", clock.since_start(marks.document_inserted)),
+                ("at", marks.first_frame - start),
+                ("navigation", marks.navigation_start - start),
+                ("script", marks.script_start - start),
+                ("requested", marks.document_requested - start),
+                ("received", marks.document_received - start),
+                ("inserted", marks.document_inserted - start),
             ],
         );
     }
 
     fn long_task(&self, window: &str, task: &LongTask) {
-        let Some(clock) = &self.clock else { return };
-        clock.report(
+        let Some(start) = self.process_start_ms else {
+            return;
+        };
+        report(
             window,
             task.kind.event(),
-            &[
-                ("at", clock.since_start(task.start)),
-                ("duration", task.duration),
-            ],
+            &[("at", task.start - start), ("duration", task.duration)],
+        );
+    }
+
+    fn report_now(&self, window: &str, event: &str) {
+        let Some(start) = self.process_start_ms else {
+            return;
+        };
+        report(
+            window,
+            event,
+            &[("at", epoch_ms_of(SystemTime::now()) - start)],
         );
     }
 }
 
-impl Clock {
-    fn since_start(&self, epoch_ms: f64) -> f64 {
-        epoch_ms - self.process_start_ms
+fn report(window: &str, event: &str, fields: &[(&str, f64)]) {
+    let mut line = format!("timing {window} {event}");
+    for (key, value) in fields {
+        line.push_str(&format!(" {key}={value:.1}"));
     }
-
-    fn windows_opened(&self) -> std::sync::MutexGuard<'_, HashMap<String, f64>> {
-        // The map stays valid even if a thread panicked while holding the lock.
-        self.windows_opened_ms
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-    }
-
-    fn report(&self, window: &str, event: &str, fields: &[(&str, f64)]) {
-        let mut line = format!("timing {window} {event}");
-        for (key, value) in fields {
-            line.push_str(&format!(" {key}={value:.1}"));
-        }
-        self.write(&line);
-    }
-
-    fn write(&self, line: &str) {
-        // A report that can't be written is only lost; it must never stop the window.
-        let _ = writeln!(std::io::stderr().lock(), "{line}");
-    }
+    // A report that can't be written is only lost; it must never stop the window.
+    let _ = writeln!(std::io::stderr().lock(), "{line}");
 }
 
 /// The page's clock is `performance.timeOrigin + performance.now()`, in ms since the Unix epoch,
