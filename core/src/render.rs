@@ -1,9 +1,11 @@
 use std::path::Path;
 
 use comrak::nodes::{Node, NodeCodeBlock, NodeValue};
-use comrak::{Arena, Options, format_html, parse_document};
+use comrak::{Arena, Options, parse_document};
 
 use crate::decode::decode;
+use crate::image::ImageSources;
+use crate::sanitize::sanitized_html;
 
 /// A document rendered to HTML by [`render`].
 ///
@@ -34,33 +36,27 @@ impl serde::Serialize for RenderedDocument {
 /// The bytes are decoded first: a byte order mark decides the encoding (UTF-8, UTF-16 LE or BE),
 /// otherwise valid UTF-8 is UTF-8, and anything else is Windows-1252.
 ///
-/// Markdown is the only format in v1; the path will pick the format by extension and resolve
-/// relative images against the document's folder. Raw HTML in the document is left out of the
-/// result until ticket 06 adds sanitizing.
-pub fn render(
-    bytes: &[u8],
-    #[expect(
-        unused_variables,
-        reason = "ticket 06 resolves relative images against the document's folder"
-    )]
-    path: &Path,
-) -> RenderedDocument {
+/// The HTML is sanitized: it keeps the raw HTML GitHub allows and nothing that could act on its
+/// own. `path` is the document's file, against whose folder relative images resolve, and
+/// `image_origin` is where the page loads local images from: the app's image scheme, such as
+/// `http://image.localhost`. Markdown is the only format in v1.
+pub fn render(bytes: &[u8], path: &Path, image_origin: &str) -> RenderedDocument {
     let text = decode(bytes);
     let options = github_options();
     let arena = Arena::new();
     let root = parse_document(&arena, &text, &options);
     show_front_matter_as_yaml(root);
     keep_line_numbers_on_blocks_only(root);
-    let mut html = String::new();
-    // Writing to a String never fails, so there is no error to pass on.
-    let _ = format_html(root, &options, &mut html);
-    RenderedDocument { html }
+    let images = ImageSources::new(path, image_origin);
+    RenderedDocument {
+        html: sanitized_html(root, &options, images),
+    }
 }
 
 const FRONT_MATTER_DELIMITER: &str = "---";
 
 /// comrak's options for rendering as GitHub does. comrak 0.59 has no tagfilter (removed in 0.56);
-/// the tags it escaped are removed by sanitizing (ticket 06).
+/// sanitizing removes the tags it escaped.
 fn github_options() -> Options<'static> {
     let mut options = Options::default();
     let extension = &mut options.extension;
@@ -76,6 +72,8 @@ fn github_options() -> Options<'static> {
     extension.header_id_prefix = Some(String::new());
     extension.front_matter_delimiter = Some(FRONT_MATTER_DELIMITER.to_owned());
     let render = &mut options.render;
+    // Raw HTML stays in, for sanitizing to keep what GitHub allows.
+    render.r#unsafe = true;
     render.sourcepos = true;
     // github-markdown-css styles task lists by these classes.
     render.tasklist_classes = true;
@@ -135,9 +133,15 @@ fn yaml_of(front_matter: &str) -> String {
 mod tests {
     use super::*;
 
+    const IMAGE_ORIGIN: &str = "http://image.localhost";
+
     #[test]
     fn renders_markdown_as_html() {
-        let rendered = render(b"# Title\n\nSome *text*.\n", Path::new("README.md"));
+        let rendered = render(
+            b"# Title\n\nSome *text*.\n",
+            Path::new("README.md"),
+            IMAGE_ORIGIN,
+        );
         let html = rendered.as_str();
 
         assert!(html.contains(">Title<a "), "{html}");
@@ -149,6 +153,7 @@ mod tests {
         let rendered = render(
             b"Before\n\n<script>alert('x')</script>\n\nAfter <script>alert('y')</script>\n",
             Path::new("README.md"),
+            IMAGE_ORIGIN,
         );
         let html = rendered.as_str();
 
@@ -157,7 +162,9 @@ mod tests {
     }
 
     fn html_of_bytes(bytes: &[u8]) -> String {
-        render(bytes, Path::new("README.md")).as_str().to_owned()
+        render(bytes, Path::new("README.md"), IMAGE_ORIGIN)
+            .as_str()
+            .to_owned()
     }
 
     #[test]
@@ -215,7 +222,7 @@ mod tests {
     }
 
     fn html_of(markdown: &str) -> String {
-        render(markdown.as_bytes(), Path::new("README.md"))
+        render(markdown.as_bytes(), Path::new("README.md"), IMAGE_ORIGIN)
             .as_str()
             .to_owned()
     }
@@ -251,13 +258,13 @@ mod tests {
         assert!(html.contains(r#"class="contains-task-list""#), "{html}");
         assert!(html.contains(r#"class="task-list-item""#), "{html}");
         assert!(
-            html.contains(r#"<input type="checkbox" class="task-list-item-checkbox" checked="" disabled="" />"#),
+            html.contains(
+                r#"<input type="checkbox" class="task-list-item-checkbox" checked="" disabled="">"#
+            ),
             "{html}"
         );
         assert!(
-            html.contains(
-                r#"<input type="checkbox" class="task-list-item-checkbox" disabled="" />"#
-            ),
+            html.contains(r#"<input type="checkbox" class="task-list-item-checkbox" disabled="">"#),
             "{html}"
         );
     }

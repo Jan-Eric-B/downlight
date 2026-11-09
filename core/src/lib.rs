@@ -5,7 +5,10 @@
 
 mod decode;
 mod format;
+mod image;
 mod render;
+mod sanitize;
 
 pub use format::{MARKDOWN_EXTENSIONS, is_markdown};
+pub use image::{LocalImage, local_image};
 pub use render::{RenderedDocument, render};

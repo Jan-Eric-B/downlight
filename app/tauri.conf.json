@@ -16,6 +16,7 @@
       "csp": {
         "default-src": "'self'",
         "script-src": "'self'",
+        "img-src": "http://image.localhost data: https: http:",
         "connect-src": "ipc: http://ipc.localhost",
         "object-src": "'none'",
         "base-uri": "'none'",

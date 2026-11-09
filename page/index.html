@@ -3,6 +3,9 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- Remote images load as on GitHub, whose image proxy doesn't tell their hosts where
+         they're shown either. -->
+    <meta name="referrer" content="no-referrer" />
     <title>Downlight</title>
     <script type="module" src="/src/main.ts"></script>
   </head>

@@ -39,3 +39,7 @@ _Avoid_: Minimap, document map
 **First paint**:
 The moment the first screen of rendered document text is visible after a file is opened from the file manager. An empty or half-built window doesn't count.
 _Avoid_: Startup time, load time
+
+**Local image**:
+An image in a document whose file is on this computer. The page loads it through Downlight's own image scheme, never from the file system directly. An image on a network share is never a local image and doesn't load.
+_Avoid_: Asset, file image

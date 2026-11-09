@@ -41,6 +41,20 @@ body {
   contain-intrinsic-size: auto 3em;
 }
 
+/* GitHub's other way to show an image in light or dark mode only, besides <picture>:
+   `![Logo](logo-dark.png#gh-dark-mode-only)`. Rendering keeps the fragment on local images. */
+@media (prefers-color-scheme: light) {
+  .markdown-body img[src$="#gh-dark-mode-only"] {
+    display: none;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  .markdown-body img[src$="#gh-light-mode-only"] {
+    display: none;
+  }
+}
+
 /* A window without a document: "Open file" in the middle of the window. It is a markdown-body too,
    so it takes github-markdown-css's font and its light or dark colors. */
 .empty-window {

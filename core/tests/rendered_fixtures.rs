@@ -35,9 +35,11 @@ fn render(document: &Path) -> TestResult<String> {
     let name = document
         .file_name()
         .ok_or("a fixture document has no file name")?;
-    Ok(downlight_core::render(&bytes, Path::new(name))
-        .as_str()
-        .to_owned())
+    Ok(
+        downlight_core::render(&bytes, Path::new(name), "http://image.localhost")
+            .as_str()
+            .to_owned(),
+    )
 }
 
 fn rendered_fixture_of(document: &Path) -> PathBuf {

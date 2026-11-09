@@ -31,6 +31,12 @@ pub fn with_backdrop<'a, R: Runtime, M: Manager<R>>(
         .effects(EffectsBuilder::new().effect(Effect::Mica).build())
 }
 
+/// Where the page loads a custom scheme's URLs from: WebView2 serves custom schemes as
+/// `http://<scheme>.localhost`.
+pub fn custom_scheme_origin(scheme: &str) -> String {
+    format!("http://{scheme}.localhost")
+}
+
 /// The path in one case, since Windows file names ignore case. NTFS compares names by
 /// upper-casing each character on its own, so a character whose upper case is longer, such as ß,
 /// stays as it is.

@@ -5,6 +5,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod command_line;
+mod image;
 mod menu;
 mod open;
 mod platform;
@@ -39,6 +40,7 @@ fn main() -> ExitCode {
                 }
             });
         }))
+        .register_asynchronous_uri_scheme_protocol(image::SCHEME, image::serve)
         .manage(timing)
         .manage(OpenWindows::default())
         .invoke_handler(tauri::generate_handler![

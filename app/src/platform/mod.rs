@@ -5,7 +5,9 @@
 mod windows;
 
 #[cfg(windows)]
-pub use windows::{fold_case, has_backdrop, process_start, show_error, with_backdrop};
+pub use windows::{
+    custom_scheme_origin, fold_case, has_backdrop, process_start, show_error, with_backdrop,
+};
 
 /// Other systems print the error on stderr until their ports give it a native dialog.
 #[cfg(not(windows))]
@@ -39,4 +41,10 @@ pub fn process_start() -> Option<std::time::SystemTime> {
 #[cfg(not(windows))]
 pub fn fold_case(path: std::path::PathBuf) -> std::path::PathBuf {
     path
+}
+
+/// The webviews of macOS and Linux serve custom schemes as `<scheme>://localhost`.
+#[cfg(not(windows))]
+pub fn custom_scheme_origin(scheme: &str) -> String {
+    format!("{scheme}://localhost")
 }

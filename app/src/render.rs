@@ -8,6 +8,7 @@ use std::time::{Instant, SystemTime};
 use downlight_core::RenderedDocument;
 use tauri::{State, WebviewWindow};
 
+use crate::image;
 use crate::timing::{ReadAndRenderTimes, Timing};
 use crate::window::OpenWindows;
 
@@ -40,7 +41,7 @@ fn read_and_render(path: &Path) -> Result<(RenderedDocument, ReadAndRenderTimes)
         source,
     })?;
     let read = clock.elapsed();
-    let document = downlight_core::render(&bytes, path);
+    let document = downlight_core::render(&bytes, path, &image::origin());
     let times = ReadAndRenderTimes {
         started,
         read,
