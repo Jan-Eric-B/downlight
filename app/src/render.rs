@@ -1,4 +1,4 @@
-//! The command that reads and renders a window's document.
+//! The command that reads and renders a window's document, and the read and render it runs.
 
 use std::fmt;
 use std::io;
@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Instant, SystemTime};
 
 use downlight_core::RenderedDocument;
+use tauri::async_runtime::JoinHandle;
 use tauri::{State, WebviewWindow};
 
 use crate::image;
@@ -16,24 +17,37 @@ use crate::window::OpenWindows;
 ///
 /// The page passes nothing: the path comes from the app's own state, so the page can't ask for
 /// other files. The work runs on a blocking thread, off the main thread, so the window keeps
-/// answering while a large document renders.
+/// answering while a large document renders. The first request after the window was given its
+/// document gets the render started then (`OpenWindows::render_of`).
 #[tauri::command]
 pub async fn render_document(
     window: WebviewWindow,
     open_windows: State<'_, OpenWindows>,
     timing: State<'_, Timing>,
 ) -> Result<Option<RenderedDocument>, DocumentError> {
-    let Some(path) = open_windows.document_of(window.label()) else {
+    let Some(task) = open_windows.render_of(window.label()) else {
         return Ok(None);
     };
-    let (document, times) = tauri::async_runtime::spawn_blocking(move || read_and_render(&path))
+    let (document, times) = task
         .await
         .map_err(|source| DocumentError::ReadAndRenderStopped { source })??;
     timing.read_and_render(window.label(), &times);
     Ok(Some(document))
 }
 
-fn read_and_render(path: &Path) -> Result<(RenderedDocument, ReadAndRenderTimes), DocumentError> {
+pub type ReadAndRender = Result<(RenderedDocument, ReadAndRenderTimes), DocumentError>;
+
+/// A document being read and rendered on a blocking thread, by [`start`].
+pub type RenderTask = JoinHandle<ReadAndRender>;
+
+/// Starts reading and rendering `path` on a blocking thread, off the main thread and the async
+/// runtime's workers.
+pub fn start(path: &Path) -> RenderTask {
+    let path = path.to_owned();
+    tauri::async_runtime::spawn_blocking(move || read_and_render(&path))
+}
+
+fn read_and_render(path: &Path) -> ReadAndRender {
     let started = SystemTime::now();
     let clock = Instant::now();
     let bytes = std::fs::read(path).map_err(|source| DocumentError::Read {
