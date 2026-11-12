@@ -242,3 +242,75 @@ body {
 .link-target[hidden] {
   display: none;
 }
+
+/* The find bar (find.ts), at the top right over the document, on a solid background, since the
+   document scrolls under it. Above the "File deleted or moved" bar, which it may cover. */
+.find-bar {
+  position: fixed;
+  top: 12px;
+  right: 24px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: none;
+  margin: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--borderColor-default);
+  border-radius: 6px;
+  background-color: var(--bgColor-default);
+  box-shadow: 0 4px 12px rgb(0 0 0 / 20%);
+}
+
+.find-bar[hidden] {
+  display: none;
+}
+
+.find-bar input {
+  width: 220px;
+  padding: 3px 8px;
+  border: 1px solid var(--borderColor-default);
+  border-radius: 6px;
+  background-color: var(--bgColor-default);
+  color: var(--fgColor-default);
+  font: inherit;
+}
+
+.find-bar input:focus-visible {
+  outline: 2px solid var(--borderColor-accent-emphasis);
+  outline-offset: -1px;
+}
+
+/* "3 of 12", wide enough that the bar doesn't change size while the count does. */
+.find-bar [role="status"] {
+  min-width: 6em;
+  color: var(--fgColor-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* Find's matches, painted with the CSS Custom Highlight API so the document's DOM never changes.
+   The current match is orange, as in Chromium's own find, and the others yellow; in dark mode both
+   are darker, with dark text on the current one so it stays readable. */
+::highlight(find-match) {
+  background-color: light-dark(#fff2a8, rgb(187 128 9 / 45%));
+}
+
+::highlight(find-current) {
+  background-color: light-dark(#ff9632, #d29922);
+  color: light-dark(#1f2328, #0d1117);
+}
+
+/* High contrast: the reader's own colors for marked text, and the selection's for the current
+   match, so the two differ in every theme. */
+@media (forced-colors: active) {
+  ::highlight(find-match) {
+    background-color: Mark;
+    color: MarkText;
+  }
+
+  ::highlight(find-current) {
+    background-color: Highlight;
+    color: HighlightText;
+  }
+}

@@ -19,7 +19,7 @@ use windows_sys::Win32::System::Com::{
 };
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, GetProcessTimes};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-    GetKeyState, VK_BROWSER_REFRESH, VK_CONTROL, VK_F5,
+    GetKeyState, VK_BROWSER_REFRESH, VK_CONTROL, VK_F3, VK_F5,
 };
 use windows_sys::Win32::UI::Shell::{
     ILCreateFromPathW, ILFree, SHOpenFolderAndSelectItems, ShellExecuteW,
@@ -193,18 +193,21 @@ fn with_com<T>(work: impl FnOnce() -> io::Result<T>) -> io::Result<T> {
     result
 }
 
-/// Leaves WebView2's reload keys (F5, Ctrl+R, Ctrl+Shift+R, Ctrl+F5, Shift+F5 and a keyboard's
-/// Refresh key) to the page, which reloads the document on F5 and Ctrl+R and swallows the rest
-/// (ticket 10). Without this, WebView2 loads the page anew on Ctrl+Shift+R even when the page
-/// cancels the key, and the window loses its reading position. WebView2's other keys, such as
-/// zoom, keep working, which turning off all its browser keys would stop.
+/// Leaves WebView2's reload and find keys to the page. The page reloads the document on F5 and
+/// Ctrl+R and swallows WebView2's other reloads (Ctrl+Shift+R, Ctrl+F5, Shift+F5 and a keyboard's
+/// Refresh key, ticket 10), and opens its own find bar on Ctrl+F and steps through the matches on
+/// F3 and Shift+F3 (ticket 14). Without this, WebView2 loads the page anew on Ctrl+Shift+R even
+/// when the page cancels the key, and the window loses its reading position; and WebView2 handles
+/// its browser keys before the page sees them, so Ctrl+F, F3 and Ctrl+G could show its own find
+/// bar. WebView2's other keys, such as zoom, keep working, which turning off all its browser keys
+/// would stop.
 ///
-/// Without the handler only Ctrl+Shift+R still loads the page anew, and the window works
-/// otherwise, so a failure to reach the webview or to add the handler is left at that.
-pub fn leave_reload_keys_to_the_page(window: &WebviewWindow) {
+/// Without the handler only those keys misbehave, and the window works otherwise, so a failure to
+/// reach the webview or to add the handler is left at that.
+pub fn leave_reload_and_find_keys_to_the_page(window: &WebviewWindow) {
     let _ = window.with_webview(|webview| {
         let handler = AcceleratorKeyPressedEventHandler::create(Box::new(|_, args| {
-            args.map_or(Ok(()), |args| leave_to_the_page_if_reload(&args))
+            args.map_or(Ok(()), |args| leave_to_the_page_if_reload_or_find(&args))
         }));
         let mut token = 0;
         // SAFETY: the handler and the token are valid for the call, and the controller keeps its
@@ -218,7 +221,7 @@ pub fn leave_reload_keys_to_the_page(window: &WebviewWindow) {
     });
 }
 
-fn leave_to_the_page_if_reload(
+fn leave_to_the_page_if_reload_or_find(
     args: &ICoreWebView2AcceleratorKeyPressedEventArgs,
 ) -> windows_core::Result<()> {
     let mut key = 0;
@@ -227,16 +230,25 @@ fn leave_to_the_page_if_reload(
     // SAFETY: GetKeyState only reads the calling thread's keyboard state. The event comes on the
     // window's thread while it handles the key, so that state is the key's own.
     let ctrl_held = unsafe { GetKeyState(i32::from(VK_CONTROL)) } < 0;
-    let reload = key == u32::from(VK_F5)
-        || key == u32::from(VK_BROWSER_REFRESH)
-        || (key == u32::from(b'R') && ctrl_held);
-    if reload {
+    if is_reload_or_find_key(key, ctrl_held) {
         // WebView2 still passes the key on to the page.
         let args: ICoreWebView2AcceleratorKeyPressedEventArgs2 = args.cast()?;
         // SAFETY: a plain property setter on a live interface.
         unsafe { args.SetIsBrowserAcceleratorKeyEnabled(false)? };
     }
     Ok(())
+}
+
+/// Whether the virtual key `key`, with Ctrl held or not, is one of WebView2's reload or find keys,
+/// with any other modifiers: F5, the Refresh key and Ctrl+R reload; Ctrl+F, F3 and Ctrl+G find
+/// (WebView2's Find on Page and Find Next, Shift for the previous match).
+fn is_reload_or_find_key(key: u32, ctrl_held: bool) -> bool {
+    let reload = key == u32::from(VK_F5)
+        || key == u32::from(VK_BROWSER_REFRESH)
+        || (key == u32::from(b'R') && ctrl_held);
+    let find = key == u32::from(VK_F3)
+        || ((key == u32::from(b'F') || key == u32::from(b'G')) && ctrl_held);
+    reload || find
 }
 
 /// When Windows created this process, so first paint counts the loader's work before `main` too.
@@ -285,6 +297,36 @@ mod tests {
     #[test]
     fn fold_case_keeps_a_character_whose_upper_case_is_longer() {
         assert_eq!(fold_case(PathBuf::from("ß")), PathBuf::from("ß"));
+    }
+
+    #[test]
+    fn reload_and_find_keys_are_left_to_the_page() {
+        for (key, ctrl_held) in [
+            (VK_F5, false),
+            (VK_F5, true),
+            (VK_BROWSER_REFRESH, false),
+            (u16::from(b'R'), true),
+            (u16::from(b'F'), true),
+            (VK_F3, false),
+            (VK_F3, true),
+            (u16::from(b'G'), true),
+        ] {
+            assert!(is_reload_or_find_key(u32::from(key), ctrl_held), "{key}");
+        }
+    }
+
+    #[test]
+    fn other_keys_stay_with_webview2() {
+        for (key, ctrl_held) in [
+            (u16::from(b'R'), false),
+            (u16::from(b'F'), false),
+            (u16::from(b'G'), false),
+            // Zoom, until ticket 16 takes it over.
+            (u16::from(b'0'), true),
+            (u16::from(b'P'), true),
+        ] {
+            assert!(!is_reload_or_find_key(u32::from(key), ctrl_held), "{key}");
+        }
     }
 
     #[test]

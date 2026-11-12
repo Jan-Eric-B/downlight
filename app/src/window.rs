@@ -494,7 +494,7 @@ fn open_window(app: &AppHandle, label: &str, title: &str) -> tauri::Result<()> {
         builder
     };
     let window = builder.build()?;
-    platform::leave_reload_keys_to_the_page(&window);
+    platform::leave_reload_and_find_keys_to_the_page(&window);
     std::thread::spawn(move || {
         std::thread::sleep(LONGEST_HIDDEN);
         // The window may have closed meanwhile, and then there is nothing to show.

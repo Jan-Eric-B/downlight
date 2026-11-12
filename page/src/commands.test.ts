@@ -2,6 +2,7 @@ import { clearMocks, mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import { emit } from "@tauri-apps/api/event";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { startCommands } from "./commands";
+import { startFind } from "./find";
 
 let commands: string[] = [];
 let stop: AbortController;
@@ -179,7 +180,7 @@ describe("Reload", () => {
 });
 
 describe("the right-click menu", () => {
-  test("replaces the webview's menu with Reload, Open and Copy", () => {
+  test("replaces the webview's menu with Reload, Find, Open and Copy", () => {
     let entries: unknown;
     answer = (command, args) => {
       if (command === "show_document_menu") {
@@ -194,6 +195,7 @@ describe("the right-click menu", () => {
     expect(event.defaultPrevented).toBe(true);
     expect(entries).toEqual([
       { kind: "command", id: "reload", label: "Reload", shortcut: "F5" },
+      { kind: "command", id: "find", label: "Find", shortcut: "Ctrl+F" },
       { kind: "separator" },
       { kind: "command", id: "open", label: "Open...", shortcut: "Ctrl+O" },
       { kind: "separator" },
@@ -211,6 +213,15 @@ describe("the right-click menu", () => {
     await settle();
     await emit("menu-command", "reload");
     expect(appCommands()).toEqual(["reload_document"]);
+  });
+
+  test("runs Find chosen in the menu", async () => {
+    startFind(stop.signal);
+    await settle();
+    await emit("menu-command", "find");
+    const bar = document.querySelector<HTMLElement>(".find-bar");
+    expect(bar?.hidden).toBe(false);
+    expect(document.activeElement).toBe(bar?.querySelector("input"));
   });
 
   test("ignores a command it doesn't know", async () => {

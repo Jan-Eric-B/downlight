@@ -16,6 +16,10 @@ _Avoid_: Handler, default app
 Looking for text in the shown document, and only there.
 _Avoid_: Search
 
+**Current match**:
+The one match of Find that Enter and F3 step on from, scrolled into view and highlighted apart from the others. When the reader starts typing, it is the first match at or after the reading position.
+_Avoid_: Active match, selected match
+
 **Tick**:
 A reader's mark on a task list item. It belongs to the window and is never written to the file.
 _Avoid_: Check, complete, done
@@ -23,6 +27,10 @@ _Avoid_: Check, complete, done
 **Reload**:
 Showing the document again after its file changed, at the same reading position.
 _Avoid_: Refresh
+
+**Reading position**:
+The block at the top of the view, kept as the line number it starts on. Reload, and Back and Forward, return to it, and Find's first current match is the first one from it on.
+_Avoid_: Scroll position, anchor
 
 **Rendered document**:
 A document's file turned into the sanitized HTML the page shows. Only the core makes one.

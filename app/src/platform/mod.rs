@@ -6,8 +6,9 @@ mod windows;
 
 #[cfg(windows)]
 pub use windows::{
-    custom_scheme_origin, fold_case, has_backdrop, is_missing, leave_reload_keys_to_the_page,
-    open_folder, open_url, process_start, reveal_file, show_error, with_backdrop,
+    custom_scheme_origin, fold_case, has_backdrop, is_missing,
+    leave_reload_and_find_keys_to_the_page, open_folder, open_url, process_start, reveal_file,
+    show_error, with_backdrop,
 };
 
 /// Other systems count what Rust counts as not found until their ports.
@@ -34,9 +35,9 @@ pub fn open_url(_url: &str) -> std::io::Result<()> {
     Err(std::io::ErrorKind::Unsupported.into())
 }
 
-/// Other systems' webviews get their reload keys looked at with their ports.
+/// Other systems' webviews get their reload and find keys looked at with their ports.
 #[cfg(not(windows))]
-pub fn leave_reload_keys_to_the_page(_window: &tauri::WebviewWindow) {}
+pub fn leave_reload_and_find_keys_to_the_page(_window: &tauri::WebviewWindow) {}
 
 /// Other systems print the error on stderr until their ports give it a native dialog.
 #[cfg(not(windows))]

@@ -31,18 +31,18 @@ const RELOAD_DOCUMENT = DOCUMENTS.mixed1mb.replace(/\.md$/, "-reload.md");
 /**
  * Starts Downlight with the timing switch on and collects its reports until its windows painted.
  * Each of `laterDocuments` is then opened by a further launch, which hands it to the running
- * process (ADR 0001), and the run waits for its window to paint too. With `scroll`, it then
- * scrolls through the first window's document; with `reload`, it scrolls to the middle of the
- * first window's document and saves the file, and waits for the reload to be shown. `prepare`
- * runs before the process starts.
+ * process (ADR 0001), and the run waits for its window to paint too. `afterPaint`, if given, then
+ * acts on the first window over WebView2's debug port (`scrollThrough`, `reloadInTheMiddle` or
+ * `typeInFind`), and the run returns its result as `after`. `prepare` runs before the process
+ * starts.
  */
 async function run(
   documents,
-  { scroll = false, reload = false, laterDocuments = [], prepare } = {},
+  { afterPaint, laterDocuments = [], prepare } = {},
 ) {
   prepare?.();
   const env = { ...process.env, DOWNLIGHT_TIMING: "1" };
-  if (scroll || reload) {
+  if (afterPaint) {
     env.WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = `--remote-debugging-port=${DEBUG_PORT}`;
   }
   const child = spawn(EXECUTABLE, documents, {
@@ -83,24 +83,9 @@ async function run(
       launches.push(await launch(document, env));
     }
     await painted(documents.length + laterDocuments.length);
-    if (scroll) await scrollThrough();
-    let saved;
-    if (reload) {
-      saved = await saveInTheMiddle(documents[0]);
-      while (!reports.some((r) => r.event === "reload-shown")) {
-        if (Date.now() > deadline)
-          throw new Error(`No reload shown within ${RUN_TIMEOUT_MS} ms`);
-        await sleep(20);
-      }
-    }
+    const after = await afterPaint?.({ documents, reports, deadline });
     await sleep(SETTLE_MS);
-    if (reload) {
-      // After the settle time, since the probe's own layout reads take long frames of their own,
-      // which the measures leave out.
-      saved.probed = performance.now();
-      saved.lineAfter = await topLineNow();
-    }
-    return { reports, memory: memoryOf(child.pid), launches, saved };
+    return { reports, memory: memoryOf(child.pid), launches, after };
   } finally {
     execFileSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
       stdio: "ignore",
@@ -122,8 +107,9 @@ async function launch(document, env) {
 }
 
 /**
- * Connects to the first window's page over WebView2's debug port. `evaluate` runs an expression
- * in the page, waits for a promise it gives, and resolves with its value.
+ * Connects to the first window's page over WebView2's debug port. `send` calls a DevTools
+ * protocol method and resolves with its result; `evaluate` runs an expression in the page, waits
+ * for a promise it gives, and resolves with its value.
  */
 async function connect() {
   const targets = await (
@@ -136,24 +122,78 @@ async function connect() {
     socket.onerror = reject;
   });
   let lastId = 0;
-  const evaluate = (expression) =>
+  const send = (method, params) =>
     new Promise((resolve) => {
       const id = ++lastId;
       socket.addEventListener("message", function answered(event) {
         const message = JSON.parse(event.data);
         if (message.id !== id) return;
         socket.removeEventListener("message", answered);
-        resolve(message.result?.result?.value);
+        resolve(message.result);
       });
-      socket.send(
-        JSON.stringify({
-          id,
-          method: "Runtime.evaluate",
-          params: { expression, awaitPromise: true, returnByValue: true },
-        }),
-      );
+      socket.send(JSON.stringify({ id, method, params }));
     });
-  return { evaluate, close: () => socket.close() };
+  const evaluate = async (expression) =>
+    (
+      await send("Runtime.evaluate", {
+        expression,
+        awaitPromise: true,
+        returnByValue: true,
+      })
+    )?.result?.value;
+  return { send, evaluate, close: () => socket.close() };
+}
+
+/** What the reader types into the find bar, one character at a time; the last matches nothing. */
+const FIND_QUERIES = ["e", "the", "lamplight", "qxzjv"];
+
+/** Resolves in the page once the next frame is done, as the page's `afterNextFrame` does. */
+const NEXT_FRAME =
+  "new Promise((done) => requestAnimationFrame(() => setTimeout(done, 0)))";
+
+/**
+ * Opens the find bar with Ctrl+F and types each of `FIND_QUERIES` into it, one character a
+ * frame; Ctrl+F before each selects the box's text, so the query's first character replaces it.
+ * Returns each keystroke's time from its `input` event to the end of the next frame, and when the
+ * typing started and ended.
+ */
+async function typeInFind() {
+  const { send, evaluate, close } = await connect();
+  try {
+    // Before the page's own listener, which is on the box: the window's capture phase comes
+    // first.
+    await evaluate(`(() => {
+      window.findKeystrokes = [];
+      addEventListener("input", () => {
+        const start = performance.now();
+        requestAnimationFrame(() => setTimeout(() => findKeystrokes.push(performance.now() - start), 0));
+      }, true);
+    })()`);
+    const ctrlF = async () => {
+      const key = {
+        modifiers: 2,
+        key: "f",
+        code: "KeyF",
+        windowsVirtualKeyCode: 70,
+      };
+      await send("Input.dispatchKeyEvent", { type: "rawKeyDown", ...key });
+      await send("Input.dispatchKeyEvent", { type: "keyUp", ...key });
+      await evaluate(NEXT_FRAME);
+    };
+    const started = performance.now();
+    for (const query of FIND_QUERIES) {
+      await ctrlF();
+      for (const character of query) {
+        await send("Input.insertText", { text: character });
+        await evaluate(NEXT_FRAME);
+      }
+    }
+    // The last keystroke's frame is done by now, as the wait after it was.
+    const keystrokes = await evaluate("findKeystrokes");
+    return { keystrokes, started, ended: performance.now() };
+  } finally {
+    close();
+  }
 }
 
 /**
@@ -184,6 +224,25 @@ async function saveInTheMiddle(document) {
   } finally {
     close();
   }
+}
+
+/**
+ * Saves the file in the middle of the first window's document (`saveInTheMiddle`), waits for
+ * the reload to be shown and for the page to settle, then reads the line at the top of the view.
+ * Returns when the file was saved and probed, and the line before and after.
+ */
+async function reloadInTheMiddle({ documents, reports, deadline }) {
+  const saved = await saveInTheMiddle(documents[0]);
+  while (!reports.some((r) => r.event === "reload-shown")) {
+    if (Date.now() > deadline)
+      throw new Error(`No reload shown within ${RUN_TIMEOUT_MS} ms`);
+    await sleep(20);
+  }
+  // The probe comes after the settle time, since its own layout reads take long frames of their
+  // own, which the measures leave out.
+  await sleep(SETTLE_MS);
+  const probed = performance.now();
+  return { ...saved, probed, lineAfter: await topLineNow() };
 }
 
 /** The line at the top of the view now (`TOP_LINE`). */
@@ -383,7 +442,7 @@ function scrolled({ reports, memory }) {
 }
 
 /** A save to the file in the middle of the 1 MB document, until the reload is shown. */
-function reloaded({ reports, saved }) {
+function reloaded({ reports, after: saved }) {
   const [reload] = reportsOf(reports, "document-0", "reload");
   const [shown] = reportsOf(reports, "document-0", "reload-shown");
   const after = reports
@@ -400,6 +459,20 @@ function reloaded({ reports, saved }) {
     longestAfterReload: Math.max(0, ...after),
     // How far the line at the top of the view moved; 0 when the reload kept the reading position.
     linesMoved: Math.abs(saved.lineAfter - saved.lineBefore),
+  };
+}
+
+/** Typing into the find bar: each keystroke until its frame is done, and the longest task. */
+function typed({ reports, after: found }) {
+  const during = reports
+    .filter((r) => r.event === "long-task" || r.event === "long-frame")
+    // A report reaches the script a little after its task, so it counts until the run's end.
+    .filter((r) => r.seen >= found.started)
+    .map((r) => r.duration);
+  return {
+    keystrokeToFrame: median(found.keystrokes),
+    longestKeystrokeToFrame: Math.max(...found.keystrokes),
+    longestWhileTyping: Math.max(0, ...during),
   };
 }
 
@@ -446,16 +519,24 @@ const reload = await measure(
   reloaded,
   // A fresh copy each run, since a run appends to it.
   {
-    reload: true,
+    afterPaint: reloadInTheMiddle,
     prepare: () => copyFileSync(DOCUMENTS.mixed1mb, RELOAD_DOCUMENT),
   },
 );
 const scrolling = [
   await measure("1 MB mixed", [DOCUMENTS.mixed1mb], scrolled, {
-    scroll: true,
+    afterPaint: scrollThrough,
   }),
   await measure("1 MB prose", [DOCUMENTS.prose1mb], scrolled, {
-    scroll: true,
+    afterPaint: scrollThrough,
+  }),
+];
+const finding = [
+  await measure("1 MB mixed", [DOCUMENTS.mixed1mb], typed, {
+    afterPaint: typeInFind,
+  }),
+  await measure("1 MB prose", [DOCUMENTS.prose1mb], typed, {
+    afterPaint: typeInFind,
   }),
 ];
 console.log(table(cases));
@@ -469,3 +550,9 @@ console.log();
 console.log("A save in the middle of the document, until the reload is shown:");
 console.log();
 console.log(table([reload]));
+console.log();
+console.log(
+  `Typing ${FIND_QUERIES.map((q) => `"${q}"`).join(", ")} into the find bar, one character a frame:`,
+);
+console.log();
+console.log(table(finding));

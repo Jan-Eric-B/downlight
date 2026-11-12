@@ -3,6 +3,7 @@ import { emit } from "@tauri-apps/api/event";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import notes from "../../core/tests/fixtures/notes.html?raw";
 import readme from "../../core/tests/fixtures/readme.html?raw";
+import { layOut, linesOf, nextShown, settle } from "./test-support";
 import { startDocumentView, whenDocumentShown } from "./view";
 
 let commands: string[] = [];
@@ -52,11 +53,6 @@ afterEach(() => {
   clearMocks();
   document.body.replaceChildren();
 });
-
-/** Lets the page's pending IPC calls, such as starting to listen, finish. */
-function settle(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 0));
-}
 
 function heading(): string | null | undefined {
   return document.querySelector("article.markdown-body h1")?.textContent;
@@ -186,45 +182,6 @@ test("a notice from the app shows for a few seconds", async () => {
   vi.advanceTimersByTime(5000);
   expect(notice?.hidden).toBe(true);
 });
-
-/** Resolves once the next shown document is in place, as `whenDocumentShown` says. */
-function nextShown(): Promise<void> {
-  return new Promise((resolve) => {
-    const stop = whenDocumentShown(() => {
-      stop();
-      resolve();
-    });
-  });
-}
-
-/** The first and last line of the file that `element` comes from, by its `data-sourcepos`. */
-function linesOf(element: Element): [number, number] | undefined {
-  const own = element.getAttribute("data-sourcepos");
-  if (own) {
-    const [start, end] = own.split("-").map((point) => Number.parseInt(point));
-    return [start ?? 0, end ?? 0];
-  }
-  // A wrapper, such as a code block's, sits where the block inside it does; inline text sits in
-  // its block.
-  const inside = element.querySelector("[data-sourcepos]");
-  const around = element.parentElement?.closest("[data-sourcepos]");
-  const block = inside ?? around;
-  return block ? linesOf(block) : undefined;
-}
-
-/**
- * Lays the document out, which happy-dom doesn't: each line of the file is 20 px high, and
- * `topLine` is at the top of the view (1.5 is halfway down the first line).
- */
-function layOut(topLine: number): void {
-  vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(
-    function (this: Element) {
-      const [start, end] = linesOf(this) ?? [topLine, topLine - 1];
-      const top = (start - topLine) * 20;
-      return new DOMRect(0, top, 800, (end - start + 1) * 20);
-    },
-  );
-}
 
 /** The first line of each block the page scrolled to the top of the view, in turn. */
 function spyOnScrolls(): () => number[] {
@@ -402,6 +359,39 @@ test("showing another document runs the whenDocumentShown listeners", async () =
   stop();
 });
 
+test("a reload overtaken by a reload that can't read the file still runs the whenDocumentShown listeners", async () => {
+  documents = [
+    () => Promise.resolve(readme),
+    () => Promise.resolve(notes),
+    () => Promise.reject(new Error("Can't read C:\\docs\\readme.md: in use")),
+  ];
+  await startDocumentView(0);
+  await settle();
+  layOut(15.5);
+  // The second reload starts while the first one anchors its render, which overtakes the first.
+  let overtaken = false;
+  vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(() => {
+    if (overtaken) return;
+    overtaken = true;
+    void emit("document-changed", "reload");
+  });
+  const headings: (string | null | undefined)[] = [];
+  const stop = whenDocumentShown(() => {
+    headings.push(heading());
+  });
+
+  await emit("document-changed", "reload");
+  await vi.waitFor(() => {
+    expect(document.querySelector(".notice")?.textContent).toContain(
+      "Can't read C:\\docs\\readme.md",
+    );
+  });
+  await vi.waitFor(() => {
+    expect(headings).toEqual(["Field notes"]);
+  });
+  stop();
+});
+
 test("a reload overtaken by a newer document-shown shows the newer document", async () => {
   let sendReload: (html: string) => void = () => {};
   documents = [
@@ -499,4 +489,20 @@ test("a reload of a document shown at a heading keeps the reading position", asy
   await emit("document-changed", "reload");
   await shown;
   expect(new Set(scrolledTo())).toEqual(new Set([8]));
+});
+
+test("a document that can't be read runs the whenDocumentShown listeners", async () => {
+  documents = [
+    () => Promise.resolve(readme),
+    () => Promise.reject(new Error("Can't read gone.md: it is in use")),
+  ];
+  await startDocumentView(0);
+  await settle();
+
+  const shown = nextShown();
+  await emit("document-shown");
+  await shown;
+  expect(document.querySelector("article")?.textContent).toContain(
+    "Can't read gone.md",
+  );
 });

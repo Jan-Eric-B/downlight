@@ -8,14 +8,14 @@ Spec: [Downlight v1](../spec.md)
 
 **Status:** ready-for-agent
 
-- [ ] Ctrl+F opens the find bar with the focus in its box; pressing it again while open selects the text in the box.
+- [x] Ctrl+F opens the find bar with the focus in its box; pressing it again while open selects the text in the box.
 - [ ] Matches are highlighted as the reader types, ignoring case, without changing the document's DOM.
-- [ ] The bar shows "N of M", or "No results" when nothing matches.
+- [x] The bar shows "N of M", or "No results" when nothing matches.
 - [ ] Enter and F3 go to the next match, Shift+Enter and Shift+F3 to the previous one, wrapping at the ends. The current match scrolls into view and is highlighted differently from the rest.
 - [ ] Esc closes the bar and clears the highlights.
-- [ ] After a reload while the bar is open, the matches are counted again.
-- [ ] Find is in the right-click menu.
-- [ ] Page tests cover the count, the current match, next and previous, wrapping, Esc and the count after a reload.
+- [x] After a reload while the bar is open, the matches are counted again.
+- [x] Find is in the right-click menu.
+- [x] Page tests cover the count, the current match, next and previous, wrapping, Esc and the count after a reload.
 - [ ] Typing in the box on the 1 MB document is measured with the timing switch, and the result is recorded in this ticket.
 
 ## Plan
@@ -25,22 +25,22 @@ Spec: [Downlight v1](../spec.md)
 **Tests first:**
 
 - `page/src/find.test.ts` setup: `startFind`, `startCommands` and `startDocumentView` with `mockIPC` answering the new `find.html` fixture, as `view.test.ts` does. Keys are dispatched `keydown` events; typing sets `box.value` and dispatches `input`. Observed: the bar's text, `document.activeElement`, the box's selection, `findMatches()` and `view.innerHTML`.
-  - `ctrl_f_opens_the_bar_with_the_focus_in_its_box` - default prevented, so WebView2's own find bar stays away
-  - `ctrl_f_while_open_selects_the_text_in_the_box`
-  - `typing_counts_matches_ignoring_case` - "lamp" over Lamp, LAMP and lamp gives "1 of N"
-  - `a_match_across_inline_formatting_counts_once` - "lamp light" across `<strong>`
-  - `nothing_matching_shows_no_results` - and an empty box shows no count and has no matches
-  - `finding_leaves_the_documents_dom_unchanged` - `view.innerHTML` equal before typing, after stepping and after Esc
-  - `the_first_match_after_the_reading_position_is_current` - with a block halfway down at the top of the view (stub `getBoundingClientRect`, as `view.test.ts` does for Reload), the current match is the first one at or after that block
-  - `at_the_top_of_the_document_the_first_match_is_current`
-  - `a_current_match_in_a_closed_section_opens_it` - every closed `<details>` around the current match gets `open`
-  - `enter_and_f3_go_to_the_next_match` / `shift_enter_and_shift_f3_go_to_the_previous_match`
-  - `next_after_the_last_match_wraps_to_the_first` / `previous_before_the_first_wraps_to_the_last`
-  - `the_current_matchs_block_is_scrolled_into_view` - spy on `Element.prototype.scrollIntoView` (happy-dom has no layout; where it lands is a manual check)
-  - `esc_closes_the_bar_and_clears_the_matches`
-  - `a_document_shown_while_the_bar_is_open_is_counted_again` - `emit("document-shown")` with `notes.html`; once ticket 10 has landed, the same through its reload path
-  - `a_new_document_does_not_scroll_to_a_match` - so Reload's anchoring and a link's heading win
-- `commands.test.ts`: the menu test expects `{kind:"command", id:"find", label:"Find", shortcut:"Ctrl+F"}`; add `runs_find_chosen_in_the_menu`.
+  - "Ctrl+F opens the bar with the focus in its box" - default prevented, so WebView2's own find bar stays away
+  - "Ctrl+F while the bar is open selects the text in its box"
+  - "typing counts the matches, ignoring case" - "lamp" over Lamp, LAMP and lamp gives "1 of N"
+  - "a match across inline formatting counts once" - "lamp light" across `<strong>`
+  - "nothing matching shows No results" - and an empty box shows no count and has no matches
+  - "finding leaves the document's DOM unchanged" - `view.innerHTML` equal before typing, after stepping and after Esc
+  - "the first match after the reading position is current" - with a block halfway down at the top of the view (stub `getBoundingClientRect`, as `view.test.ts` does for Reload), the current match is the first one at or after that block
+  - "at the top of the document the first match is current"
+  - "a current match in a closed section opens it" - every closed `<details>` around the current match gets `open`
+  - "Enter and F3 go to the next match" / "Shift+Enter and Shift+F3 go to the previous match"
+  - "next after the last match wraps to the first" / "previous before the first match wraps to the last"
+  - "the current match's block is scrolled into view" - spy on `Element.prototype.scrollIntoView` (happy-dom has no layout; where it lands is a manual check)
+  - "Esc closes the bar and clears the matches"
+  - "a document shown while the bar is open is counted again" - `emit("document-shown")` with `notes.html`; once ticket 10 has landed, the same through its reload path
+  - "a new document doesn't scroll to a match" - so Reload's anchoring and a link's heading win
+- `commands.test.ts`: the menu test expects `{kind:"command", id:"find", label:"Find", shortcut:"Ctrl+F"}`; add "runs Find chosen in the menu".
 
 **Changes:**
 
@@ -76,6 +76,40 @@ Spec: [Downlight v1](../spec.md)
 - The first current match is the first one after the reading position, not the first in the document.
 - The tickets are built one at a time, so each shared piece in "Fits with other tickets" is added by the first ticket that needs it.
 
+## Results
+
+Built 2026-11-12. `npm run check` passes. Not yet measured and not yet checked in the real app: this build ran neither the app nor `npm run measure`.
+
+**Beyond the plan:**
+
+- Spaces: inside a block's text, a line break from the file, a no-break space and every other space match a space in the box, so a phrase matches across a hard-wrapped line. A text node of only line breaks and spaces, which sits between blocks, keeps its line breaks, so a match never runs from one block into the next; code keeps its lines. Each character stays one character, so offsets still map back to text nodes. Tests "a line break or no-break space in a paragraph matches a space", "a match never runs from one block into the next" and "code keeps its lines".
+- Typing on keeps the current match: from the second character, the current match is the first one from where the last current match started, as in Chromium, and not the first after the reading position, which the scroll to the last match has moved. Opening the bar, and typing after "No results", start from the reading position. Tests "typing on keeps the current match" and "typing after No results starts again from the reading position".
+- The reading position is compared by place in the document, not by line number: `view.ts` exports `readingBlock(view)`, the innermost element at the top of the view (Reload's `readingLine` is built on it), and a match is at or after it when it is inside it or follows it. Line numbers don't rise in document order: footnotes come last but keep their definitions' lines, and raw HTML has none, either of which broke the binary search, which then skipped matches or went back to the top. `find.md` has a footnote defined early for this. Tests "a match in raw HTML after the reading position is current" and "a footnote is after the reading position, though its definition is early in the file".
+- A word-final sigma ("ς") and any other ("σ") match each other: case folding makes them one, which keeps the offsets. Test "a word-final sigma matches any other sigma".
+- Typing, and opening the bar with text left in its box, go to the current match (open its sections, scroll), as in Chromium; only a recount after a shown document doesn't.
+- A recount after a shown document (another document or a reload) takes the first match at or after the reading position, rather than the first after the old current match's offset: offsets in the last document's text say nothing about another one, and a reload has just put the view back at the reading position.
+- `whenDocumentShown` also runs when the window shows no document or an error (plan step 2; ticket 10 left it out), so Find never counts matches in the last document's detached text. Tests "a window whose document goes away finds nothing" and "a document that can't be read runs the whenDocumentShown listeners". Its listener gets the view, as the plan said, so Find looks nothing up. A request that replaced the view and was then overtaken leaves the call to the request that overtook it, which makes it even when its read fails, so the listeners hear of every replaced view. Tests "a reload overtaken by a reload that can't read the file still runs the whenDocumentShown listeners" and "a reload overtaken by a reload that can't read the file is counted again".
+- WebView2's keys: Microsoft's docs (`ICoreWebView2AcceleratorKeyPressedEventArgs2`, `CoreWebView2Settings.AreBrowserAcceleratorKeysEnabled`, "Differences between Microsoft Edge and WebView2") put WebView2's own handling of a browser key before the web content gets it, and list Ctrl+F, F3, Shift+F3, Ctrl+G and Ctrl+Shift+G as its find keys. So `preventDefault` alone can't be relied on, and the handler, renamed `leave_reload_and_find_keys_to_the_page`, also turns off WebView2's handling of Ctrl+F, Ctrl+G and F3 with any other modifiers; the page still gets them. The key check is a pure `is_reload_or_find_key`, with tests `reload_and_find_keys_are_left_to_the_page` and `other_keys_stay_with_webview2`. Compiled and unit tested, not pressed in the app.
+- F3 and Shift+F3 are commands in `commands.ts` (`findNext`, `findPrevious`), not on a window `keydown` of Find's own as the plan said; `Command` has a `shift` flag for Shift+F3. Neither is in the right-click menu. F3 with the bar closed opens it ("F3 while the bar is closed opens it"); the key is always taken; with Ctrl, Alt or Meta it does nothing ("F3 with Ctrl held does nothing", "F3 with Alt held does nothing"). Unlike the old handler, F3 during an IME composition is a step, as F5 is a reload then. Esc closes the open bar wherever the focus is, not only in the box ("Esc with the focus outside the box closes the bar"), and Enter that ends an IME composition doesn't step ("Enter that ends an IME composition doesn't step").
+- After the frame, the second scroll looks at the match's own rect and scrolls it to the middle (`scrollBy`) only if it is outside the view, so a match far down a paragraph taller than the view shows too. A later step, or closing the bar, cancels it. Tests "a current match still outside the view after a frame is scrolled to its middle", "a later step cancels the last match's scroll after its frame" and "closing the bar cancels the current match's scroll after its frame".
+- The reading position and the scrolls that check they landed (ADR 0003) moved from `view.ts` to `page/src/reading-position.ts`, after the architecture review (see Comments). Find takes `atOrAfterReadingPosition` and `scrollToMiddle` from it. Open moved from `commands.ts` to `open.ts`, which ended the import cycle commands, find, view, commands. The page tests share `settle`, `nextShown`, `linesOf` and `layOut` from `page/src/test-support.ts`.
+- `GLOSSARY.md` has "Current match".
+
+**Measured:** pending; the measurement starts the app and drives WebView2 over its debug port, which this build didn't do. Run `npm run documents`, `npm run tauri build`, `npm run measure`. Its last table, "Typing ... into the find bar", gives each keystroke's time from its `input` event to the end of the next frame (median and worst) and the longest task or frame while typing ("e", "the", "lamplight" and a string that matches nothing), on the 1 MB mixed and prose documents. The target is no task or frame over 100 ms. If a keystroke goes over, the next step is the plan's fallback: paint only the matches in and near the view, repainted on scroll at most once a frame, with the choice of matches as a pure function with its own page test, while the count and `findMatches()` keep every match. If the first keystroke alone goes over, building the index is the long part: split its walk across tasks, as a reload's parse is split.
+
+**Not yet checked by hand** (`npm run tauri dev` or the release build):
+
+- Ctrl+F opens the bar with the focus in its box; Ctrl+F again selects its text.
+- WebView2's own find bar never shows: Ctrl+F, F3, Shift+F3, Ctrl+G and Ctrl+Shift+G, with the bar open and closed.
+- All matches are highlighted as you type, and the current match looks different, in light, dark and high contrast.
+- Enter, F3, Shift+Enter and Shift+F3 step and wrap, with the current match centred far down the 1 MB document, in a paragraph taller than the window, and inside a closed `<details>`, which opens.
+- Esc clears the highlights and keeps the box's text; Ctrl+F shows them again.
+- The menu's Find opens the bar.
+- Saving the file with the bar open recounts and leaves the view at the reading position; a link to another document with the bar open recounts and doesn't scroll to a match.
+- An IME's Enter that ends a composition doesn't step.
+- The bar over the "File deleted or moved" bar, and in a narrow window.
+- F5 and Ctrl+R still reload, and Ctrl+plus, Ctrl+minus and Ctrl+0 still zoom (the key handler changed).
+
 ## Comments
 
 **2026-11-12, from ticket 10's code quality review.** What ticket 10 left in place that this ticket builds on:
@@ -85,3 +119,7 @@ Spec: [Downlight v1](../spec.md)
 - `Command` already has `ctrlLetter?` and `key?`, and Reload is in the menu. Find goes after Reload, in the spec's order.
 - Ctrl+F is one of WebView2's own browser keys (it opens WebView2's find bar). Ticket 10 found that cancelling a key in the page doesn't always stop WebView2. If `preventDefault` doesn't hold for Ctrl+F, F3 or Shift+F3, extend the existing `AcceleratorKeyPressed` handler (`leave_reload_keys_to_the_page` in `app/src/platform/windows.rs`, renamed for what it covers) rather than adding a second handler.
 - To keep each task under 100 ms on the 1 MB document, ticket 10 parses a reload's HTML into a `<template>` and swaps it in a frame later. Building the text index can follow the same rule: measure it with the timing switch, and split it across tasks if it doesn't fit in one.
+
+**2026-11-12, architecture review.** Ticket 14 had copied Reload's "scroll, wait a frame, scroll again" into `goToCurrent` and imported `readingBlock` and `afterNextFrame` from `view.ts`. Both now live in `page/src/reading-position.ts`: Reload, heading links and Find call `scrollToTop`, `scrollToMiddle`, `readingPosition`, `returnToReadingPosition` and `atOrAfterReadingPosition`, and only that module knows how a reading block is found. The page tests didn't change apart from one import.
+
+A lead for later, not worth doing now: happy-dom has no CSS Custom Highlights, so `canPaint` is false in the tests and `paint` and `paintCurrent` never run there; the tests read `findMatches()` instead. If Find had to paint only the matches near the view (the fallback in Measured) or the overview ruler gets built, give Find a painter: CSS Highlights in the app, a recorder in the tests. With two adapters the seam is real, and the tests could check what is painted, and the current match's own highlight. Today the painting is about 25 lines, and a seam for it would cost more than it saves.

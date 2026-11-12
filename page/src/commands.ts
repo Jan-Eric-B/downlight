@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listenToApp } from "./events";
+import { findNext, findPrevious, openFind } from "./find";
 import { showNotice } from "./notice";
+import { open } from "./open";
 
 /**
  * The reader's commands: each one's keyboard shortcut and what it does. A new command is added
@@ -10,25 +12,14 @@ import { showNotice } from "./notice";
 interface Command {
   /** The letter pressed with Ctrl, in lower case. */
   ctrlLetter?: string;
-  /** A named key pressed without modifiers, such as `F5`. The menu shows it before Ctrl+letter. */
+  /**
+   * A named key, such as `F5`, pressed without Ctrl, Alt or Meta, and with Shift only if `shift`
+   * says so. The menu shows it before Ctrl+letter.
+   */
   key?: string;
+  /** Whether `key` is pressed with Shift. */
+  shift?: boolean;
   run(): void;
-}
-
-let opening = false;
-
-/** Open: the open dialog, then the chosen document in this window. */
-export async function open(): Promise<void> {
-  // A second Ctrl+O before the dialog is up would open a second dialog.
-  if (opening) return;
-  opening = true;
-  try {
-    await invoke("open_document");
-  } catch (error) {
-    showNotice(String(error));
-  } finally {
-    opening = false;
-  }
 }
 
 const commands = {
@@ -38,6 +29,9 @@ const commands = {
     // The app tells the page to reload, and the page shows why if the file can't be read.
     run: () => void invoke("reload_document"),
   },
+  find: { ctrlLetter: "f", run: openFind },
+  findNext: { key: "F3", run: findNext },
+  findPrevious: { key: "F3", shift: true, run: findPrevious },
   open: { ctrlLetter: "o", run: () => void open() },
   close: {
     ctrlLetter: "w",
@@ -57,6 +51,7 @@ type MenuLine = { command: CommandId; label: string } | "separator" | "copy";
 /** The right-click menu, top to bottom. */
 const menu: MenuLine[] = [
   { command: "reload", label: "Reload" },
+  { command: "find", label: "Find" },
   "separator",
   { command: "open", label: "Open..." },
   "separator",
@@ -77,30 +72,31 @@ function menuEntries() {
 }
 
 function shortcutOf(command: Command): string | undefined {
-  if (command.key) return command.key;
+  if (command.key) return command.shift ? `Shift+${command.key}` : command.key;
   return command.ctrlLetter && `Ctrl+${command.ctrlLetter.toUpperCase()}`;
 }
 
-function hasModifier(event: KeyboardEvent): boolean {
-  return event.ctrlKey || event.altKey || event.shiftKey || event.metaKey;
-}
-
 function pressesShortcutOf(event: KeyboardEvent, command: Command): boolean {
+  if (
+    command.ctrlLetter !== undefined &&
+    pressesCtrlLetter(event, command.ctrlLetter)
+  ) {
+    return true;
+  }
+  if (event.ctrlKey || event.altKey || event.metaKey) return false;
   return (
-    (command.key !== undefined &&
-      event.key === command.key &&
-      !hasModifier(event)) ||
-    (command.ctrlLetter !== undefined &&
-      pressesCtrlLetter(event, command.ctrlLetter))
+    command.key !== undefined &&
+    event.key === command.key &&
+    event.shiftKey === (command.shift ?? false)
   );
 }
 
 /**
  * The webview's own reloads (Ctrl+F5, Shift+F5, Ctrl+Shift+R), which would load the page anew
  * and lose the reading position. On Windows the app already turns them off in WebView2
- * (`leave_reload_keys_to_the_page` in `app/src/platform/windows.rs`), so this check matters only
- * if the app couldn't add that handler (it carries on without it), and on other systems until
- * their ports.
+ * (`leave_reload_and_find_keys_to_the_page` in `app/src/platform/windows.rs`), so this check
+ * matters only if the app couldn't add that handler (it carries on without it), and on other
+ * systems until their ports.
  */
 function isWebviewReload(event: KeyboardEvent): boolean {
   if (event.altKey || event.metaKey) return false;
