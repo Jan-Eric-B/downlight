@@ -6,7 +6,7 @@ Spec: [Downlight v1](../spec.md)
 
 **Blocked by:** 02 (Performance spike and stack decision)
 
-**Status:** ready-for-agent
+**Status:** closed
 
 - [x] A UTF-8, UTF-16 LE or UTF-16 BE byte order mark decides the encoding, and the mark itself doesn't show.
 - [x] Without a mark, a file that is valid UTF-8 is read as UTF-8.
@@ -35,3 +35,5 @@ The UTF-8 check itself takes 0.02 ms on 1 MB. A UTF-8 file, the common case, cos
 - **Windows PowerShell 5.1:** `Out-File` (5.1.26100) writes UTF-16 LE with a mark and CRLF line endings. The test uses the bytes it wrote for `'# Größe', '', 'Café'`.
 - **Dependency:** `encoding_rs` 0.8.44, as the spec names. Its license is `(Apache-2.0 OR MIT) AND BSD-3-Clause`, so `deny.toml` now allows BSD-3-Clause, which is compatible with GPL-3.0. It brings in `simdutf8`, `core_detect` and `multiversion_no_op`.
 - **Tests** are render tests in `core/src/render.rs`: one per mark, valid UTF-8 without a mark, Windows-1252 with umlauts, the PowerShell file, and a mark followed by bytes in another encoding.
+
+**2026-11-09, closed.** Closed, with every criterion done. Still open: `npm run measure` on a quiet machine, so that its numbers compare with ticket 04's (see Results).

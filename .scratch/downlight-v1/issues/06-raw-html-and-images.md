@@ -6,7 +6,7 @@ Spec: [Downlight v1](../spec.md)
 
 **Blocked by:** 04 (Documents look like GitHub on Mica)
 
-**Status:** ready-for-agent
+**Status:** closed
 
 - [x] Sanitizing keeps `<details>`, `<summary>`, `<picture>`, `<source>`, `<img>` with `width`, `height` and `align`, `align` on block elements, `<kbd>`, `<sub>` and `<sup>`, plus the task list checkboxes, heading ids, line numbers and classes that rendering produces.
 - [x] Sanitizing removes scripts, styles, frames, objects, event handler attributes and `javascript:` URLs.
@@ -89,3 +89,5 @@ Open:
 - **Credentials over http:** a remote image at an intranet host name (`http://fileserver/logo.png`) is allowed. WebView2, like Chromium, may answer an NTLM or Negotiate challenge from a host it counts as intranet without asking. The spec names network shares only. Turning that off (Chromium's `--auth-server-allowlist` browser argument, for instance) touches the arguments of the WebView2 environment, which ticket 19 also deals with, so it needs a decision.
 - **A document on a network share** loses all its relative images, as the criterion says, although the reader has already connected to that server by opening the file.
 - `<picture>` in light mode with a real switch in Windows.
+
+**2026-11-10, closed.** Closed, with every criterion done. The credentials over http moved to ticket 20, which the v1 release check waits on. Still open from the Comments: a document on a network share loses its relative images, and `<picture>` in light mode with a real switch in Windows.

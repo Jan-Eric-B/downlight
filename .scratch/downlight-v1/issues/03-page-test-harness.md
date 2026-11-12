@@ -6,7 +6,7 @@ Spec: [Downlight v1](../spec.md)
 
 **Blocked by:** 02 (Performance spike and stack decision)
 
-**Status:** ready-for-agent
+**Status:** closed
 
 - [x] Vitest with happy-dom runs the page tests with one command.
 - [x] A core test renders the fixture documents and fails when its output differs from the committed rendered fixtures. There is a documented way to update them.
@@ -26,3 +26,5 @@ Spec: [Downlight v1](../spec.md)
 - **The one fixture,** `readme.md`, is a small README. Its table and task list render as plain paragraphs until ticket 04 turns on GFM; that ticket's `npm run fixtures` diff shows them appear. Tickets 10, 13 and 14 add the fixtures they need.
 - **Page tests:** `page/src/main.test.ts` loads the page with the app answering `render_document` with `readme.html` and checks the document is shown. `page/src/window.test.ts` covers Ctrl+W: the letter the key types on Latin layouts (QWERTY, AZERTY in both directions), the key's place on Cyrillic, no Ctrl, and Shift, Alt or Meta held too. Each test was seen failing with the code it covers broken.
 - `npm audit` still reports only ticket 01's minimatch advisory, now counted as 10 entries along ESLint's and typescript-eslint's dependency chain; Vitest and happy-dom added none.
+
+**2026-11-09, closed.** Closed, with every criterion done.

@@ -6,7 +6,7 @@ Spec: [Downlight v1](../spec.md)
 
 **Blocked by:** 08 (One process, a window per document)
 
-**Status:** ready-for-agent
+**Status:** closed
 
 - [x] A failure while creating a window shows a native message box with the error, and the process exits with a non-zero code.
 - [x] An error that `tauri::Builder::run` returns to `main` is shown the same way.
@@ -37,3 +37,5 @@ So the error paths were checked with a release build temporarily patched so that
 - A second launch with a failing document while that box was still up: the second launch exits with 0, and the running process shows a second box. Its handover being handled shows the main thread stays free while a box is up.
 
 Still open: the last criterion's real WebView2 failure (HRESULT 0x8007139F), for want of a way to bring it about, and the WebView2 hang above, which needs its own ticket if it should be handled.
+
+**2026-11-09, closed.** Closed with one hand check open: a second launch under a different `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` shows the message box. Also open, from the Comments: the real WebView2 failure (HRESULT 0x8007139F), and the WebView2 hang, which needs its own ticket if it should be handled.

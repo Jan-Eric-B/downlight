@@ -6,7 +6,7 @@ Spec: [Downlight v1](../spec.md)
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** closed
 
 - [x] A Cargo workspace with the core crate (no Tauri dependency) and the app crate, on the latest stable Tauri 2.x (not the 3.0 alpha). Each dependency's version is taken from the registry when it is added.
 - [x] The page is plain TypeScript built with Vite, with no UI framework; github-markdown-css (its MIT notice kept) in light or dark, following Windows.
@@ -38,3 +38,5 @@ Tooling and checks (the tools `CODING_STANDARDS.md` relies on):
 - github-markdown-css's MIT notice ships in `page/dist/licenses.md`, written by Vite's `build.license`.
 - `.npmrc` pins the public npm registry, so `package-lock.json` resolves on GitHub rather than through a local mirror. Prettier skips `*.md`.
 - Open: the workflow is written but hasn't run on GitHub yet; its box gets ticked after the first green run. The Cargo manifests have no `license` field (GPL-3.0-only or -or-later is undecided). `npm audit` reports a moderate minimatch advisory in ESLint's dev tooling with no in-range fix yet. `cargo audit` warns about two Linux-only GTK crates, which matter for the Linux port.
+
+**2026-11-09, closed.** Closed with one criterion open: the GitHub Actions workflow (`.github/workflows/check.yml`) is written, but whether it has run green on GitHub wasn't checked at closing (no `gh` on the work machine). Its box gets ticked after the first green run.

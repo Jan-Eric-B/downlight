@@ -6,7 +6,7 @@ Spec: [Downlight v1](../spec.md)
 
 **Blocked by:** 01 (Walking skeleton)
 
-**Status:** ready-for-agent
+**Status:** closed
 
 - [x] A timing switch, off by default, reports first paint and page tasks over 100 ms. Later tickets reuse it.
 - [x] A generator in the repo writes the test documents: 100 KB and 1 MB of Markdown with a table and a code block about every 30 lines, and 1 MB of prose only.
@@ -77,3 +77,5 @@ The numbers move with the machine's load. The tables below are from the last of 
 ## Comments
 
 **2026-11-03, decisions after the spike.** `content-visibility: auto` stays and is recorded in ADR 0003. Ticket 04 takes over the window opening hidden until first paint (no white flash), measuring the page's first frame again, and the transparency effects and high contrast checks.
+
+**2026-11-09, closed.** Closed. The one unticked criterion doesn't apply: cold first paint was 0.69 to 0.91 s, under the 1.5 s at which work would have stopped.

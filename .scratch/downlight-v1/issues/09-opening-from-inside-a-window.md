@@ -6,7 +6,7 @@ Spec: [Downlight v1](../spec.md)
 
 **Blocked by:** 08 (One process, a window per document)
 
-**Status:** ready-for-agent
+**Status:** closed
 
 - [x] Ctrl+O shows an open dialog filtered to `.md`, `.markdown`, `.mdown`, `.mkd`, `.mkdn` and `.mdwn`, and shows the chosen document in this window. If the document is open in another window, that window comes to the front instead.
 - [x] Dropping a Markdown file onto a window shows it there, by the same rule.
@@ -33,3 +33,5 @@ Spec: [Downlight v1](../spec.md)
 - `cargo audit`: no advisories for rfd. Five warnings remain, all for Linux-only crates in Tauri's tree (glib, zbus).
 - Checked by hand on the release build, with WebView2's remote debugging to read the page: an empty launch shows "Open file" and "or drop a file here" titled Downlight; Ctrl+O shows the dialog filtered to "Markdown files", and the chosen README shows in that window with its title; choosing `NOTES.md` in one window while `notes.md` is open in another brings that window to the front and leaves the first as it was; the right-click menu shows "Open... Ctrl+O" and "Copy Ctrl+C"; Open in the menu shows the dialog; Copy in the menu and Ctrl+C both copy the selection; Ctrl+W closes each window and the process exits with the last. In dark mode only.
 - Still to check by hand: dropping a `.md` file, a `.txt` file and a folder onto a window (dropping couldn't be driven from a script); the empty state and the notice in light mode.
+
+**2026-11-09, closed.** Closed, with every criterion done. Still to check by hand, from the Comments: dropping a `.md` file, a `.txt` file and a folder onto a window, and the empty state and the notice in light mode.

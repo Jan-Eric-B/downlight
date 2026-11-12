@@ -6,7 +6,7 @@ Spec: [Downlight v1](../spec.md)
 
 **Blocked by:** 02 (Performance spike and stack decision)
 
-**Status:** ready-for-agent
+**Status:** closed
 
 - [x] A second launch with a file passes it to the running process and exits at once, so `downlight <file>` in a shell returns immediately.
 - [x] Each document opened from the command line or Explorer gets its own window in the one process.
@@ -36,3 +36,5 @@ Spec: [Downlight v1](../spec.md)
 - Open: an error while opening a window for a second launch goes to stderr, which a release build doesn't show; ticket 19 shows it. A launch that arrives while the last window is closing can be lost, since the process exits under it; not seen, not guarded.
 
 **2026-11-03, review fixes.** `document_key` moved from the per-OS module into `app/src/window.rs`; the per-OS module keeps only the case rule (`fold_case`, with tests), and the non-Windows copy of the path resolution is gone. Both launches go through `window::open_launch`, which also clears a closed window's entry (`forget_when_destroyed`). A window that fails to open doesn't keep the launch's other documents from opening; `open_launch` returns every failure as a `LaunchFailure` whose message names the document, and both launches print them on stderr until ticket 19 shows them. If the first launch ends up with no window, `setup` fails with those messages and the process exits instead of running with no window. The fallbacks for relative paths in `document_key` and `title_of` are gone, since the command line makes every path absolute. Checked by hand on the release build: one process, a second window for a second launch (the launch returned after 169 ms), and `A.MD` opens no third window.
+
+**2026-11-09, closed.** Closed, with every criterion done. The 300 ms target for a further window, not met under load here, was met in ticket 04 (203 ms). Still open from the Comments: a launch that arrives while the last window is closing can be lost.
