@@ -16,7 +16,7 @@ Spec: [Downlight v1](../spec.md)
 - [x] After a reload while the bar is open, the matches are counted again.
 - [x] Find is in the right-click menu.
 - [x] Page tests cover the count, the current match, next and previous, wrapping, Esc and the count after a reload.
-- [ ] Typing in the box on the 1 MB document is measured with the timing switch, and the result is recorded in this ticket.
+- [x] Typing in the box on the 1 MB document is measured with the timing switch, and the result is recorded in this ticket.
 
 ## Plan
 
@@ -78,7 +78,7 @@ Spec: [Downlight v1](../spec.md)
 
 ## Results
 
-Built 2026-11-12. `npm run check` passes. Not yet measured and not yet checked in the real app: this build ran neither the app nor `npm run measure`.
+Built 2026-11-12. `npm run check` passes. Measured with `npm run measure` (see Measured); not yet checked by hand in the real app.
 
 **Beyond the plan:**
 
@@ -95,7 +95,29 @@ Built 2026-11-12. `npm run check` passes. Not yet measured and not yet checked i
 - The reading position and the scrolls that check they landed (ADR 0003) moved from `view.ts` to `page/src/reading-position.ts`, after the architecture review (see Comments). Find takes `atOrAfterReadingPosition` and `scrollToMiddle` from it. Open moved from `commands.ts` to `open.ts`, which ended the import cycle commands, find, view, commands. The page tests share `settle`, `nextShown`, `linesOf` and `layOut` from `page/src/test-support.ts`.
 - `GLOSSARY.md` has "Current match".
 
-**Measured:** pending; the measurement starts the app and drives WebView2 over its debug port, which this build didn't do. Run `npm run documents`, `npm run tauri build`, `npm run measure`. Its last table, "Typing ... into the find bar", gives each keystroke's time from its `input` event to the end of the next frame (median and worst) and the longest task or frame while typing ("e", "the", "lamplight" and a string that matches nothing), on the 1 MB mixed and prose documents. The target is no task or frame over 100 ms. If a keystroke goes over, the next step is the plan's fallback: paint only the matches in and near the view, repainted on scroll at most once a frame, with the choice of matches as a pure function with its own page test, while the count and `findMatches()` keep every match. If the first keystroke alone goes over, building the index is the long part: split its walk across tasks, as a reload's parse is split.
+**Measured (2026-11-12):** `npm run documents`, `npm run tauri build`, `npm run measure`, release build, median of 5 runs. The measurement types "e", "the", "lamplight" and a string that matches nothing into the find bar on the 1 MB mixed and prose documents. The target is no task or frame over 100 ms.
+
+First, with the whole index built on the first keystroke:
+
+| Measure (median of 5) | 1 MB mixed | 1 MB prose |
+| --- | ---: | ---: |
+| keystrokeToFrame | 15.4 | 14.8 |
+| firstKeystrokeToFrame | 139.3 | 117.5 |
+| longestLaterKeystrokeToFrame | 40.7 (worst 45.2) | 32.8 (worst 39.7) |
+| longestWhileTyping | 135.2 (worst 136.5) | 113.9 (worst 122.5) |
+
+Over the target, and only on the first keystroke: every later one, "t" with tens of thousands of matches among them, stays under 46 ms, so painting every match is cheap enough and the plan's fallback (paint only near the view) isn't needed. The long part was building the index. So the index is now built a slice at a time (`IndexBuilder`, 64 KB of text per task, `SLICE_CHARACTERS` in `page/src/find.ts`), starting when the bar opens rather than at the first keystroke. A short document is still indexed at once, in the same task; for a long one, a count asked for before the index is built waits for it, with no count in the bar until then, and then goes to its match as typing does. A document shown during the build drops it. Tests "a long document is counted once its text is indexed", "typing while a long document is indexed counts the last text and goes to its match" and "a document shown while a long one is indexed is counted instead".
+
+`scripts/measure.js` now times each keystroke until the end of the first frame that shows its count, so a keystroke waiting for the index isn't measured as fast, and reports the first keystroke apart. With the index built in slices:
+
+| Measure (median of 5) | 1 MB mixed | 1 MB prose |
+| --- | ---: | ---: |
+| keystrokeToCount | 14.8 | 15.0 |
+| firstKeystrokeToCount | 158.4 | 129.8 |
+| longestLaterKeystrokeToCount | 37.4 (worst 42.0) | 31.9 (worst 32.2) |
+| longestWhileTyping | 0.0 (worst 0.0) | 0.0 (worst 0.0) |
+
+No task or frame over 100 ms while typing: the target is met. The first count still comes 130 to 160 ms after the first keystroke, but the page stays responsive meanwhile. The measurement types one frame after Ctrl+F, when the index has barely started; a reader takes longer than that to start typing, so for them the index is usually ready by the first keystroke.
 
 **Not yet checked by hand** (`npm run tauri dev` or the release build):
 

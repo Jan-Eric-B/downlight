@@ -89,26 +89,60 @@ function searchable(text: string, inCode: boolean): string {
   return folded.replace(/\s/g, " ");
 }
 
-/** Builds the index of the view's text, walking its nodes once. */
-function buildIndex(view: HTMLElement): TextIndex {
-  const parts: string[] = [];
-  const nodes: IndexedNode[] = [];
-  let length = 0;
-  const visit = (parent: Node, inCode: boolean) => {
-    for (let child = parent.firstChild; child; child = child.nextSibling) {
-      if (child.nodeType === Node.TEXT_NODE) {
-        const node = child as Text;
-        if (node.data.length === 0) continue;
-        nodes.push({ node, start: length });
-        parts.push(searchable(node.data, inCode));
-        length += node.data.length;
-      } else if (child.nodeType === Node.ELEMENT_NODE) {
-        visit(child, inCode || child.nodeName === "PRE");
+/**
+ * How much of the document's text the index takes in per task. Building the whole index of a 1 MB
+ * test document in one task held the page up for over 100 ms; a slice of this size takes a few
+ * milliseconds there (ticket 14's Results).
+ */
+const SLICE_CHARACTERS = 64 * 1024;
+
+/** Builds the index of a view's text a slice at a time, walking its nodes once, in order. */
+class IndexBuilder {
+  private readonly parts: string[] = [];
+  private readonly nodes: IndexedNode[] = [];
+  private length = 0;
+  /** The node the walk visits next, or null once it is done. */
+  private next: Node | null;
+  /** How many `<pre>` elements `next` is in: text in one is code, which keeps its lines. */
+  private preDepth = 0;
+
+  constructor(private readonly view: HTMLElement) {
+    this.next = view.firstChild;
+  }
+
+  /** Takes in about one slice of text, and returns the index once the walk is done. */
+  slice(): TextIndex | undefined {
+    const end = this.length + SLICE_CHARACTERS;
+    while (this.next && this.length < end) this.visit(this.next);
+    if (this.next) return undefined;
+    return { text: this.parts.join(""), nodes: this.nodes };
+  }
+
+  private visit(node: Node): void {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = node as Text;
+      if (text.data.length > 0) {
+        this.nodes.push({ node: text, start: this.length });
+        this.parts.push(searchable(text.data, this.preDepth > 0));
+        this.length += text.data.length;
       }
+    } else if (node.nodeType === Node.ELEMENT_NODE && node.firstChild) {
+      if (node.nodeName === "PRE") this.preDepth++;
+      this.next = node.firstChild;
+      return;
     }
-  };
-  visit(view, false);
-  return { text: parts.join(""), nodes };
+    this.next = this.after(node);
+  }
+
+  /** The node after `node` and everything in it, or null at the end of the view. */
+  private after(node: Node): Node | null {
+    for (let at: Node | null = node; at && at !== this.view;) {
+      if (at.nextSibling) return at.nextSibling;
+      at = at.parentNode;
+      if (at?.nodeName === "PRE") this.preDepth--;
+    }
+    return null;
+  }
 }
 
 /** Every match of `query` in the index, in document order. */
@@ -184,6 +218,13 @@ class Find {
   private view: HTMLElement | undefined;
   /** The index of the shown document, built when Find first needs it. */
   private index: TextIndex | undefined;
+  /** The index being built, while it is. */
+  private builder: IndexBuilder | undefined;
+  /**
+   * The count waiting for the index: where it takes the current match from, and whether it goes
+   * to it.
+   */
+  private waiting: { from: CurrentFrom; go: boolean } | undefined;
   matches: IndexedMatch[] = [];
   current: number | undefined;
   /** Counts the moves to a match, so a later move overtakes the scroll of an earlier one. */
@@ -215,8 +256,9 @@ class Find {
     this.box.focus();
     this.box.select();
     if (!wasOpen) {
-      this.recount("readingPosition");
-      void this.goToCurrent();
+      // Now rather than at the first keystroke, so the reader's typing finds it ready.
+      this.startIndexing();
+      this.recount("readingPosition", true);
     }
   }
 
@@ -225,6 +267,8 @@ class Find {
     this.box.blur();
     // A move still waiting for its frame doesn't scroll once the bar is closed.
     this.moves++;
+    // The index goes on being built, for the next Find, but nothing counts when it's done.
+    this.waiting = undefined;
     this.show([], undefined);
   }
 
@@ -236,21 +280,60 @@ class Find {
   documentShown(view: HTMLElement): void {
     this.view = view;
     this.index = undefined;
-    if (this.isOpen) this.recount("readingPosition");
+    this.builder = undefined;
+    this.waiting = undefined;
+    if (this.isOpen) {
+      this.startIndexing();
+      this.recount("readingPosition", false);
+    }
   }
 
   /**
-   * Finds the box's text in the shown document. The current match is the first one from where
-   * `from` says, or from the reading position when there was no current match, so typing on
-   * keeps the reader at the same match.
+   * Builds the shown document's index, unless it is built or being built: the first slice at
+   * once, which is all of a short document, and each further slice in a task of its own. A count
+   * that waited for the index runs once it is built.
    */
-  recount(from: CurrentFrom): void {
+  private startIndexing(): void {
+    if (!this.view || this.index || this.builder) return;
+    const builder = new IndexBuilder(this.view);
+    this.builder = builder;
+    const slice = () => {
+      // Another document's index has replaced this one.
+      if (this.builder !== builder) return;
+      const index = builder.slice();
+      if (!index) {
+        setTimeout(slice, 0);
+        return;
+      }
+      this.builder = undefined;
+      this.index = index;
+      const waiting = this.waiting;
+      this.waiting = undefined;
+      if (waiting) this.recount(waiting.from, waiting.go);
+    };
+    slice();
+  }
+
+  /**
+   * Finds the box's text in the shown document, and with `go` goes to the current match. The
+   * current match is the first one from where `from` says, or from the reading position when
+   * there was no current match, so typing on keeps the reader at the same match. Until the index
+   * is built, the count waits for it, and the bar shows none.
+   */
+  recount(from: CurrentFrom, go: boolean): void {
     const query = searchable(this.box.value, false);
     if (!this.view || query === "") {
+      this.waiting = undefined;
       this.show([], undefined);
       return;
     }
-    this.index ??= buildIndex(this.view);
+    this.startIndexing();
+    if (!this.index) {
+      // A count that waits with `go` still goes once it runs, whatever later typing asked for.
+      this.waiting = { from, go: go || (this.waiting?.go ?? false) };
+      this.show([], undefined);
+      return;
+    }
     const matches = matchesIn(this.index, query);
     const lastAt =
       from === "lastCurrent" && this.current !== undefined
@@ -266,6 +349,7 @@ class Find {
       }
     }
     this.show(matches, current);
+    if (go) void this.goToCurrent();
   }
 
   /** Makes the next match current, or with `-1` the previous one, wrapping at the ends. */
@@ -295,7 +379,8 @@ class Find {
     if (this.current !== undefined) {
       this.status.textContent = `${String(this.current + 1)} of ${String(this.matches.length)}`;
     } else {
-      this.status.textContent = this.box.value === "" ? "" : "No results";
+      const counted = this.box.value !== "" && !this.waiting;
+      this.status.textContent = counted ? "No results" : "";
     }
   }
 
@@ -333,7 +418,7 @@ class Find {
    * Scrolls the current match to the middle of the view, opening the sections it is in. A later
    * move, or closing the bar, cancels the scroll's second step.
    */
-  async goToCurrent(): Promise<void> {
+  private async goToCurrent(): Promise<void> {
     const match =
       this.current === undefined ? undefined : this.matches[this.current];
     if (!match) return;
@@ -386,8 +471,7 @@ export function startFind(signal?: AbortSignal): void {
   box.addEventListener(
     "input",
     () => {
-      started.recount("lastCurrent");
-      void started.goToCurrent();
+      started.recount("lastCurrent", true);
     },
     { signal },
   );

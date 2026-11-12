@@ -471,6 +471,56 @@ test("a window whose document goes away finds nothing", async () => {
   expect(findMatches().matches).toEqual([]);
 });
 
+/**
+ * A document with far more text than Find indexes in one task, so its index is built over several:
+ * `count` paragraphs, each with one "lamp".
+ */
+function longDocument(count: number): string {
+  return Array.from({ length: count }, (_, at) => {
+    const line = String(at + 1);
+    const filler = "and some more words to make it long, ".repeat(2);
+    return `<p data-sourcepos="${line}:1-${line}:99">The lamp on line ${line}, ${filler}</p>`;
+  }).join("\n");
+}
+
+/** Lets every task the page queued with no delay run, a long document's indexing too. */
+async function settleAll(): Promise<void> {
+  for (let turn = 0; turn < 20; turn++) await settle();
+}
+
+test("a long document is counted once its text is indexed", async () => {
+  await show(longDocument(2000));
+  type("lamp");
+  // Still indexing: neither a count nor No results yet.
+  expect(status()).toBe("");
+  await vi.waitFor(() => {
+    expect(status()).toBe("1 of 2000");
+  });
+});
+
+test("typing while a long document is indexed counts the last text and goes to its match", async () => {
+  await show(longDocument(2000));
+  const scrolled = spyOnScrolls();
+  type("lam");
+  type("lamp on line 1500,");
+  await vi.waitFor(() => {
+    expect(status()).toBe("1 of 1");
+  });
+  const holder = currentHolder();
+  expect(holder?.getAttribute("data-sourcepos")).toBe("1500:1-1500:99");
+  expect(scrolled().at(-1)).toEqual([holder, { block: "center" }]);
+});
+
+test("a document shown while a long one is indexed is counted instead", async () => {
+  await show(longDocument(2000));
+  type("document");
+  await show(notes);
+  expect(status()).toBe("1 of 2");
+  await settleAll();
+  expect(status()).toBe("1 of 2");
+  expect(findMatches().matches).toHaveLength(2);
+});
+
 test("a line break or no-break space in a paragraph matches a space", async () => {
   // A line break in the file is a space on the page, and so is a no-break space.
   await show(`<p data-sourcepos="1:1-2:9">Light the
