@@ -4,7 +4,7 @@
 
 Spec: [Downlight v1](../spec.md)
 
-**Blocked by:** 05 (Files in any common encoding), 07 (Syntax highlighting and copy buttons), 13 (Ticks), 14 (Find), 16 (Zoom and window size), 17 (Installer and file associations), 19 (Startup errors are shown)
+**Blocked by:** 05 (Files in any common encoding), 07 (Syntax highlighting and copy buttons), 13 (Ticks), 14 (Find), 16 (Zoom and window size), 17 (Installer and file associations), 19 (Startup errors are shown), 20 (No credentials sent for remote images)
 
 **Status:** ready-for-human
 
