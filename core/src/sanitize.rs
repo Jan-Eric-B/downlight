@@ -8,10 +8,10 @@ use std::collections::{HashMap, HashSet};
 use ammonia::Builder;
 use comrak::nodes::{Node, NodeValue};
 
-use url::Url;
-
+use crate::file_url::{self, Target};
 use crate::highlight::is_highlight_class;
-use crate::image::{ImageSources, is_drive};
+use crate::image::ImageSources;
+use crate::links::goes_to_the_system;
 
 /// The elements GitHub allows in a document, and the ones rendering writes besides: `section`
 /// around the footnotes and `input` for task list checkboxes.
@@ -146,13 +146,10 @@ const CLASSES: &[&str] = &[
 /// The class that names a code block's language, such as `language-rust`.
 const LANGUAGE_CLASS: &str = "language-";
 
-/// The schemes a link may have. Relative links and Windows paths (`C:\docs`, which the URL parser
-/// reads as the scheme `c`) stay too; what a link does is decided when it is clicked (ticket 11).
-const LINK_SCHEMES: &[&str] = &["http", "https", "mailto", "file"];
-
 /// Every scheme that `href` and `src` may have before the attribute filter decides on them.
 /// ammonia removes a URL whose scheme isn't listed before it calls the filter, so this lets
-/// through what the filter judges: links' schemes, `data:` images and drive letters.
+/// through what the filter judges: links' schemes, `data:` images and drive letters, which the URL
+/// parser reads as a scheme (`C:\docs` has the scheme `c`).
 const SCHEMES_TO_FILTER: &[&str] = &[
     "http", "https", "mailto", "file", "data", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j",
     "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z",
@@ -268,12 +265,15 @@ pub(crate) fn sanitize(html: &str, images: ImageSources) -> String {
         .to_string()
 }
 
-/// `href` if a link may keep it: relative, a Windows path or with one of [`LINK_SCHEMES`]. A link
-/// without, such as `javascript:`, loses its target and does nothing.
+/// `href` if a link may keep it: one naming a file or folder, or a URL that link resolution hands
+/// to the system. A link with any other target, such as `javascript:`, loses it and does nothing,
+/// as link resolution would have it do anyway; what a kept link does is decided when it is
+/// clicked (ticket 11).
 fn link_target(href: &str) -> Option<Cow<'_, str>> {
-    let kept = match Url::parse(href) {
-        Ok(url) => LINK_SCHEMES.contains(&url.scheme()) || is_drive(url.scheme()),
-        Err(error) => error == url::ParseError::RelativeUrlWithoutBase,
+    let kept = match file_url::classify(href) {
+        Target::File => true,
+        Target::Url(url) => goes_to_the_system(&url),
+        Target::Unusable => false,
     };
     kept.then_some(Cow::Borrowed(href))
 }

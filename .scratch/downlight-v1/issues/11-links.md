@@ -8,18 +8,18 @@ Spec: [Downlight v1](../spec.md)
 
 **Status:** ready-for-agent
 
-- [ ] The core's link resolution takes the document's path and a link target and returns one action: show a document in this window (optionally at a heading), scroll to a heading, reveal a file in the file manager, open a folder, hand a URL to the system, or nothing.
-- [ ] A link to a Markdown file (one of the six extensions) shows that document in the same window, at its heading if the link has one.
-- [ ] A link to a heading in this document scrolls to it.
-- [ ] Ctrl+click on a link to a Markdown file opens it in a new window, or brings its window to the front if it is open.
-- [ ] `http`, `https` and `mailto` links open in the system's browser or mail app.
-- [ ] A link to a local file that isn't Markdown shows the file selected in Explorer; Downlight never opens or runs it.
-- [ ] A link to a folder opens it in Explorer.
-- [ ] A link with any other scheme does nothing.
-- [ ] Paths on network shares are handled like local paths, and only when clicked.
-- [ ] Hovering any link shows its target.
-- [ ] A link to a missing file shows a message.
-- [ ] Core tests are a table of document paths and link targets with the action each one gives.
+- [x] The core's link resolution takes the document's path and a link target and returns one action: show a document in this window (optionally at a heading), scroll to a heading, reveal a file in the file manager, open a folder, hand a URL to the system, or nothing.
+- [x] A link to a Markdown file (one of the six extensions) shows that document in the same window, at its heading if the link has one.
+- [x] A link to a heading in this document scrolls to it.
+- [x] Ctrl+click on a link to a Markdown file opens it in a new window, or brings its window to the front if it is open.
+- [x] `http`, `https` and `mailto` links open in the system's browser or mail app.
+- [x] A link to a local file that isn't Markdown shows the file selected in Explorer; Downlight never opens or runs it.
+- [x] A link to a folder opens it in Explorer.
+- [x] A link with any other scheme does nothing.
+- [x] Paths on network shares are handled like local paths, and only when clicked.
+- [x] Hovering any link shows its target.
+- [x] A link to a missing file shows a message.
+- [x] Core tests are a table of document paths and link targets with the action each one gives.
 
 ## Plan
 
@@ -80,6 +80,30 @@ Spec: [Downlight v1](../spec.md)
 - Ctrl+click on `other.md#heading` opens the new window at that heading, in this ticket (not left for ticket 12): `render_document` returns the heading with the HTML.
 - A link to a document already open in another window brings that window to the front and scrolls it to the heading if the link has one; without a heading, that window keeps its reading position.
 - The tickets are built one at a time, so each shared piece in "Fits with other tickets" is added by the first ticket that needs it.
+
+## Results
+
+Built 2026-11-12. `npm run check` passes.
+
+**Beyond the plan:**
+
+- The heading reaches the page one way only: `ShownDocument` keeps it and `render_document` answers `{ document, heading }` for every window, new or changed, and `document-shown` stays without a payload. The plan sent it two ways (the event's payload for a changed window, the render for a new one). The heading is cloned, not taken, so of two links followed in quick succession the page's latest request still gets it; the page ignores it on a reload. Tests `window_shown_a_document_at_a_heading_hands_it_over_with_every_render` and "a reload of a document shown at a heading keeps the reading position".
+- The `url` crate leaves quotes and spaces in a `mailto:` URL, so `OpenUrl` percent-encodes spaces, quotes, `<`, `>`, backticks and control characters on top, and a URL can't break the browser's or mail app's command line.
+- The page finds a heading with `getElementById`, then `getElementsByName` for `a[name]`, both kept to the article, rather than a selector with `CSS.escape`: no escaping, and happy-dom rejects escaped id selectors that browsers accept.
+- The navigation guard sits in `window.rs` next to `page_origin`, with no `is_own_page` in `links.rs`: a URL may load only if its origin is the page's own, the `devUrl`'s (Vite's dev server) under `cfg!(dev)`, otherwise `http://tauri.localhost`, which Tauri also serves in development without a `devUrl`. `page_origin` always gives an origin, so no configuration leaves a blank window.
+- A link to a document open in another window whose page hasn't asked for its document yet (a window still starting, say after two quick Ctrl+clicks on `b.md#x` and `b.md#y`) doesn't send that page `scroll-to-heading`, which it couldn't hear yet: `OpenWindows::claim` holds the heading on the window's `ShownDocument`, under the same lock, and the page's first render gets it, as `hold_notice` does for a notice. `show` then answers `Shown::AlreadyOpen { window, scroll_to }`, and `follow_link` sends only `scroll_to`. Tests `heading_for_an_open_window_whose_page_has_not_asked_is_held_for_its_first_render` and `link_to_a_document_open_in_another_window_scrolls_it_only_with_a_heading`.
+- `Followed` is `scrollTo { heading: string | null } | nothing`: the page has nothing to do after a link showed another document, which `document-shown` already renders, so the plan's `shown` was dropped. `show` answers `Shown::Given` for a new or changed window, and takes the document with its heading as one `DocumentAt`. Serde shape tests (`followed_serializes_as_the_page_reads_it`, `document_to_show_serializes_as_the_page_reads_it`) keep the app's answers and the page's types in step.
+- `#` alone, and a link to the shown document without a heading, scroll to the top. An empty target and `?q` do nothing.
+- The top of the document is a missing heading everywhere, never an empty one: `LinkAction::ShowDocument` and `LinkAction::ScrollToHeading` both hold `heading: Option<String>` (the core drops an empty fragment for both), as do `Followed::ScrollTo`, `DocumentAt`, `Handover` and `render_document`'s answer, and the page's `scrollToHeading(heading: string | null)` scrolls to the top for null. `scroll-to-heading` is sent only with a heading. Tests `empty_heading_link_scrolls_to_the_top` and "heading outcome without a heading scrolls to the top".
+- The lookup is `Fn(&Path) -> io::Result<Option<PathKind>>` rather than `Option<PathKind>`: a path that can't be looked at (an offline share, a folder the reader may not open) gives `LinkError::Unreachable { path, source }`, shown as "Can't reach \\server\share\a.md: " and the system's reason rather than "Can't find", since the file may well exist. Only `ERROR_FILE_NOT_FOUND`, `ERROR_PATH_NOT_FOUND` and `ERROR_INVALID_DRIVE` count as missing (`platform::is_missing`): Rust's `ErrorKind::NotFound` also covers an offline server (`ERROR_BAD_NETPATH`) and a missing share (`ERROR_BAD_NET_NAME`). Tests `link_to_a_path_that_cannot_be_reached_is_an_error_naming_it`, `unreachable_file_message_names_the_file_and_why` and `only_a_missing_file_folder_or_drive_is_missing`.
+- Opening a folder stays `ShellExecuteW` with `explore`. A file put where the folder was isn't run because Windows registers `explore` for folders (`HKCR\Folder\shell\explore`) and for no file type; that rests on the registry, though, and a program can add an `explore` verb to a file type for one user without admin rights, which the comment on `open_folder` now says. `ShellExecuteExW` with `SEE_MASK_CLASSNAME` and the class `Directory` was considered in the review and dropped: `explore` isn't a verb of `HKCR\Directory`, so the call fails with `ERROR_NO_ASSOCIATION` on a real folder too. Checked against Microsoft's `SHELLEXECUTEINFOW` docs, this machine's registry and one call outside the repo, and compiled; not clicked in the app.
+- `OpenWindows::document_path` replaced the window tests' own `document_of` helper.
+
+**Measured** (release build, 5 runs): following a heading link 80% into the 1 MB mixed document took 45 ms (median) from the click until the heading stayed at the top of the view, with no task or frame over 100 ms.
+
+**Checked in the release build** over WebView2's debug port with real clicks: the page loads (the navigation guard lets its own origin through); `#heading`, footnote and `README.md#heading` links in README.md scroll; `gone.md` shows "Can't find ...\gone.md."; hovering shows the target; `guide.md#install` shows the guide at Install; afterwards a save to guide.md reloads it and a save to README.md doesn't; `location.href = "https://example.com/"` leaves the page where it is, and `window.open` gives null.
+
+**Not yet checked by hand:** the window title after a link; Ctrl+click (a new window, at a heading, and an open document's window brought to the front, also minimized); https in the browser and mailto in the mail app; `.exe`, `.bat` and `.txt` only selected in Explorer; a folder link; `ms-settings:` and `ftp:`; a `\\server\share` link connecting only on click; a link on an offline share or into a folder without access showing "Can't reach ..."; Shift-click and middle-click opening no browser window.
 
 ## Comments
 

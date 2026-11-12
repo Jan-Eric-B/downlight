@@ -17,6 +17,59 @@ function afterNextFrame(): Promise<void> {
   });
 }
 
+/** Selects the view that shows the rendered document, and none of the page's own elements. */
+export const DOCUMENT_VIEW_SELECTOR = "article.markdown-body";
+
+/**
+ * Scrolls `element` to the top of the view, and once more after the next frame if
+ * `stillCurrent` says the scroll is still wanted then. Returns whether it was.
+ */
+async function putAtTop(
+  element: Element,
+  stillCurrent: () => boolean,
+): Promise<boolean> {
+  element.scrollIntoView({ block: "start" });
+  // The blocks above it had estimated heights until this frame laid them out (ADR 0003), so it
+  // may have moved.
+  await afterNextFrame();
+  if (!stillCurrent()) return false;
+  element.scrollIntoView({ block: "start" });
+  return true;
+}
+
+/**
+ * Scrolls the shown document to the element whose id is `heading`, or else to the anchor with
+ * that name, as a browser does for a URL's fragment; null is the top. Only the document is
+ * searched, never the page's own elements. A heading that isn't there leaves the view where it
+ * is.
+ */
+export async function scrollToHeading(heading: string | null): Promise<void> {
+  if (heading === null) {
+    scrollTo(0, 0);
+    return;
+  }
+  const view = document.querySelector(DOCUMENT_VIEW_SELECTOR);
+  if (!view) return;
+  // By id and by name rather than by a selector, which would need the heading escaped; the
+  // page's own elements have no ids or names.
+  const byId = document.getElementById(heading);
+  const target =
+    byId && view.contains(byId)
+      ? byId
+      : [...document.getElementsByName(heading)].find(
+          (element) => element.localName === "a" && view.contains(element),
+        );
+  if (!target) return;
+  await putAtTop(target, () => target.isConnected);
+}
+
+/**
+ * The app's answer when the page asks for its document (`DocumentToShow` in `app/src/render.rs`):
+ * the rendered document as its HTML, and the heading to show it at, from a link like `guide.md#install`,
+ * or null for its top. Null while the window shows no document.
+ */
+type DocumentToShow = { document: string; heading: string | null } | null;
+
 const shownListeners = new Set<() => void>();
 
 /**
@@ -158,20 +211,26 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
   };
 
   /**
-   * Asks the app for the window's document and shows it. Returns when the HTML arrived, if this
-   * request inserted a document; a request that a later one overtook shows nothing, so the
-   * window ends up with the document it was shown last.
+   * Asks the app for the window's document and shows it, at its heading if a link named one and
+   * otherwise at the top. Returns when the HTML arrived, if this request inserted a document; a
+   * request that a later one overtook shows nothing, so the window ends up with the document it
+   * was shown last.
    */
   const showDocument = async (): Promise<number | undefined> => {
     fileGone = false;
     const request = ++latestRequest;
     try {
-      const html = await invoke<string | null>("render_document");
+      const shown = await invoke<DocumentToShow>("render_document");
       if (request !== latestRequest) return undefined;
       const received = epochMs();
-      place(html);
+      place(shown?.document ?? null);
       addCopyButtons(view);
-      if (html === null) return undefined;
+      if (shown === null) return undefined;
+      scrollTo(0, 0);
+      if (shown.heading !== null) {
+        await scrollToHeading(shown.heading);
+        if (request !== latestRequest) return undefined;
+      }
       documentShown();
       return received;
     } catch (error) {
@@ -190,9 +249,9 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
     // that can't read the file leaves the bar as it is.
     fileGone = false;
     const request = ++latestRequest;
-    let html: string | null;
+    let shown: DocumentToShow;
     try {
-      html = await invoke<string | null>("render_document");
+      shown = await invoke<DocumentToShow>("render_document");
     } catch (error) {
       if (request === latestRequest) showNotice(String(error));
       return;
@@ -204,8 +263,9 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
     // template's content is inert: its images load only once it is in the view.
     const parsed = document.createElement("template");
     // The HTML comes only from the core's render, never from the page. The app reloads only a
-    // window that shows a document, so the render is never null here.
-    parsed.innerHTML = html ?? "";
+    // window that shows a document, so the render is never null here. A heading the document was
+    // shown at is left alone: a reload keeps the reading position.
+    parsed.innerHTML = shown?.document ?? "";
     addCopyButtons(parsed.content);
     await afterNextFrame();
     if (request !== latestRequest) return;
@@ -214,14 +274,8 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
     place(parsed.content);
     const inserted = epochMs();
     const block = line === undefined ? undefined : blockAt(view, line);
-    if (block) {
-      block.scrollIntoView({ block: "start" });
-      // The blocks above it had estimated heights until this frame laid them out (ADR 0003),
-      // so it may have moved.
-      await afterNextFrame();
-      if (request !== latestRequest) return;
-      block.scrollIntoView({ block: "start" });
-    }
+    if (block && !(await putAtTop(block, () => request === latestRequest)))
+      return;
     const anchored = epochMs();
     documentShown();
     reportReload({ received, inserted, anchored });
@@ -229,9 +283,10 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
 
   // The listeners only start: waiting for them would hold up first paint.
   listenToApp("document-shown", () => {
-    void showDocument().then(() => {
-      scrollTo(0, 0);
-    });
+    void showDocument();
+  });
+  listenToApp("scroll-to-heading", (heading) => {
+    void scrollToHeading(heading);
   });
   listenToApp("document-changed", (change) => {
     if (change === "gone") {

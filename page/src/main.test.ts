@@ -9,7 +9,11 @@ afterEach(() => {
 
 test("shows the document the core rendered", async () => {
   mockWindows("document-0");
-  mockIPC((command) => (command === "render_document" ? readme : undefined));
+  mockIPC((command) =>
+    command === "render_document"
+      ? { document: readme, heading: null }
+      : undefined,
+  );
 
   // The page starts when its script loads, and the import waits until it shows the document.
   await import("./main");

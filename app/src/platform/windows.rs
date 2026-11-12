@@ -1,4 +1,7 @@
-use std::path::PathBuf;
+use std::ffi::OsStr;
+use std::io;
+use std::os::windows::ffi::OsStrExt as _;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use tauri::window::{Effect, EffectsBuilder};
@@ -8,13 +11,21 @@ use webview2_com::Microsoft::Web::WebView2::Win32::{
     ICoreWebView2AcceleratorKeyPressedEventArgs, ICoreWebView2AcceleratorKeyPressedEventArgs2,
 };
 use windows_core::Interface as _;
-use windows_sys::Win32::Foundation::FILETIME;
+use windows_sys::Win32::Foundation::{
+    ERROR_FILE_NOT_FOUND, ERROR_INVALID_DRIVE, ERROR_PATH_NOT_FOUND, FILETIME,
+};
+use windows_sys::Win32::System::Com::{
+    COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoInitializeEx, CoUninitialize,
+};
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, GetProcessTimes};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     GetKeyState, VK_BROWSER_REFRESH, VK_CONTROL, VK_F5,
 };
+use windows_sys::Win32::UI::Shell::{
+    ILCreateFromPathW, ILFree, SHOpenFolderAndSelectItems, ShellExecuteW,
+};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    MB_ICONERROR, MB_OK, MB_SETFOREGROUND, MessageBoxW,
+    MB_ICONERROR, MB_OK, MB_SETFOREGROUND, MessageBoxW, SW_SHOWNORMAL,
 };
 
 use crate::APP_NAME;
@@ -81,8 +92,105 @@ pub fn show_error(message: &str) {
 }
 
 /// `s` as the NUL-terminated UTF-16 string Windows' wide APIs take.
-fn wide(s: &str) -> Vec<u16> {
-    s.encode_utf16().chain(std::iter::once(0)).collect()
+fn wide(s: impl AsRef<OsStr>) -> Vec<u16> {
+    s.as_ref().encode_wide().chain(std::iter::once(0)).collect()
+}
+
+/// Whether `error`, from looking at a path, means nothing is there. Rust counts an offline server
+/// (`ERROR_BAD_NETPATH`) and a share that isn't there (`ERROR_BAD_NET_NAME`) as not found too,
+/// but a file behind them may exist, so those aren't missing.
+pub fn is_missing(error: &io::Error) -> bool {
+    error
+        .raw_os_error()
+        .and_then(|code| u32::try_from(code).ok())
+        .is_some_and(|code| {
+            [
+                ERROR_FILE_NOT_FOUND,
+                ERROR_PATH_NOT_FOUND,
+                ERROR_INVALID_DRIVE,
+            ]
+            .contains(&code)
+        })
+}
+
+/// Shows the file at `path` selected in an Explorer window of its folder (ticket 11). Explorer
+/// only selects it, so a link to a program or a script never runs it.
+pub fn reveal_file(path: &Path) -> io::Result<()> {
+    let path = wide(path);
+    with_com(|| {
+        // SAFETY: `path` is a NUL-terminated UTF-16 buffer that outlives the call.
+        let item = unsafe { ILCreateFromPathW(path.as_ptr()) };
+        if item.is_null() {
+            return Err(io::ErrorKind::NotFound.into());
+        }
+        // SAFETY: `item` is a live absolute item ID list naming the file; with no items to select
+        // (0 and null), Explorer opens the file's folder and selects the file itself.
+        let opened = unsafe { SHOpenFolderAndSelectItems(item, 0, std::ptr::null(), 0) };
+        // SAFETY: `item` came from ILCreateFromPathW and isn't used after this.
+        unsafe { ILFree(item) };
+        if opened < 0 {
+            return Err(io::Error::from_raw_os_error(opened));
+        }
+        Ok(())
+    })
+}
+
+/// Opens the folder at `path` in Explorer (ticket 11). With the `explore` verb rather than `open`,
+/// a file put where the folder was isn't opened or run: Windows registers `explore` for folders
+/// (`HKCR\Folder`) and for no file type, so the shell finds no verb for the file and fails. That
+/// rests on the registry, which a program can change for one user without admin rights.
+/// `ShellExecuteExW` with the class `Directory` would not help: `explore` isn't one of its verbs,
+/// so it fails on a real folder too (ticket 11's review).
+pub fn open_folder(path: &Path) -> io::Result<()> {
+    shell_execute("explore", path.as_os_str())
+}
+
+/// Hands `url`, an `http`, `https` or `mailto` URL that link resolution checked, to the system's
+/// browser or mail app (ticket 11).
+pub fn open_url(url: &str) -> io::Result<()> {
+    shell_execute("open", OsStr::new(url))
+}
+
+/// Runs the shell's `verb` on `file`, as Explorer would.
+fn shell_execute(verb: &str, file: &OsStr) -> io::Result<()> {
+    let (verb, file) = (wide(verb), wide(file));
+    with_com(|| {
+        // SAFETY: both strings are NUL-terminated UTF-16 buffers that outlive the call; the null
+        // window, parameters and folder are allowed (no owner, no arguments, the current folder).
+        let instance = unsafe {
+            ShellExecuteW(
+                std::ptr::null_mut(),
+                verb.as_ptr(),
+                file.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                SW_SHOWNORMAL,
+            )
+        };
+        // ShellExecuteW returns a number, not a real handle: over 32 means it succeeded.
+        if instance.addr() > 32 {
+            Ok(())
+        } else {
+            Err(io::Error::last_os_error())
+        }
+    })
+}
+
+/// Runs `work` with COM started on this thread, as the shell's functions need: some shell
+/// extensions they load want a single-threaded apartment. COM is stopped again only if this call
+/// started it; a thread already in another apartment keeps it, and the work runs there.
+fn with_com<T>(work: impl FnOnce() -> io::Result<T>) -> io::Result<T> {
+    // The flags are small positive constants, so the cast keeps their bits.
+    let flags = (COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE).cast_unsigned();
+    // SAFETY: the reserved pointer must be null, and each successful call is matched by one
+    // CoUninitialize below, on the same thread.
+    let started = unsafe { CoInitializeEx(std::ptr::null(), flags) } >= 0;
+    let result = work();
+    if started {
+        // SAFETY: matches the successful CoInitializeEx above, on the same thread.
+        unsafe { CoUninitialize() };
+    }
+    result
 }
 
 /// Leaves WebView2's reload keys (F5, Ctrl+R, Ctrl+Shift+R, Ctrl+F5, Shift+F5 and a keyboard's
@@ -160,6 +268,10 @@ pub fn process_start() -> Option<SystemTime> {
 
 #[cfg(test)]
 mod tests {
+    use windows_sys::Win32::Foundation::{
+        ERROR_ACCESS_DENIED, ERROR_BAD_NET_NAME, ERROR_BAD_NETPATH,
+    };
+
     use super::*;
 
     #[test]
@@ -173,5 +285,21 @@ mod tests {
     #[test]
     fn fold_case_keeps_a_character_whose_upper_case_is_longer() {
         assert_eq!(fold_case(PathBuf::from("ß")), PathBuf::from("ß"));
+    }
+
+    #[test]
+    fn only_a_missing_file_folder_or_drive_is_missing() {
+        let missing = |code: u32| is_missing(&io::Error::from_raw_os_error(code.cast_signed()));
+        for code in [
+            ERROR_FILE_NOT_FOUND,
+            ERROR_PATH_NOT_FOUND,
+            ERROR_INVALID_DRIVE,
+        ] {
+            assert!(missing(code), "{code}");
+        }
+        // An offline server, a share that isn't there, and a file the reader may not open.
+        for code in [ERROR_BAD_NETPATH, ERROR_BAD_NET_NAME, ERROR_ACCESS_DENIED] {
+            assert!(!missing(code), "{code}");
+        }
     }
 }

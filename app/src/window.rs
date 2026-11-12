@@ -9,6 +9,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 use std::{fmt, io};
 
+use tauri::webview::NewWindowResponse;
 use tauri::{
     AppHandle, Emitter as _, Manager as _, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
     WindowEvent,
@@ -56,17 +57,23 @@ struct ShownDocument {
     page_asked: bool,
     /// A notice about this document, held for the page's first request (`hold_notice`).
     held_notice: Option<String>,
+    /// The heading the window shows the document at, from a link like `guide.md#install` (ticket
+    /// 11). Handed over with every render rather than taken by the first, so that of two links
+    /// followed in quick succession, the page's latest request still gets it; the page uses it
+    /// only when it shows the document, never on a reload.
+    heading: Option<String>,
 }
 
 impl ShownDocument {
-    fn given(path: &Path, key: PathBuf) -> Self {
+    fn given(document: DocumentAt<'_>, key: PathBuf) -> Self {
         Self {
-            path: path.to_owned(),
+            path: document.path.to_owned(),
             key,
-            render_ahead: Some(render::start(path, "read-and-render")),
+            render_ahead: Some(render::start(document.path, "read-and-render")),
             watch: None,
             page_asked: false,
             held_notice: None,
+            heading: document.heading.map(str::to_owned),
         }
     }
 }
@@ -77,6 +84,28 @@ pub struct Handover {
     pub render: RenderTask,
     /// A notice about the document for the page to show, held since before the page asked.
     pub notice: Option<String>,
+    /// The heading to show the document at, or None for its top.
+    pub heading: Option<String>,
+}
+
+/// A document to show, and where in it.
+#[derive(Debug, Clone, Copy)]
+pub struct DocumentAt<'a> {
+    /// As the launch, the dialog, the drop or the link named it.
+    pub path: &'a Path,
+    /// The heading to show it at, from a link like `guide.md#install` (ticket 11), or None.
+    pub heading: Option<&'a str>,
+}
+
+impl<'a> DocumentAt<'a> {
+    /// The document at `path`, without a heading: a window given it shows its top, and a window
+    /// that shows it already keeps its reading position.
+    pub fn new(path: &'a Path) -> Self {
+        Self {
+            path,
+            heading: None,
+        }
+    }
 }
 
 /// The window a document is to be shown in.
@@ -86,6 +115,19 @@ pub enum Target<'a> {
     NewWindow,
     /// The window with this label, as for Ctrl+O and dropping a file.
     Window(&'a str),
+}
+
+/// What [`show`] did with a document.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Shown {
+    /// A window was given it: a new one, or the target window.
+    Given,
+    /// It is open already, in `window`, which was brought to the front. That may be the target
+    /// window itself. `scroll_to` is the heading for that window's page to scroll to now.
+    AlreadyOpen {
+        window: String,
+        scroll_to: Option<String>,
+    },
 }
 
 /// What showing a document changed, by window label. The caller acts on it: it opens a new
@@ -106,8 +148,12 @@ enum Claim {
         window: String,
         key: Option<PathBuf>,
     },
-    /// The document is already open in the window with this label.
-    AlreadyOpen(String),
+    /// The document is already open in `window`. `scroll_to` is the heading its page is to scroll
+    /// to now, if the document came with one and the page listens.
+    AlreadyOpen {
+        window: String,
+        scroll_to: Option<String>,
+    },
     /// The target window has closed.
     WindowGone,
 }
@@ -116,20 +162,34 @@ impl OpenWindows {
     /// Records that `target` shows `document` (None: no document), unless the document is open
     /// already. Looking up and recording happen under one lock, so two requests for the same
     /// document end up in one window.
-    fn claim(&self, document: Option<&Path>, target: Target<'_>) -> Claim {
-        let key = document.map(document_key);
+    ///
+    /// The window of an open document is to scroll to the document's heading, if it has one. A
+    /// page that hasn't asked for its document yet may not be listening (a new window's webview
+    /// takes about 600 ms to start), so it gets the heading with its first render instead, the
+    /// way `hold_notice` holds a notice (ticket 10).
+    fn claim(&self, document: Option<DocumentAt<'_>>, target: Target<'_>) -> Claim {
+        let key = document.map(|document| document_key(document.path));
         let mut table = self.lock();
         if let Some(key) = &key
-            && let Some(label) = table.window_showing(key)
+            && let Some(window) = table.window_showing(key)
         {
-            return Claim::AlreadyOpen(label);
+            let mut scroll_to = document
+                .and_then(|document| document.heading)
+                .map(str::to_owned);
+            if scroll_to.is_some()
+                && let Some(shown) = table.shown_mut(&window, key)
+                && !shown.page_asked
+            {
+                shown.heading = scroll_to.take();
+            }
+            return Claim::AlreadyOpen { window, scroll_to };
         }
         // Made only once a window takes the document, so that an open document or a closed
         // window starts no render.
         let shown = |key: &Option<PathBuf>| {
             document
                 .zip(key.clone())
-                .map(|(path, key)| ShownDocument::given(path, key))
+                .map(|(document, key)| ShownDocument::given(document, key))
         };
         match target {
             Target::NewWindow => {
@@ -154,7 +214,7 @@ impl OpenWindows {
     /// started when the window was given the document, the first time, and a new read of its
     /// file after that.
     pub fn render_of(&self, window: &str) -> Option<Handover> {
-        let (path, ahead, notice) = {
+        let (path, ahead, notice, heading) = {
             let mut table = self.lock();
             let shown = table.shown.get_mut(window)?.as_mut()?;
             shown.page_asked = true;
@@ -162,12 +222,25 @@ impl OpenWindows {
                 shown.path.clone(),
                 shown.render_ahead.take(),
                 shown.held_notice.take(),
+                shown.heading.clone(),
             )
         };
         Some(Handover {
             render: ahead.unwrap_or_else(|| render::start(&path, "read-and-render")),
             notice,
+            heading,
         })
+    }
+
+    /// The file of the document `window` shows, as the launch, the dialog, the drop or the link
+    /// named it, or None while it shows none. The one way to learn a window's document: commands
+    /// take it from here, never from the page.
+    pub fn document_path(&self, window: &str) -> Option<PathBuf> {
+        self.lock()
+            .shown
+            .get(window)?
+            .as_ref()
+            .map(|shown| shown.path.clone())
     }
 
     /// Holds `message`, a notice about the document with `key`, for `window`'s page until the page
@@ -325,41 +398,55 @@ pub fn open_launch(
     documents
         .into_iter()
         .filter_map(|document| {
-            show(app, document.as_deref(), Target::NewWindow)
-                .err()
-                .map(|error| LaunchFailure { document, error })
+            show(
+                app,
+                document.as_deref().map(DocumentAt::new),
+                Target::NewWindow,
+            )
+            .err()
+            .map(|error| LaunchFailure { document, error })
         })
         .collect()
 }
 
 /// Shows `document` (None: no document) in `target`, the one way a window gets or changes its
-/// document. A document that is open already has its window brought to the front instead, so a
-/// document is shown in at most one window. A new window opens titled after the document; a
-/// window shown another document gets that document's title and a `document-shown` event, on
-/// which its page renders the document.
+/// document. A document that is open already has its window brought to the
+/// front instead, so a document is shown in at most one window. A new window opens titled after
+/// the document; a window shown another document gets that document's title and a
+/// `document-shown` event, on which its page renders the document. Either page gets the heading
+/// with the render (`Handover`).
 ///
 /// The document's render starts as soon as the window is given it, so that it runs while a new
 /// window's webview starts (`ShownDocument::render_ahead`), and the window starts watching the
 /// document's file, to reload it when it changes.
-pub fn show(app: &AppHandle, document: Option<&Path>, target: Target<'_>) -> tauri::Result<()> {
+pub fn show(
+    app: &AppHandle,
+    document: Option<DocumentAt<'_>>,
+    target: Target<'_>,
+) -> tauri::Result<Shown> {
     let open_windows = app.state::<OpenWindows>();
+    let path = document.map(|document| document.path);
     match open_windows.claim(document, target) {
         Claim::New { window, key } => {
-            open_window(app, &window, &title_of(document)).inspect_err(|_| {
+            open_window(app, &window, &title_of(path)).inspect_err(|_| {
                 open_windows.forget(&window);
             })?;
-            watch(app, &window, document, key);
-            Ok(())
+            watch(app, &window, path, key);
+            Ok(Shown::Given)
         }
         Claim::Changed { window: label, key } => {
-            watch(app, &label, document, key);
+            watch(app, &label, path, key);
             let window = app
                 .get_webview_window(&label)
                 .ok_or(tauri::Error::WindowNotFound)?;
-            window.set_title(&title_of(document))?;
-            app.emit_to(label.as_str(), DOCUMENT_SHOWN, ())
+            window.set_title(&title_of(path))?;
+            app.emit_to(label.as_str(), DOCUMENT_SHOWN, ())?;
+            Ok(Shown::Given)
         }
-        Claim::AlreadyOpen(label) => bring_to_front(app, &label),
+        Claim::AlreadyOpen { window, scroll_to } => {
+            bring_to_front(app, &window)?;
+            Ok(Shown::AlreadyOpen { window, scroll_to })
+        }
         Claim::WindowGone => Err(tauri::Error::WindowNotFound),
     }
 }
@@ -392,9 +479,15 @@ fn open_window(app: &AppHandle, label: &str, title: &str) -> tauri::Result<()> {
     // Decided once, so the page drops its background exactly when the window is transparent.
     let backdrop = platform::has_backdrop();
     let url = WebviewUrl::App(timing.page_url(backdrop).into());
+    let page = page_origin(app);
     let builder = WebviewWindowBuilder::new(app, label, url)
         .title(title)
-        .visible(false);
+        .visible(false)
+        // Links never navigate the webview or open one of its own windows: the page follows them
+        // through the app (ticket 11). These stop whatever still tries, such as a link the page
+        // missed, from loading another site or a file in the window.
+        .on_navigation(move |url| url.origin().ascii_serialization() == page)
+        .on_new_window(|_, _| NewWindowResponse::Deny);
     let builder = if backdrop {
         platform::with_backdrop(builder)
     } else {
@@ -410,6 +503,17 @@ fn open_window(app: &AppHandle, label: &str, title: &str) -> tauri::Result<()> {
         }
     });
     Ok(())
+}
+
+/// The origin the app's page loads from, as Tauri serves `WebviewUrl::App`: the `devUrl` (Vite's
+/// dev server) in development, and otherwise the app's own `tauri` scheme, which Tauri also falls
+/// back to in development without a `devUrl`. Always one origin, so the page always loads.
+fn page_origin(app: &AppHandle) -> String {
+    let dev_url = app.config().build.dev_url.as_ref().filter(|_| cfg!(dev));
+    match dev_url {
+        Some(dev_url) => dev_url.origin().ascii_serialization(),
+        None => platform::custom_scheme_origin("tauri"),
+    }
 }
 
 fn bring_to_front(app: &AppHandle, label: &str) -> tauri::Result<()> {

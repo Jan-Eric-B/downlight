@@ -6,6 +6,7 @@
 
 mod command_line;
 mod image;
+mod links;
 mod menu;
 mod notice;
 mod open;
@@ -48,6 +49,7 @@ fn main() -> ExitCode {
         .manage(OpenWindows::default())
         .invoke_handler(tauri::generate_handler![
             render::render_document,
+            links::follow_link,
             reload::reload_document,
             open::open_document,
             menu::show_document_menu,

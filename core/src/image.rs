@@ -7,6 +7,8 @@ use std::path::{Component, Path, PathBuf, Prefix};
 
 use url::Url;
 
+use crate::file_url::{self, Target};
+
 /// The image formats the webview shows, by extension, with their media types.
 const MEDIA_TYPES: [(&str, &str); 10] = [
     ("apng", "image/apng"),
@@ -69,11 +71,8 @@ pub(crate) struct ImageSources {
 
 impl ImageSources {
     pub(crate) fn new(document: &Path, origin: &str) -> Self {
-        let folder = document
-            .parent()
-            .and_then(|folder| Url::from_directory_path(folder).ok());
         Self {
-            folder,
+            folder: file_url::folder_of(document),
             origin: origin.to_owned(),
         }
     }
@@ -82,11 +81,12 @@ impl ImageSources {
     /// `http(s)` and `data:` images load as they are, local ones through the image scheme, and
     /// anything else, such as an image on a network share, not at all.
     pub(crate) fn source(&self, src: &str) -> Option<String> {
-        match Url::parse(src) {
-            Ok(url) if matches!(url.scheme(), "http" | "https" | "data") => Some(src.to_owned()),
-            Ok(url) if url.scheme() != "file" && !is_drive(url.scheme()) => None,
-            Ok(_) | Err(url::ParseError::RelativeUrlWithoutBase) => self.local_source(src),
-            Err(_) => None,
+        match file_url::classify(src) {
+            Target::Url(url) if matches!(url.scheme(), "http" | "https" | "data") => {
+                Some(src.to_owned())
+            }
+            Target::File => self.local_source(src),
+            Target::Url(_) | Target::Unusable => None,
         }
     }
 
@@ -129,18 +129,7 @@ impl ImageSources {
     /// names a file on a network share. A query means nothing to a file and is dropped; the
     /// fragment stays, for GitHub's `#gh-dark-mode-only` and the like.
     fn local_source(&self, src: &str) -> Option<String> {
-        // comrak writes a backslash in a Markdown link as %5C, and Windows paths separate
-        // folders with either slash.
-        let src = src.replace("%5C", "/").replace("%5c", "/");
-        let file = if is_drive_path(&src) {
-            Url::parse(&format!("file:///{src}"))
-        } else {
-            match &self.folder {
-                Some(folder) => folder.join(&src),
-                None => Url::parse(&src),
-            }
-        }
-        .ok()?;
+        let file = file_url::resolve(self.folder.as_ref(), src)?;
         // Only a `file:` URL has a path. One with a host, from `//server/share` or
         // `\\server\share`, gives a network share's path, which isn't local.
         if !is_local(&file.to_file_path().ok()?) {
@@ -152,16 +141,6 @@ impl ImageSources {
             .unwrap_or_default();
         Some(format!("{}{}{fragment}", self.origin, file.path()))
     }
-}
-
-/// Whether a URL's scheme is really a drive letter, as the URL parser reads `C:\pics\logo.png`.
-pub(crate) fn is_drive(scheme: &str) -> bool {
-    scheme.len() == 1 && scheme.bytes().all(|letter| letter.is_ascii_alphabetic())
-}
-
-/// Whether `src` starts with a drive letter and a slash, as `C:/pics` or `C:\pics` do.
-fn is_drive_path(src: &str) -> bool {
-    matches!(src.as_bytes(), [letter, b':', b'/' | b'\\', ..] if letter.is_ascii_alphabetic())
 }
 
 /// Whether `path` is a whole path on this computer: on Windows, one on a drive, never a network

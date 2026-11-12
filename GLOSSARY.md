@@ -43,3 +43,11 @@ _Avoid_: Startup time, load time
 **Local image**:
 An image in a document whose file is on this computer. The page loads it through Downlight's own image scheme, never from the file system directly. An image on a network share is never a local image and doesn't load.
 _Avoid_: Asset, file image
+
+**Link target**:
+Where a link in a document points, as the document writes it (its `href`). It comes from the document, so it is untrusted until link resolution turns it into a link action.
+_Avoid_: URL, href
+
+**Link action**:
+The one thing following a link does, as the core's link resolution returns it: show a document (optionally at a heading), scroll to a heading, reveal a file, open a folder, hand a URL to the system, or nothing.
+_Avoid_: Navigation, link handler

@@ -6,9 +6,33 @@ mod windows;
 
 #[cfg(windows)]
 pub use windows::{
-    custom_scheme_origin, fold_case, has_backdrop, leave_reload_keys_to_the_page, process_start,
-    show_error, with_backdrop,
+    custom_scheme_origin, fold_case, has_backdrop, is_missing, leave_reload_keys_to_the_page,
+    open_folder, open_url, process_start, reveal_file, show_error, with_backdrop,
 };
+
+/// Other systems count what Rust counts as not found until their ports.
+#[cfg(not(windows))]
+pub fn is_missing(error: &std::io::Error) -> bool {
+    error.kind() == std::io::ErrorKind::NotFound
+}
+
+/// Other systems reveal files in their file managers with their ports; the reader is told.
+#[cfg(not(windows))]
+pub fn reveal_file(_path: &std::path::Path) -> std::io::Result<()> {
+    Err(std::io::ErrorKind::Unsupported.into())
+}
+
+/// Other systems open folders in their file managers with their ports; the reader is told.
+#[cfg(not(windows))]
+pub fn open_folder(_path: &std::path::Path) -> std::io::Result<()> {
+    Err(std::io::ErrorKind::Unsupported.into())
+}
+
+/// Other systems hand URLs to their browsers and mail apps with their ports; the reader is told.
+#[cfg(not(windows))]
+pub fn open_url(_url: &str) -> std::io::Result<()> {
+    Err(std::io::ErrorKind::Unsupported.into())
+}
 
 /// Other systems' webviews get their reload keys looked at with their ports.
 #[cfg(not(windows))]

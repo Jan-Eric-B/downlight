@@ -5,7 +5,11 @@ import { startDocumentView } from "./view";
 
 beforeEach(() => {
   mockWindows("document-0");
-  mockIPC((command) => (command === "render_document" ? code : undefined));
+  mockIPC((command) =>
+    command === "render_document"
+      ? { document: code, heading: null }
+      : undefined,
+  );
 });
 
 afterEach(() => {

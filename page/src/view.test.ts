@@ -7,8 +7,17 @@ import { startDocumentView, whenDocumentShown } from "./view";
 
 let commands: string[] = [];
 
-/** What `render_document` gives, in turn; the last answer repeats. */
-let documents: (() => Promise<string | null>)[] = [];
+/** A document shown at a heading, as `render_document` answers for a link like `a.md#install`. */
+interface AtHeading {
+  document: string;
+  heading: string;
+}
+
+/**
+ * What `render_document` gives, in turn: the HTML, the HTML at a heading, or null for no
+ * document. The last answer repeats.
+ */
+let documents: (() => Promise<string | AtHeading | null>)[] = [];
 
 /** The page's text when it asked the app to show its window, or undefined until then. */
 let textWhenShown: string | undefined;
@@ -27,7 +36,11 @@ beforeEach(() => {
       }
       if (command !== "render_document") return undefined;
       const next = documents.length > 1 ? documents.shift() : documents[0];
-      return next?.();
+      return next?.().then((answer) =>
+        typeof answer === "string"
+          ? { document: answer, heading: null }
+          : answer,
+      );
     },
     { shouldMockEvents: true },
   );
@@ -410,4 +423,80 @@ test("a reload overtaken by a newer document-shown shows the newer document", as
   sendReload(readme);
   await settle();
   expect(heading()).toBe("Field notes");
+});
+
+/** The ids of the elements the page scrolled to the top of the view, in turn. */
+function spyOnHeadingScrolls(): () => string[] {
+  const scrolls = vi
+    .spyOn(Element.prototype, "scrollIntoView")
+    .mockImplementation(() => {});
+  return () => scrolls.mock.contexts.map((element) => (element as Element).id);
+}
+
+test("document shown at a heading scrolls to that heading", async () => {
+  documents = [
+    () => Promise.resolve(notes),
+    () => Promise.resolve({ document: readme, heading: "options" }),
+  ];
+  await startDocumentView(0);
+  await settle();
+  const scrolledTo = spyOnHeadingScrolls();
+
+  const shown = nextShown();
+  await emit("document-shown");
+  await shown;
+  expect(heading()).toBe("Lamplighter");
+  expect(scrolledTo().length).toBeGreaterThan(0);
+  expect(new Set(scrolledTo())).toEqual(new Set(["options"]));
+});
+
+test("document shown without a heading starts at the top", async () => {
+  documents = [() => Promise.resolve(readme), () => Promise.resolve(notes)];
+  await startDocumentView(0);
+  await settle();
+  const scrolledTo = spyOnHeadingScrolls();
+  const toTop = vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+
+  const shown = nextShown();
+  await emit("document-shown");
+  await shown;
+  expect(toTop).toHaveBeenCalledWith(0, 0);
+  expect(scrolledTo()).toEqual([]);
+});
+
+test("a new window opened at a heading scrolls to it on its first show", async () => {
+  documents = [() => Promise.resolve({ document: readme, heading: "install" })];
+  const scrolledTo = spyOnHeadingScrolls();
+
+  await startDocumentView(0);
+  expect(new Set(scrolledTo())).toEqual(new Set(["install"]));
+  expect(commands).toContain("show_window");
+});
+
+test("scroll-to-heading from the app scrolls an open document to that heading", async () => {
+  documents = [() => Promise.resolve(readme)];
+  await startDocumentView(0);
+  await settle();
+  const scrolledTo = spyOnHeadingScrolls();
+
+  await emit("scroll-to-heading", "before-a-release");
+  await vi.waitFor(() => {
+    expect(scrolledTo()).toContain("before-a-release");
+  });
+  expect(heading()).toBe("Lamplighter");
+});
+
+test("a reload of a document shown at a heading keeps the reading position", async () => {
+  // The heading comes with every render of the document, the reload's too.
+  const atOptions = { document: readme, heading: "options" };
+  documents = [() => Promise.resolve(atOptions)];
+  await startDocumentView(0);
+  await settle();
+  layOut(8.5);
+  const scrolledTo = spyOnScrolls();
+
+  const shown = nextShown();
+  await emit("document-changed", "reload");
+  await shown;
+  expect(new Set(scrolledTo())).toEqual(new Set([8]));
 });

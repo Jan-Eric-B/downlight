@@ -9,7 +9,7 @@ use downlight_core::{MARKDOWN_EXTENSIONS, is_markdown};
 use tauri::{DragDropEvent, Manager as _, WebviewWindow, WindowEvent};
 
 use crate::notice;
-use crate::window::{self, Target};
+use crate::window::{self, DocumentAt, Target};
 
 /// Shows the open dialog, filtered to Markdown files, and shows the chosen document in the
 /// calling window. Choosing nothing changes nothing.
@@ -27,8 +27,13 @@ pub async fn open_document(window: WebviewWindow) -> Result<(), OpenError> {
         else {
             return Ok(());
         };
-        window::show(&app, Some(&document), Target::Window(window.label()))
-            .map_err(|source| OpenError::Show { document, source })
+        window::show(
+            &app,
+            Some(DocumentAt::new(&document)),
+            Target::Window(window.label()),
+        )
+        .map(|_| ())
+        .map_err(|source| OpenError::Show { document, source })
     })
     .await
     .map_err(|source| OpenError::DialogStopped { source })?
@@ -47,10 +52,16 @@ pub fn show_when_dropped(window: &tauri::Window, event: &WindowEvent) {
     // they stay off the main thread, where window events arrive.
     tauri::async_runtime::spawn_blocking(move || {
         let failure = match dropped_document(&paths).map(Path::to_path_buf) {
-            Some(document) => match window::show(&app, Some(&document), Target::Window(&label)) {
-                Ok(()) => return,
-                Err(source) => OpenError::Show { document, source },
-            },
+            Some(document) => {
+                match window::show(
+                    &app,
+                    Some(DocumentAt::new(&document)),
+                    Target::Window(&label),
+                ) {
+                    Ok(_) => return,
+                    Err(source) => OpenError::Show { document, source },
+                }
+            }
             None => OpenError::NotMarkdown,
         };
         notice::show_notice(&app, &label, &failure.to_string());

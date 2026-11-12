@@ -22,7 +22,7 @@ fn app_file(name: &str) -> PathBuf {
     reason = "a helper isn't a #[test] function, and its panic fails the test that called it"
 )]
 fn open_new(windows: &OpenWindows, document: Option<&Path>) -> String {
-    match windows.claim(document, Target::NewWindow) {
+    match windows.claim(document.map(DocumentAt::new), Target::NewWindow) {
         Claim::New { window, .. } => window,
         other => panic!("expected a new window, got {other:?}"),
     }
@@ -32,14 +32,17 @@ fn open_new(windows: &OpenWindows, document: Option<&Path>) -> String {
 fn first_claim_of_a_document_names_a_new_window_that_shows_it() {
     let windows = OpenWindows::default();
     let label = open_new(&windows, Some(&manifest()));
-    assert_eq!(document_of(&windows, &label), Some(manifest()));
+    assert_eq!(windows.document_path(&label), Some(manifest()));
 }
 
 #[test]
 fn new_window_comes_with_the_key_its_watch_is_kept_under() {
     let windows = OpenWindows::default();
     assert_eq!(
-        windows.claim(Some(&app_file("cargo.toml")), Target::NewWindow),
+        windows.claim(
+            Some(DocumentAt::new(&app_file("cargo.toml"))),
+            Target::NewWindow
+        ),
         Claim::New {
             window: "document-0".to_owned(),
             key: Some(document_key(&manifest()))
@@ -64,8 +67,11 @@ fn open_document_claimed_again_gives_its_window() {
     let windows = OpenWindows::default();
     let first = open_new(&windows, Some(&manifest()));
     assert_eq!(
-        windows.claim(Some(&manifest()), Target::NewWindow),
-        Claim::AlreadyOpen(first)
+        windows.claim(Some(DocumentAt::new(&manifest())), Target::NewWindow),
+        Claim::AlreadyOpen {
+            window: first,
+            scroll_to: None
+        }
     );
 }
 
@@ -74,8 +80,14 @@ fn open_document_is_found_ignoring_case() {
     let windows = OpenWindows::default();
     let first = open_new(&windows, Some(&manifest()));
     assert_eq!(
-        windows.claim(Some(&app_file("CARGO.TOML")), Target::NewWindow),
-        Claim::AlreadyOpen(first)
+        windows.claim(
+            Some(DocumentAt::new(&app_file("CARGO.TOML"))),
+            Target::NewWindow
+        ),
+        Claim::AlreadyOpen {
+            window: first,
+            scroll_to: None
+        }
     );
 }
 
@@ -85,8 +97,11 @@ fn open_document_is_found_through_a_parent_folder_step() {
     let first = open_new(&windows, Some(&manifest()));
     let roundabout = app_file("src").join("..").join("Cargo.toml");
     assert_eq!(
-        windows.claim(Some(&roundabout), Target::NewWindow),
-        Claim::AlreadyOpen(first)
+        windows.claim(Some(DocumentAt::new(&roundabout)), Target::NewWindow),
+        Claim::AlreadyOpen {
+            window: first,
+            scroll_to: None
+        }
     );
 }
 
@@ -95,8 +110,14 @@ fn missing_document_claimed_again_in_other_case_gives_its_window() {
     let windows = OpenWindows::default();
     let first = open_new(&windows, Some(&app_file("missing.md")));
     assert_eq!(
-        windows.claim(Some(&app_file("MISSING.md")), Target::NewWindow),
-        Claim::AlreadyOpen(first)
+        windows.claim(
+            Some(DocumentAt::new(&app_file("MISSING.md"))),
+            Target::NewWindow
+        ),
+        Claim::AlreadyOpen {
+            window: first,
+            scroll_to: None
+        }
     );
 }
 
@@ -114,10 +135,10 @@ fn forgotten_window_gives_its_document_a_new_window() {
     let first = open_new(&windows, Some(&manifest()));
     windows.forget(&first);
     assert!(matches!(
-        windows.claim(Some(&manifest()), Target::NewWindow),
+        windows.claim(Some(DocumentAt::new(&manifest())), Target::NewWindow),
         Claim::New { .. }
     ));
-    assert_eq!(document_of(&windows, &first), None);
+    assert_eq!(windows.document_path(&first), None);
 }
 
 #[test]
@@ -126,7 +147,7 @@ fn empty_windows_are_never_the_same_window() {
     let first = open_new(&windows, None);
     let second = open_new(&windows, None);
     assert_ne!(first, second);
-    assert_eq!(document_of(&windows, &first), None);
+    assert_eq!(windows.document_path(&first), None);
 }
 
 #[test]
@@ -139,13 +160,13 @@ fn empty_window_shows_the_document_it_is_given() {
     let windows = OpenWindows::default();
     let label = open_new(&windows, None);
     assert_eq!(
-        windows.claim(Some(&manifest()), Target::Window(&label)),
+        windows.claim(Some(DocumentAt::new(&manifest())), Target::Window(&label)),
         Claim::Changed {
             window: label.clone(),
             key: Some(document_key(&manifest()))
         }
     );
-    assert_eq!(document_of(&windows, &label), Some(manifest()));
+    assert_eq!(windows.document_path(&label), Some(manifest()));
 }
 
 #[test]
@@ -154,22 +175,25 @@ fn window_shows_another_document_in_place_of_its_own() {
     let label = open_new(&windows, Some(&manifest()));
     let other = app_file("build.rs");
     assert_eq!(
-        windows.claim(Some(&other), Target::Window(&label)),
+        windows.claim(Some(DocumentAt::new(&other)), Target::Window(&label)),
         Claim::Changed {
             window: label.clone(),
             key: Some(document_key(&other))
         }
     );
-    assert_eq!(document_of(&windows, &label), Some(other));
+    assert_eq!(windows.document_path(&label), Some(other));
 }
 
 #[test]
 fn document_a_window_gave_up_opens_anew() {
     let windows = OpenWindows::default();
     let label = open_new(&windows, Some(&manifest()));
-    windows.claim(Some(&app_file("build.rs")), Target::Window(&label));
+    windows.claim(
+        Some(DocumentAt::new(&app_file("build.rs"))),
+        Target::Window(&label),
+    );
     assert!(matches!(
-        windows.claim(Some(&manifest()), Target::NewWindow),
+        windows.claim(Some(DocumentAt::new(&manifest())), Target::NewWindow),
         Claim::New { .. }
     ));
 }
@@ -178,10 +202,16 @@ fn document_a_window_gave_up_opens_anew() {
 fn document_shown_in_a_window_is_found_there_again() {
     let windows = OpenWindows::default();
     let label = open_new(&windows, None);
-    windows.claim(Some(&manifest()), Target::Window(&label));
+    windows.claim(Some(DocumentAt::new(&manifest())), Target::Window(&label));
     assert_eq!(
-        windows.claim(Some(&app_file("CARGO.TOML")), Target::NewWindow),
-        Claim::AlreadyOpen(label)
+        windows.claim(
+            Some(DocumentAt::new(&app_file("CARGO.TOML"))),
+            Target::NewWindow
+        ),
+        Claim::AlreadyOpen {
+            window: label,
+            scroll_to: None
+        }
     );
 }
 
@@ -191,10 +221,107 @@ fn document_open_in_another_window_stays_there() {
     let first = open_new(&windows, Some(&manifest()));
     let second = open_new(&windows, Some(&app_file("build.rs")));
     assert_eq!(
-        windows.claim(Some(&manifest()), Target::Window(&second)),
-        Claim::AlreadyOpen(first)
+        windows.claim(Some(DocumentAt::new(&manifest())), Target::Window(&second)),
+        Claim::AlreadyOpen {
+            window: first,
+            scroll_to: None
+        }
     );
-    assert_eq!(document_of(&windows, &second), Some(app_file("build.rs")));
+    assert_eq!(windows.document_path(&second), Some(app_file("build.rs")));
+}
+
+#[test]
+fn window_document_path_is_the_one_it_shows() {
+    let windows = OpenWindows::default();
+    let label = open_new(&windows, Some(&app_file("cargo.toml")));
+    // As given, not as the key spells it, so the reader sees the name they know.
+    assert_eq!(windows.document_path(&label), Some(app_file("cargo.toml")));
+    windows.claim(
+        Some(DocumentAt::new(&app_file("build.rs"))),
+        Target::Window(&label),
+    );
+    assert_eq!(windows.document_path(&label), Some(app_file("build.rs")));
+}
+
+#[test]
+fn window_without_a_document_has_no_document_path() {
+    let windows = OpenWindows::default();
+    let label = open_new(&windows, None);
+    assert_eq!(windows.document_path(&label), None);
+    assert_eq!(windows.document_path("document-99"), None);
+}
+
+#[test]
+fn document_claimed_for_its_own_window_is_already_there() {
+    // A link to the shown document scrolls instead of rendering it again. The link was clicked in
+    // the document, so the page has asked for it.
+    let windows = OpenWindows::default();
+    let label = open_new(&windows, Some(&manifest()));
+    let _ = windows.render_of(&label);
+    assert_eq!(
+        windows.claim(
+            Some(DocumentAt {
+                path: &app_file("CARGO.TOML"),
+                heading: Some("install")
+            }),
+            Target::Window(&label)
+        ),
+        Claim::AlreadyOpen {
+            window: label,
+            scroll_to: Some("install".to_owned())
+        }
+    );
+}
+
+#[test]
+fn link_to_a_document_open_in_another_window_scrolls_it_only_with_a_heading() {
+    // Without a heading, that window keeps its reading position (ticket 11's decisions).
+    let windows = OpenWindows::default();
+    let first = open_new(&windows, Some(&manifest()));
+    let _ = windows.render_of(&first);
+    let second = open_new(&windows, Some(&app_file("build.rs")));
+    let at_install = DocumentAt {
+        path: &manifest(),
+        heading: Some("install"),
+    };
+    assert_eq!(
+        windows.claim(Some(at_install), Target::Window(&second)),
+        Claim::AlreadyOpen {
+            window: first.clone(),
+            scroll_to: Some("install".to_owned())
+        }
+    );
+    assert_eq!(
+        windows.claim(Some(DocumentAt::new(&manifest())), Target::Window(&second)),
+        Claim::AlreadyOpen {
+            window: first,
+            scroll_to: None
+        }
+    );
+}
+
+#[test]
+fn heading_for_an_open_window_whose_page_has_not_asked_is_held_for_its_first_render() {
+    // Ctrl+click on `b.md#x` opens a window whose page listens for nothing until its webview has
+    // started, so a heading sent to it now would be lost.
+    let windows = OpenWindows::default();
+    let first = open_new(&windows, Some(&manifest()));
+    let second = open_new(&windows, Some(&app_file("build.rs")));
+    let at_install = DocumentAt {
+        path: &manifest(),
+        heading: Some("install"),
+    };
+    assert_eq!(
+        windows.claim(Some(at_install), Target::Window(&second)),
+        Claim::AlreadyOpen {
+            window: first.clone(),
+            scroll_to: None
+        }
+    );
+    assert_eq!(
+        heading_of(&windows, &first),
+        Some(Some("install".to_owned()))
+    );
 }
 
 #[test]
@@ -203,23 +330,13 @@ fn showing_in_a_closed_window_changes_nothing() {
     let label = open_new(&windows, None);
     windows.forget(&label);
     assert_eq!(
-        windows.claim(Some(&manifest()), Target::Window(&label)),
+        windows.claim(Some(DocumentAt::new(&manifest())), Target::Window(&label)),
         Claim::WindowGone
     );
     assert!(matches!(
-        windows.claim(Some(&manifest()), Target::NewWindow),
+        windows.claim(Some(DocumentAt::new(&manifest())), Target::NewWindow),
         Claim::New { .. }
     ));
-}
-
-/// The document `window` shows, as the page's next render reads it.
-fn document_of(windows: &OpenWindows, window: &str) -> Option<PathBuf> {
-    windows
-        .lock()
-        .shown
-        .get(window)?
-        .as_ref()
-        .map(|shown| shown.path.clone())
 }
 
 /// A document file of the test's own, so that tests running in parallel never share one.
@@ -288,7 +405,7 @@ fn window_changed_to_another_document_renders_the_new_one_ahead() {
     let second = document("changed-second", "# Second document");
     let windows = OpenWindows::default();
     let label = open_new(&windows, Some(&first));
-    windows.claim(Some(&second), Target::Window(&label));
+    windows.claim(Some(DocumentAt::new(&second)), Target::Window(&label));
     wait_for_render_ahead(&windows, &label);
     std::fs::write(&second, "# Changed since").unwrap();
     let shown = rendered_html(&windows, &label);
@@ -314,12 +431,71 @@ fn opening_an_open_document_again_starts_no_render_for_its_window() {
     let windows = OpenWindows::default();
     let label = open_new(&windows, Some(&manifest()));
     let _ = windows.render_of(&label);
-    windows.claim(Some(&manifest()), Target::NewWindow);
+    windows.claim(Some(DocumentAt::new(&manifest())), Target::NewWindow);
     // Its window shows it already, so a render ahead would be read and then never used.
     let shown = windows.lock().shown[&label]
         .as_ref()
         .map(|shown| shown.render_ahead.is_some());
     assert_eq!(shown, Some(false));
+}
+
+/// The heading `window`'s page gets with its document, or None while it shows none.
+fn heading_of(windows: &OpenWindows, window: &str) -> Option<Option<String>> {
+    windows.render_of(window).map(|handover| handover.heading)
+}
+
+#[test]
+fn new_window_for_a_heading_link_keeps_the_heading() {
+    let windows = OpenWindows::default();
+    let claim = windows.claim(
+        Some(DocumentAt {
+            path: &manifest(),
+            heading: Some("install"),
+        }),
+        Target::NewWindow,
+    );
+    assert!(matches!(claim, Claim::New { .. }), "{claim:?}");
+    assert_eq!(
+        heading_of(&windows, "document-0"),
+        Some(Some("install".to_owned()))
+    );
+}
+
+#[test]
+fn window_shown_a_document_at_a_heading_hands_it_over_with_every_render() {
+    // Two links followed in quick succession each tell the page to ask, and the page keeps only
+    // its latest request, which must still get the heading.
+    let windows = OpenWindows::default();
+    let label = open_new(&windows, None);
+    windows.claim(
+        Some(DocumentAt {
+            path: &manifest(),
+            heading: Some("install"),
+        }),
+        Target::Window(&label),
+    );
+    let first = heading_of(&windows, &label);
+    let second = heading_of(&windows, &label);
+    assert_eq!(first, Some(Some("install".to_owned())));
+    assert_eq!(second, first);
+}
+
+#[test]
+fn window_shown_a_document_without_a_heading_hands_over_none() {
+    let windows = OpenWindows::default();
+    let label = open_new(&windows, None);
+    windows.claim(
+        Some(DocumentAt {
+            path: &manifest(),
+            heading: Some("install"),
+        }),
+        Target::Window(&label),
+    );
+    windows.claim(
+        Some(DocumentAt::new(&app_file("build.rs"))),
+        Target::Window(&label),
+    );
+    assert_eq!(heading_of(&windows, &label), Some(None));
 }
 
 #[test]
@@ -389,7 +565,7 @@ fn watch_for_a_document_the_window_has_left_is_dropped() {
     let second = document("left-second", "# Second");
     let windows = OpenWindows::default();
     let label = open_new(&windows, Some(&first));
-    windows.claim(Some(&second), Target::Window(&label));
+    windows.claim(Some(DocumentAt::new(&second)), Target::Window(&label));
     let (watch, life) = watch_with_its_life(&first);
     windows.keep_watch(&label, &document_key(&first), watch);
     let running = life.recv_timeout(WATCH_END_WAIT);
@@ -410,7 +586,10 @@ fn change_to_the_shown_document_is_acted_on() {
 fn change_to_a_document_the_window_has_left_is_ignored() {
     let windows = OpenWindows::default();
     let label = open_new(&windows, Some(&manifest()));
-    windows.claim(Some(&app_file("build.rs")), Target::Window(&label));
+    windows.claim(
+        Some(DocumentAt::new(&app_file("build.rs"))),
+        Target::Window(&label),
+    );
     let key = document_key(&manifest());
     assert!(!windows.shows(&label, &key));
 }
@@ -455,7 +634,10 @@ fn notice_after_the_page_asked_is_to_be_shown_now() {
 fn notice_for_a_document_the_window_has_left_is_dropped() {
     let windows = OpenWindows::default();
     let label = open_new(&windows, Some(&manifest()));
-    windows.claim(Some(&app_file("build.rs")), Target::Window(&label));
+    windows.claim(
+        Some(DocumentAt::new(&app_file("build.rs"))),
+        Target::Window(&label),
+    );
     let key = document_key(&manifest());
     assert_eq!(
         windows.hold_notice(&label, &key, "Can't watch".to_owned()),
@@ -471,7 +653,10 @@ fn notice_for_a_document_the_window_had_before_is_not_shown_with_the_new_one() {
     let label = open_new(&windows, Some(&manifest()));
     let key = document_key(&manifest());
     windows.hold_notice(&label, &key, "Can't watch".to_owned());
-    windows.claim(Some(&app_file("build.rs")), Target::Window(&label));
+    windows.claim(
+        Some(DocumentAt::new(&app_file("build.rs"))),
+        Target::Window(&label),
+    );
     let notice = windows.render_of(&label).map(|handover| handover.notice);
     assert_eq!(notice, Some(None));
 }

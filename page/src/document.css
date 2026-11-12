@@ -213,3 +213,32 @@ body {
 .notice[hidden] {
   display: none;
 }
+
+/* A link's target while the pointer is over the link or it has the focus (links.ts), at the bottom
+   left as a browser's status bar shows it. WebView2's own status bar is off, and the target shows
+   before a click, so the reader knows where a link goes. It never takes the pointer, so moving
+   onto it doesn't leave the link. */
+.link-target {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  z-index: 2;
+  max-width: min(640px, 60vw);
+  margin: 0;
+  padding: 2px 8px;
+  overflow: hidden;
+  border: 1px solid var(--borderColor-default);
+  border-bottom: none;
+  border-left: none;
+  border-top-right-radius: 6px;
+  background-color: var(--bgColor-default);
+  color: var(--fgColor-muted);
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+.link-target[hidden] {
+  display: none;
+}
