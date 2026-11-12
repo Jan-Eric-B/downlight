@@ -169,6 +169,30 @@ body {
   color: var(--fgColor-muted);
 }
 
+/* The bar that says the document's file was deleted or moved (view.ts). It stays at the top of the
+   window while the reader scrolls through the last render, on a solid background, since the
+   document scrolls under it. */
+.file-gone {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  max-width: none;
+  padding: 8px 32px;
+  border-bottom: 1px solid var(--borderColor-attention-muted);
+  /* GitHub's dark attention color is translucent, so it lies over the solid default color. */
+  background:
+    linear-gradient(
+      var(--bgColor-attention-muted),
+      var(--bgColor-attention-muted)
+    ),
+    var(--bgColor-default);
+  color: var(--fgColor-default);
+}
+
+.file-gone[hidden] {
+  display: none;
+}
+
 /* A short message at the bottom of the window, such as why a dropped file didn't open. It sits on
    a solid background, since the document may be under it. */
 .notice {

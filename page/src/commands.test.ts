@@ -142,8 +142,44 @@ describe("Ctrl+O opens a document", () => {
   });
 });
 
+describe("Reload", () => {
+  test("F5 reloads", () => {
+    const event = press({ key: "F5", code: "F5" });
+    expect(appCommands()).toEqual(["reload_document"]);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  test("Ctrl+R reloads on a QWERTY layout", () => {
+    const event = press({ ctrlKey: true, key: "r", code: "KeyR" });
+    expect(appCommands()).toEqual(["reload_document"]);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  test("Ctrl+R reloads on a Cyrillic layout, by the key in R's place", () => {
+    press({ ctrlKey: true, key: "к", code: "KeyR" });
+    expect(appCommands()).toEqual(["reload_document"]);
+  });
+
+  // WebView2 would reload the page itself, leaving the window without its document.
+  test.each([
+    ["Ctrl+F5", { ctrlKey: true, key: "F5", code: "F5" }],
+    ["Shift+F5", { shiftKey: true, key: "F5", code: "F5" }],
+    ["Ctrl+Shift+R", { ctrlKey: true, shiftKey: true, key: "R", code: "KeyR" }],
+  ])("%s is swallowed", (_keys, keys) => {
+    const event = press(keys);
+    expect(appCommands()).toEqual([]);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  test("F5 with Alt held does nothing", () => {
+    const event = press({ altKey: true, key: "F5", code: "F5" });
+    expect(appCommands()).toEqual([]);
+    expect(event.defaultPrevented).toBe(false);
+  });
+});
+
 describe("the right-click menu", () => {
-  test("replaces the webview's menu with Open and Copy", () => {
+  test("replaces the webview's menu with Reload, Open and Copy", () => {
     let entries: unknown;
     answer = (command, args) => {
       if (command === "show_document_menu") {
@@ -157,6 +193,8 @@ describe("the right-click menu", () => {
     document.body.dispatchEvent(event);
     expect(event.defaultPrevented).toBe(true);
     expect(entries).toEqual([
+      { kind: "command", id: "reload", label: "Reload", shortcut: "F5" },
+      { kind: "separator" },
       { kind: "command", id: "open", label: "Open...", shortcut: "Ctrl+O" },
       { kind: "separator" },
       { kind: "copy" },
@@ -167,6 +205,12 @@ describe("the right-click menu", () => {
     await settle();
     await emit("menu-command", "open");
     expect(appCommands()).toEqual(["open_document"]);
+  });
+
+  test("runs Reload chosen in the menu", async () => {
+    await settle();
+    await emit("menu-command", "reload");
+    expect(appCommands()).toEqual(["reload_document"]);
   });
 
   test("ignores a command it doesn't know", async () => {

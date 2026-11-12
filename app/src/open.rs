@@ -6,12 +6,10 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use downlight_core::{MARKDOWN_EXTENSIONS, is_markdown};
-use tauri::{AppHandle, DragDropEvent, Emitter as _, Manager as _, WebviewWindow, WindowEvent};
+use tauri::{DragDropEvent, Manager as _, WebviewWindow, WindowEvent};
 
+use crate::notice;
 use crate::window::{self, Target};
-
-/// The event that gives a window's page a short message to show the reader.
-const NOTICE: &str = "notice";
 
 /// Shows the open dialog, filtered to Markdown files, and shows the chosen document in the
 /// calling window. Choosing nothing changes nothing.
@@ -55,7 +53,7 @@ pub fn show_when_dropped(window: &tauri::Window, event: &WindowEvent) {
             },
             None => OpenError::NotMarkdown,
         };
-        show_notice(&app, &label, &failure.to_string());
+        notice::show_notice(&app, &label, &failure.to_string());
     });
 }
 
@@ -65,11 +63,6 @@ fn dropped_document(paths: &[PathBuf]) -> Option<&Path> {
         .iter()
         .map(PathBuf::as_path)
         .find(|path| is_markdown(path) && path.is_file())
-}
-
-fn show_notice(app: &AppHandle, window: &str, message: &str) {
-    // The only way to fail is that the window has closed, and then nobody is left to tell.
-    let _ = app.emit_to(window, NOTICE, message);
 }
 
 /// Why a window doesn't show the document the reader chose or dropped. The page shows the

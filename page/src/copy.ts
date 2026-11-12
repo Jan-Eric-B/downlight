@@ -11,7 +11,7 @@ const COPIED_MS = 2000;
  * since a `pre` scrolls sideways and would take the button with it. It has no text, only an icon
  * and a label for screen readers, so Find and a copied selection never pick up its name.
  */
-export function addCopyButtons(view: HTMLElement): void {
+export function addCopyButtons(view: ParentNode): void {
   for (const pre of view.querySelectorAll("pre")) {
     const code = pre.querySelector("code");
     if (!code) continue;

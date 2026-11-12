@@ -5,7 +5,7 @@
 // Windows scans the new executable, doesn't count.
 
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { appendFileSync, copyFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -23,18 +23,26 @@ const RUN_TIMEOUT_MS = 20_000;
 // Long tasks and frames after first paint, such as layout that a large document leaves for
 // later, still count; this is how long a run keeps listening after the last first paint.
 const SETTLE_MS = 3_000;
-// The scrolling cases drive the window over WebView2's debug port.
+// The scrolling and reload cases drive the window over WebView2's debug port.
 const DEBUG_PORT = 9333;
+// The reload case's document: a copy of the 1 MB one, since the run appends to it.
+const RELOAD_DOCUMENT = DOCUMENTS.mixed1mb.replace(/\.md$/, "-reload.md");
 
 /**
  * Starts Downlight with the timing switch on and collects its reports until its windows painted.
  * Each of `laterDocuments` is then opened by a further launch, which hands it to the running
  * process (ADR 0001), and the run waits for its window to paint too. With `scroll`, it then
- * scrolls through the first window's document.
+ * scrolls through the first window's document; with `reload`, it scrolls to the middle of the
+ * first window's document and saves the file, and waits for the reload to be shown. `prepare`
+ * runs before the process starts.
  */
-async function run(documents, { scroll = false, laterDocuments = [] } = {}) {
+async function run(
+  documents,
+  { scroll = false, reload = false, laterDocuments = [], prepare } = {},
+) {
+  prepare?.();
   const env = { ...process.env, DOWNLIGHT_TIMING: "1" };
-  if (scroll) {
+  if (scroll || reload) {
     env.WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = `--remote-debugging-port=${DEBUG_PORT}`;
   }
   const child = spawn(EXECUTABLE, documents, {
@@ -76,8 +84,23 @@ async function run(documents, { scroll = false, laterDocuments = [] } = {}) {
     }
     await painted(documents.length + laterDocuments.length);
     if (scroll) await scrollThrough();
+    let saved;
+    if (reload) {
+      saved = await saveInTheMiddle(documents[0]);
+      while (!reports.some((r) => r.event === "reload-shown")) {
+        if (Date.now() > deadline)
+          throw new Error(`No reload shown within ${RUN_TIMEOUT_MS} ms`);
+        await sleep(20);
+      }
+    }
     await sleep(SETTLE_MS);
-    return { reports, memory: memoryOf(child.pid), launches };
+    if (reload) {
+      // After the settle time, since the probe's own layout reads take long frames of their own,
+      // which the measures leave out.
+      saved.probed = performance.now();
+      saved.lineAfter = await topLineNow();
+    }
+    return { reports, memory: memoryOf(child.pid), launches, saved };
   } finally {
     execFileSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
       stdio: "ignore",
@@ -99,10 +122,10 @@ async function launch(document, env) {
 }
 
 /**
- * Jumps to the end and to the middle, then pages down 150 times, one page a frame: the moves
- * that lay out blocks the reader hasn't seen yet.
+ * Connects to the first window's page over WebView2's debug port. `evaluate` runs an expression
+ * in the page, waits for a promise it gives, and resolves with its value.
  */
-async function scrollThrough() {
+async function connect() {
   const targets = await (
     await fetch(`http://127.0.0.1:${DEBUG_PORT}/json`)
   ).json();
@@ -117,18 +140,68 @@ async function scrollThrough() {
     new Promise((resolve) => {
       const id = ++lastId;
       socket.addEventListener("message", function answered(event) {
-        if (JSON.parse(event.data).id !== id) return;
+        const message = JSON.parse(event.data);
+        if (message.id !== id) return;
         socket.removeEventListener("message", answered);
-        resolve();
+        resolve(message.result?.result?.value);
       });
       socket.send(
         JSON.stringify({
           id,
           method: "Runtime.evaluate",
-          params: { expression, awaitPromise: true },
+          params: { expression, awaitPromise: true, returnByValue: true },
         }),
       );
     });
+  return { evaluate, close: () => socket.close() };
+}
+
+/**
+ * The line number of the first top-level block not wholly above the top of the view, for
+ * checking that a reload kept the reading position.
+ */
+const TOP_LINE = `(() => {
+  const blocks = [...document.querySelectorAll("article > [data-sourcepos], article > .highlight > pre")];
+  const top = blocks.find((b) => b.getBoundingClientRect().bottom > 0);
+  return top && Number.parseInt(top.getAttribute("data-sourcepos"));
+})()`;
+
+/**
+ * Scrolls to the middle of the document and appends a line to its file, as a save in an editor
+ * does. Returns when the file was saved, and the line at the top of the view before the save.
+ */
+async function saveInTheMiddle(document) {
+  const { evaluate, close } = await connect();
+  try {
+    await evaluate(
+      "document.scrollingElement.scrollTop = document.scrollingElement.scrollHeight / 2",
+    );
+    await sleep(1_000);
+    const lineBefore = await evaluate(TOP_LINE);
+    const at = performance.now();
+    appendFileSync(document, "\nA line added by the reload measurement.\n");
+    return { at, lineBefore };
+  } finally {
+    close();
+  }
+}
+
+/** The line at the top of the view now (`TOP_LINE`). */
+async function topLineNow() {
+  const { evaluate, close } = await connect();
+  try {
+    return await evaluate(TOP_LINE);
+  } finally {
+    close();
+  }
+}
+
+/**
+ * Jumps to the end and to the middle, then pages down 150 times, one page a frame: the moves
+ * that lay out blocks the reader hasn't seen yet.
+ */
+async function scrollThrough() {
+  const { evaluate, close } = await connect();
   try {
     await evaluate("document.scrollingElement.scrollTop = 1e9");
     await sleep(1_000);
@@ -145,7 +218,7 @@ async function scrollThrough() {
       }
     })()`);
   } finally {
-    socket.close();
+    close();
   }
 }
 
@@ -309,6 +382,27 @@ function scrolled({ reports, memory }) {
   return { longestAfterDocument: measures.longestAfterDocument };
 }
 
+/** A save to the file in the middle of the 1 MB document, until the reload is shown. */
+function reloaded({ reports, saved }) {
+  const [reload] = reportsOf(reports, "document-0", "reload");
+  const [shown] = reportsOf(reports, "document-0", "reload-shown");
+  const after = reports
+    .filter((r) => r.event === "long-task" || r.event === "long-frame")
+    .filter((r) => r.at >= reload.at && r.seen < saved.probed)
+    .map((r) => r.duration);
+  return {
+    // The 150 ms of quiet the watch waits for are part of this.
+    shownSinceSave: shown.seen - saved.at,
+    read: reload.read,
+    render: reload.render,
+    insert: shown.insert,
+    anchor: shown.anchor,
+    longestAfterReload: Math.max(0, ...after),
+    // How far the line at the top of the view moved; 0 when the reload kept the reading position.
+    linesMoved: Math.abs(saved.lineAfter - saved.lineBefore),
+  };
+}
+
 function table(cases) {
   const keys = [...new Set(cases.flatMap((c) => Object.keys(c.runs[0])))];
   const lines = [
@@ -346,6 +440,16 @@ const second = await measure(
   secondWindow,
   { laterDocuments: [DOCUMENTS.mixed100kbOther] },
 );
+const reload = await measure(
+  "Reload, 1 MB mixed",
+  [RELOAD_DOCUMENT],
+  reloaded,
+  // A fresh copy each run, since a run appends to it.
+  {
+    reload: true,
+    prepare: () => copyFileSync(DOCUMENTS.mixed1mb, RELOAD_DOCUMENT),
+  },
+);
 const scrolling = [
   await measure("1 MB mixed", [DOCUMENTS.mixed1mb], scrolled, {
     scroll: true,
@@ -361,3 +465,7 @@ console.log();
 console.log("Scrolling through the document after first paint:");
 console.log();
 console.log(table(scrolling));
+console.log();
+console.log("A save in the middle of the document, until the reload is shown:");
+console.log();
+console.log(table([reload]));

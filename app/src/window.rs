@@ -1,5 +1,6 @@
 //! A window per document, in one process (ADR 0001): which window shows which document, opening
-//! a window or bringing an open document's window to the front, and closing it.
+//! a window or bringing an open document's window to the front, and closing it. Reload
+//! (`reload.rs`) keeps a window's watch and its document's next render in the table kept here.
 
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -15,7 +16,8 @@ use tauri::{
 
 use crate::render::{self, RenderTask};
 use crate::timing::Timing;
-use crate::{APP_NAME, command_line, platform};
+use crate::watch::Watch;
+use crate::{APP_NAME, command_line, platform, reload};
 
 /// The event that tells a window's page its window shows another document now.
 const DOCUMENT_SHOWN: &str = "document-shown";
@@ -43,9 +45,17 @@ struct ShownDocument {
     /// The document's read and render, started when the window was given it and taken by its
     /// page's first request. A new window's page asks only once its webview has started, about
     /// 600 ms into a cold start, and each grammar costs up to 300 ms on its first use in the
-    /// process (ticket 07), so the render runs while the webview starts. A later request (Reload,
-    /// ticket 10) reads the file again.
+    /// process (ticket 07), so the render runs while the webview starts. A reload starts a new
+    /// one (`OpenWindows::reload_ahead`).
     render_ahead: Option<RenderTask>,
+    /// The watch on the document's file, which reloads it; None until it has started (`show`), or
+    /// if it couldn't. Replacing or forgetting the entry drops it, which stops it.
+    watch: Option<Watch>,
+    /// Whether the page has asked for this document yet (`OpenWindows::render_of`), and so
+    /// listens for notices.
+    page_asked: bool,
+    /// A notice about this document, held for the page's first request (`hold_notice`).
+    held_notice: Option<String>,
 }
 
 impl ShownDocument {
@@ -53,9 +63,20 @@ impl ShownDocument {
         Self {
             path: path.to_owned(),
             key,
-            render_ahead: Some(render::start(path)),
+            render_ahead: Some(render::start(path, "read-and-render")),
+            watch: None,
+            page_asked: false,
+            held_notice: None,
         }
     }
+}
+
+/// What a window's page gets when it asks for its document.
+pub struct Handover {
+    /// The document's read and render.
+    pub render: RenderTask,
+    /// A notice about the document for the page to show, held since before the page asked.
+    pub notice: Option<String>,
 }
 
 /// The window a document is to be shown in.
@@ -69,12 +90,22 @@ pub enum Target<'a> {
 
 /// What showing a document changed, by window label. The caller acts on it: it opens a new
 /// window, or titles a changed one and tells its page.
+///
+/// A window given a document comes with the document's key (None for no document), and its watch
+/// is kept under that key. A key worked out again later could differ, had the file been renamed,
+/// deleted or named by a short name in between, and the window would then drop its watch.
 #[derive(Debug, PartialEq, Eq)]
 enum Claim {
-    /// A new window with this label shows the document; the caller opens it.
-    New(String),
-    /// The window with this label shows the document now.
-    Changed(String),
+    /// A new window shows the document; the caller opens it.
+    New {
+        window: String,
+        key: Option<PathBuf>,
+    },
+    /// The window shows the document now.
+    Changed {
+        window: String,
+        key: Option<PathBuf>,
+    },
     /// The document is already open in the window with this label.
     AlreadyOpen(String),
     /// The target window has closed.
@@ -95,21 +126,24 @@ impl OpenWindows {
         }
         // Made only once a window takes the document, so that an open document or a closed
         // window starts no render.
-        let shown = || {
+        let shown = |key: &Option<PathBuf>| {
             document
-                .zip(key)
+                .zip(key.clone())
                 .map(|(path, key)| ShownDocument::given(path, key))
         };
         match target {
             Target::NewWindow => {
-                let label = table.next_label();
-                table.shown.insert(label.clone(), shown());
-                Claim::New(label)
+                let window = table.next_label();
+                table.shown.insert(window.clone(), shown(&key));
+                Claim::New { window, key }
             }
-            Target::Window(label) => match table.shown.get_mut(label) {
+            Target::Window(window) => match table.shown.get_mut(window) {
                 Some(entry) => {
-                    *entry = shown();
-                    Claim::Changed(label.to_owned())
+                    *entry = shown(&key);
+                    Claim::Changed {
+                        window: window.to_owned(),
+                        key,
+                    }
                 }
                 None => Claim::WindowGone,
             },
@@ -119,17 +153,71 @@ impl OpenWindows {
     /// `window`'s document read and rendered, or None while the window shows none: the render
     /// started when the window was given the document, the first time, and a new read of its
     /// file after that.
-    pub fn render_of(&self, window: &str) -> Option<RenderTask> {
-        let (path, ahead) = {
+    pub fn render_of(&self, window: &str) -> Option<Handover> {
+        let (path, ahead, notice) = {
             let mut table = self.lock();
             let shown = table.shown.get_mut(window)?.as_mut()?;
-            (shown.path.clone(), shown.render_ahead.take())
+            shown.page_asked = true;
+            (
+                shown.path.clone(),
+                shown.render_ahead.take(),
+                shown.held_notice.take(),
+            )
         };
-        Some(ahead.unwrap_or_else(|| render::start(&path)))
+        Some(Handover {
+            render: ahead.unwrap_or_else(|| render::start(&path, "read-and-render")),
+            notice,
+        })
+    }
+
+    /// Holds `message`, a notice about the document with `key`, for `window`'s page until the page
+    /// first asks for that document. Once it has asked, the message comes back, to be shown now. A
+    /// message for a document the window has left, or for a closed window, is dropped.
+    ///
+    /// A new window's page listens for nothing until its webview has started, about 600 ms after
+    /// the window was given its document, so a notice sent before then would be lost. The page
+    /// listens for notices before it first asks for its document, so one handed over with that
+    /// request reaches it (ticket 10). Held on the document's entry, a notice goes when the
+    /// window is given another document.
+    pub fn hold_notice(&self, window: &str, key: &Path, message: String) -> Option<String> {
+        let mut table = self.lock();
+        let shown = table.shown_mut(window, key)?;
+        if shown.page_asked {
+            return Some(message);
+        }
+        shown.held_notice = Some(message);
+        None
+    }
+
+    /// Starts reading and rendering `window`'s document again, for the page's next request (a
+    /// reload). False while the window shows no document, and then there is nothing to reload.
+    pub fn reload_ahead(&self, window: &str) -> bool {
+        let mut table = self.lock();
+        let Some(shown) = table.shown.get_mut(window).and_then(Option::as_mut) else {
+            return false;
+        };
+        shown.render_ahead = Some(render::start(&shown.path, "reload"));
+        true
+    }
+
+    /// Whether `window` still shows the document with `key`. A watch can report a change after
+    /// its window has left the document or closed, and a document the window has left is never
+    /// reloaded.
+    pub fn shows(&self, window: &str, key: &Path) -> bool {
+        self.lock().shown_mut(window, key).is_some()
+    }
+
+    /// Gives `window` the watch started for the document with `key`. A watch that started after
+    /// the window was given another document, or closed, is dropped instead, so a save to a
+    /// document the window has left never reloads it.
+    pub fn keep_watch(&self, window: &str, key: &Path, watch: Watch) {
+        if let Some(shown) = self.lock().shown_mut(window, key) {
+            shown.watch = Some(watch);
+        }
     }
 
     /// Forgets a window that closed or never opened, so its document opens anew. A render started
-    /// for it goes with it.
+    /// for it, and the watch on its document, go with it.
     fn forget(&self, window: &str) {
         self.lock().shown.remove(window);
     }
@@ -157,6 +245,14 @@ fn document_key(document: &Path) -> PathBuf {
 }
 
 impl WindowTable {
+    /// What `window` shows, while it shows the document with `key`.
+    fn shown_mut(&mut self, window: &str, key: &Path) -> Option<&mut ShownDocument> {
+        self.shown
+            .get_mut(window)
+            .and_then(Option::as_mut)
+            .filter(|shown| shown.key == key)
+    }
+
     fn window_showing(&self, key: &Path) -> Option<String> {
         self.shown.iter().find_map(|(label, shown)| {
             shown
@@ -243,14 +339,20 @@ pub fn open_launch(
 /// which its page renders the document.
 ///
 /// The document's render starts as soon as the window is given it, so that it runs while a new
-/// window's webview starts (`ShownDocument::render_ahead`).
+/// window's webview starts (`ShownDocument::render_ahead`), and the window starts watching the
+/// document's file, to reload it when it changes.
 pub fn show(app: &AppHandle, document: Option<&Path>, target: Target<'_>) -> tauri::Result<()> {
     let open_windows = app.state::<OpenWindows>();
     match open_windows.claim(document, target) {
-        Claim::New(label) => open_window(app, &label, &title_of(document)).inspect_err(|_| {
-            open_windows.forget(&label);
-        }),
-        Claim::Changed(label) => {
+        Claim::New { window, key } => {
+            open_window(app, &window, &title_of(document)).inspect_err(|_| {
+                open_windows.forget(&window);
+            })?;
+            watch(app, &window, document, key);
+            Ok(())
+        }
+        Claim::Changed { window: label, key } => {
+            watch(app, &label, document, key);
             let window = app
                 .get_webview_window(&label)
                 .ok_or(tauri::Error::WindowNotFound)?;
@@ -259,6 +361,14 @@ pub fn show(app: &AppHandle, document: Option<&Path>, target: Target<'_>) -> tau
         }
         Claim::AlreadyOpen(label) => bring_to_front(app, &label),
         Claim::WindowGone => Err(tauri::Error::WindowNotFound),
+    }
+}
+
+/// Starts watching the file of the document `window` was given with `key`, to reload it when it
+/// changes. A window given no document has nothing to watch.
+fn watch(app: &AppHandle, window: &str, document: Option<&Path>, key: Option<PathBuf>) {
+    if let Some((document, key)) = document.zip(key) {
+        reload::watch_document(app, window, document, key);
     }
 }
 
@@ -281,7 +391,7 @@ fn open_window(app: &AppHandle, label: &str, title: &str) -> tauri::Result<()> {
     timing.window_opening(label);
     // Decided once, so the page drops its background exactly when the window is transparent.
     let backdrop = platform::has_backdrop();
-    let url = WebviewUrl::App(page_path(timing.is_on(), backdrop).into());
+    let url = WebviewUrl::App(timing.page_url(backdrop).into());
     let builder = WebviewWindowBuilder::new(app, label, url)
         .title(title)
         .visible(false);
@@ -291,6 +401,7 @@ fn open_window(app: &AppHandle, label: &str, title: &str) -> tauri::Result<()> {
         builder
     };
     let window = builder.build()?;
+    platform::leave_reload_keys_to_the_page(&window);
     std::thread::spawn(move || {
         std::thread::sleep(LONGEST_HIDDEN);
         // The window may have closed meanwhile, and then there is nothing to show.
@@ -299,21 +410,6 @@ fn open_window(app: &AppHandle, label: &str, title: &str) -> tauri::Result<()> {
         }
     });
     Ok(())
-}
-
-/// The page and what it is told in its query: `timing` turns on its timing reports, and
-/// `backdrop` says the window is transparent over the system's backdrop (Mica on Windows), so the
-/// page draws no background of its own.
-fn page_path(timing: bool, backdrop: bool) -> String {
-    let flags = [("timing", timing), ("backdrop", backdrop)]
-        .into_iter()
-        .filter_map(|(flag, on)| on.then_some(flag))
-        .collect::<Vec<_>>();
-    if flags.is_empty() {
-        "index.html".to_owned()
-    } else {
-        format!("index.html?{}", flags.join("&"))
-    }
 }
 
 fn bring_to_front(app: &AppHandle, label: &str) -> tauri::Result<()> {
@@ -368,373 +464,4 @@ fn title_of(document: Option<&Path>) -> String {
 }
 
 #[cfg(all(test, windows))]
-mod tests {
-    use std::path::PathBuf;
-
-    use tauri::async_runtime::block_on;
-
-    use super::*;
-
-    /// A file that exists: the app crate's own manifest.
-    fn manifest() -> PathBuf {
-        app_file("Cargo.toml")
-    }
-
-    fn app_file(name: &str) -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR")).join(name)
-    }
-
-    /// Opens a new window for `document` (None: an empty window) and returns its label.
-    #[expect(
-        clippy::panic,
-        reason = "a helper isn't a #[test] function, and its panic fails the test that called it"
-    )]
-    fn open_new(windows: &OpenWindows, document: Option<&Path>) -> String {
-        match windows.claim(document, Target::NewWindow) {
-            Claim::New(label) => label,
-            other => panic!("expected a new window, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn first_claim_of_a_document_names_a_new_window_that_shows_it() {
-        let windows = OpenWindows::default();
-        let label = open_new(&windows, Some(&manifest()));
-        assert_eq!(document_of(&windows, &label), Some(manifest()));
-    }
-
-    #[test]
-    fn open_document_claimed_again_gives_its_window() {
-        let windows = OpenWindows::default();
-        let first = open_new(&windows, Some(&manifest()));
-        assert_eq!(
-            windows.claim(Some(&manifest()), Target::NewWindow),
-            Claim::AlreadyOpen(first)
-        );
-    }
-
-    #[test]
-    fn open_document_is_found_ignoring_case() {
-        let windows = OpenWindows::default();
-        let first = open_new(&windows, Some(&manifest()));
-        assert_eq!(
-            windows.claim(Some(&app_file("CARGO.TOML")), Target::NewWindow),
-            Claim::AlreadyOpen(first)
-        );
-    }
-
-    #[test]
-    fn open_document_is_found_through_a_parent_folder_step() {
-        let windows = OpenWindows::default();
-        let first = open_new(&windows, Some(&manifest()));
-        let roundabout = app_file("src").join("..").join("Cargo.toml");
-        assert_eq!(
-            windows.claim(Some(&roundabout), Target::NewWindow),
-            Claim::AlreadyOpen(first)
-        );
-    }
-
-    #[test]
-    fn missing_document_claimed_again_in_other_case_gives_its_window() {
-        let windows = OpenWindows::default();
-        let first = open_new(&windows, Some(&app_file("missing.md")));
-        assert_eq!(
-            windows.claim(Some(&app_file("MISSING.md")), Target::NewWindow),
-            Claim::AlreadyOpen(first)
-        );
-    }
-
-    #[test]
-    fn other_document_opens_another_window() {
-        let windows = OpenWindows::default();
-        let first = open_new(&windows, Some(&manifest()));
-        let other = open_new(&windows, Some(&app_file("build.rs")));
-        assert_ne!(first, other);
-    }
-
-    #[test]
-    fn forgotten_window_gives_its_document_a_new_window() {
-        let windows = OpenWindows::default();
-        let first = open_new(&windows, Some(&manifest()));
-        windows.forget(&first);
-        assert!(matches!(
-            windows.claim(Some(&manifest()), Target::NewWindow),
-            Claim::New(_)
-        ));
-        assert_eq!(document_of(&windows, &first), None);
-    }
-
-    #[test]
-    fn empty_windows_are_never_the_same_window() {
-        let windows = OpenWindows::default();
-        let first = open_new(&windows, None);
-        let second = open_new(&windows, None);
-        assert_ne!(first, second);
-        assert_eq!(document_of(&windows, &first), None);
-    }
-
-    #[test]
-    fn window_without_a_document_is_titled_downlight() {
-        assert_eq!(title_of(None), "Downlight");
-    }
-
-    #[test]
-    fn empty_window_shows_the_document_it_is_given() {
-        let windows = OpenWindows::default();
-        let label = open_new(&windows, None);
-        assert_eq!(
-            windows.claim(Some(&manifest()), Target::Window(&label)),
-            Claim::Changed(label.clone())
-        );
-        assert_eq!(document_of(&windows, &label), Some(manifest()));
-    }
-
-    #[test]
-    fn window_shows_another_document_in_place_of_its_own() {
-        let windows = OpenWindows::default();
-        let label = open_new(&windows, Some(&manifest()));
-        let other = app_file("build.rs");
-        assert_eq!(
-            windows.claim(Some(&other), Target::Window(&label)),
-            Claim::Changed(label.clone())
-        );
-        assert_eq!(document_of(&windows, &label), Some(other));
-    }
-
-    #[test]
-    fn document_a_window_gave_up_opens_anew() {
-        let windows = OpenWindows::default();
-        let label = open_new(&windows, Some(&manifest()));
-        windows.claim(Some(&app_file("build.rs")), Target::Window(&label));
-        assert!(matches!(
-            windows.claim(Some(&manifest()), Target::NewWindow),
-            Claim::New(_)
-        ));
-    }
-
-    #[test]
-    fn document_shown_in_a_window_is_found_there_again() {
-        let windows = OpenWindows::default();
-        let label = open_new(&windows, None);
-        windows.claim(Some(&manifest()), Target::Window(&label));
-        assert_eq!(
-            windows.claim(Some(&app_file("CARGO.TOML")), Target::NewWindow),
-            Claim::AlreadyOpen(label)
-        );
-    }
-
-    #[test]
-    fn document_open_in_another_window_stays_there() {
-        let windows = OpenWindows::default();
-        let first = open_new(&windows, Some(&manifest()));
-        let second = open_new(&windows, Some(&app_file("build.rs")));
-        assert_eq!(
-            windows.claim(Some(&manifest()), Target::Window(&second)),
-            Claim::AlreadyOpen(first)
-        );
-        assert_eq!(document_of(&windows, &second), Some(app_file("build.rs")));
-    }
-
-    #[test]
-    fn showing_in_a_closed_window_changes_nothing() {
-        let windows = OpenWindows::default();
-        let label = open_new(&windows, None);
-        windows.forget(&label);
-        assert_eq!(
-            windows.claim(Some(&manifest()), Target::Window(&label)),
-            Claim::WindowGone
-        );
-        assert!(matches!(
-            windows.claim(Some(&manifest()), Target::NewWindow),
-            Claim::New(_)
-        ));
-    }
-
-    /// The document `window` shows, as the page's next render reads it.
-    fn document_of(windows: &OpenWindows, window: &str) -> Option<PathBuf> {
-        windows
-            .lock()
-            .shown
-            .get(window)?
-            .as_ref()
-            .map(|shown| shown.path.clone())
-    }
-
-    /// A document file of the test's own, so that tests running in parallel never share one.
-    #[expect(
-        clippy::unwrap_used,
-        reason = "a helper isn't a #[test] function, and its panic fails the test that called it"
-    )]
-    fn document(test: &str, text: &str) -> PathBuf {
-        let path =
-            std::env::temp_dir().join(format!("downlight-window-{}-{test}.md", std::process::id()));
-        std::fs::write(&path, text).unwrap();
-        path
-    }
-
-    /// The HTML `window`'s page gets when it asks for its document.
-    #[expect(
-        clippy::panic,
-        reason = "a helper isn't a #[test] function, and its panic fails the test that called it"
-    )]
-    fn rendered_html(windows: &OpenWindows, window: &str) -> String {
-        let Some(task) = windows.render_of(window) else {
-            panic!("expected {window} to show a document");
-        };
-        match block_on(task) {
-            Ok(Ok((document, _))) => document.as_str().to_owned(),
-            Ok(Err(error)) => panic!("expected a rendered document, got {error}"),
-            Err(error) => panic!("the read and render stopped: {error}"),
-        }
-    }
-
-    /// Waits until the render started ahead for `window` has read and rendered its document, so
-    /// that a test can change the file afterwards and tell the two reads apart.
-    #[expect(
-        clippy::panic,
-        reason = "a helper isn't a #[test] function, and its panic fails the test that called it"
-    )]
-    fn wait_for_render_ahead(windows: &OpenWindows, window: &str) {
-        for _ in 0..500 {
-            let finished = windows.lock().shown[window]
-                .as_ref()
-                .and_then(|shown| shown.render_ahead.as_ref())
-                .is_some_and(|task| task.inner().is_finished());
-            if finished {
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        panic!("the render ahead for {window} didn't finish in 5 s");
-    }
-
-    #[test]
-    fn window_given_a_new_document_renders_it_ahead() {
-        let path = document("new", "# Read ahead");
-        let windows = OpenWindows::default();
-        let label = open_new(&windows, Some(&path));
-        wait_for_render_ahead(&windows, &label);
-        std::fs::write(&path, "# Changed since").unwrap();
-        let shown = rendered_html(&windows, &label);
-        std::fs::remove_file(&path).unwrap();
-        assert!(shown.contains("Read ahead"), "{shown}");
-    }
-
-    #[test]
-    fn window_changed_to_another_document_renders_the_new_one_ahead() {
-        let first = document("changed-first", "# First document");
-        let second = document("changed-second", "# Second document");
-        let windows = OpenWindows::default();
-        let label = open_new(&windows, Some(&first));
-        windows.claim(Some(&second), Target::Window(&label));
-        wait_for_render_ahead(&windows, &label);
-        std::fs::write(&second, "# Changed since").unwrap();
-        let shown = rendered_html(&windows, &label);
-        std::fs::remove_file(&first).unwrap();
-        std::fs::remove_file(&second).unwrap();
-        assert!(shown.contains("Second document"), "{shown}");
-    }
-
-    #[test]
-    fn next_render_after_the_first_reads_the_file_again() {
-        let path = document("again", "# First");
-        let windows = OpenWindows::default();
-        let label = open_new(&windows, Some(&path));
-        rendered_html(&windows, &label);
-        std::fs::write(&path, "# Second").unwrap();
-        let shown = rendered_html(&windows, &label);
-        std::fs::remove_file(&path).unwrap();
-        assert!(shown.contains("Second"), "{shown}");
-    }
-
-    #[test]
-    fn opening_an_open_document_again_starts_no_render_for_its_window() {
-        let windows = OpenWindows::default();
-        let label = open_new(&windows, Some(&manifest()));
-        let _ = windows.render_of(&label);
-        windows.claim(Some(&manifest()), Target::NewWindow);
-        // Its window shows it already, so a render ahead would be read and then never used.
-        let shown = windows.lock().shown[&label]
-            .as_ref()
-            .map(|shown| shown.render_ahead.is_some());
-        assert_eq!(shown, Some(false));
-    }
-
-    #[test]
-    fn window_without_a_document_has_nothing_to_render() {
-        let windows = OpenWindows::default();
-        let label = open_new(&windows, None);
-        assert!(windows.render_of(&label).is_none());
-    }
-
-    #[test]
-    fn failure_names_its_document_and_the_error() {
-        let failure = LaunchFailure {
-            document: Some(PathBuf::from(r"C:\work\docs\README.md")),
-            error: tauri::Error::WindowNotFound,
-        };
-        assert_eq!(
-            failure.to_string(),
-            r"Can't open a window for C:\work\docs\README.md: window not found"
-        );
-    }
-
-    #[test]
-    fn failure_of_the_window_without_a_document_names_the_error() {
-        let failure = LaunchFailure {
-            document: None,
-            error: tauri::Error::WindowNotFound,
-        };
-        assert_eq!(failure.to_string(), "Can't open a window: window not found");
-    }
-
-    #[test]
-    fn report_names_each_failure_on_a_line_of_its_own() {
-        let failures = [
-            LaunchFailure {
-                document: Some(PathBuf::from(r"C:\work\a.md")),
-                error: tauri::Error::WindowNotFound,
-            },
-            LaunchFailure {
-                document: Some(PathBuf::from(r"C:\work\b.md")),
-                error: tauri::Error::WindowNotFound,
-            },
-        ];
-        assert_eq!(
-            failure_report(&failures).as_deref(),
-            Some(
-                "Can't open a window for C:\\work\\a.md: window not found\n\
-                 Can't open a window for C:\\work\\b.md: window not found"
-            )
-        );
-    }
-
-    #[test]
-    fn launch_without_failures_has_nothing_to_report() {
-        assert_eq!(failure_report(&[]), None);
-    }
-
-    #[test]
-    fn page_is_told_about_timing_and_backdrop() {
-        assert_eq!(page_path(false, false), "index.html");
-        assert_eq!(page_path(true, false), "index.html?timing");
-        assert_eq!(page_path(false, true), "index.html?backdrop");
-        assert_eq!(page_path(true, true), "index.html?timing&backdrop");
-    }
-
-    #[test]
-    fn title_names_the_file_then_its_folder_then_downlight() {
-        assert_eq!(
-            title_of(Some(Path::new(r"C:\work\docs\README.md"))),
-            "README.md - docs - Downlight"
-        );
-    }
-
-    #[test]
-    fn title_of_a_file_at_a_drive_root_names_the_drive() {
-        assert_eq!(
-            title_of(Some(Path::new(r"C:\README.md"))),
-            r"README.md - C:\ - Downlight"
-        );
-    }
-}
+mod tests;

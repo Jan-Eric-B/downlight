@@ -2,9 +2,17 @@ use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
 use tauri::window::{Effect, EffectsBuilder};
-use tauri::{Manager, Runtime, WebviewWindowBuilder};
+use tauri::{Manager, Runtime, WebviewWindow, WebviewWindowBuilder};
+use webview2_com::AcceleratorKeyPressedEventHandler;
+use webview2_com::Microsoft::Web::WebView2::Win32::{
+    ICoreWebView2AcceleratorKeyPressedEventArgs, ICoreWebView2AcceleratorKeyPressedEventArgs2,
+};
+use windows_core::Interface as _;
 use windows_sys::Win32::Foundation::FILETIME;
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, GetProcessTimes};
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+    GetKeyState, VK_BROWSER_REFRESH, VK_CONTROL, VK_F5,
+};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     MB_ICONERROR, MB_OK, MB_SETFOREGROUND, MessageBoxW,
 };
@@ -75,6 +83,52 @@ pub fn show_error(message: &str) {
 /// `s` as the NUL-terminated UTF-16 string Windows' wide APIs take.
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+/// Leaves WebView2's reload keys (F5, Ctrl+R, Ctrl+Shift+R, Ctrl+F5, Shift+F5 and a keyboard's
+/// Refresh key) to the page, which reloads the document on F5 and Ctrl+R and swallows the rest
+/// (ticket 10). Without this, WebView2 loads the page anew on Ctrl+Shift+R even when the page
+/// cancels the key, and the window loses its reading position. WebView2's other keys, such as
+/// zoom, keep working, which turning off all its browser keys would stop.
+///
+/// Without the handler only Ctrl+Shift+R still loads the page anew, and the window works
+/// otherwise, so a failure to reach the webview or to add the handler is left at that.
+pub fn leave_reload_keys_to_the_page(window: &WebviewWindow) {
+    let _ = window.with_webview(|webview| {
+        let handler = AcceleratorKeyPressedEventHandler::create(Box::new(|_, args| {
+            args.map_or(Ok(()), |args| leave_to_the_page_if_reload(&args))
+        }));
+        let mut token = 0;
+        // SAFETY: the handler and the token are valid for the call, and the controller keeps its
+        // own reference to the handler. The token isn't needed: the handler lives as long as the
+        // webview.
+        let _ = unsafe {
+            webview
+                .controller()
+                .add_AcceleratorKeyPressed(&handler, &mut token)
+        };
+    });
+}
+
+fn leave_to_the_page_if_reload(
+    args: &ICoreWebView2AcceleratorKeyPressedEventArgs,
+) -> windows_core::Result<()> {
+    let mut key = 0;
+    // SAFETY: `key` is a live u32 that VirtualKey only writes.
+    unsafe { args.VirtualKey(&mut key)? };
+    // SAFETY: GetKeyState only reads the calling thread's keyboard state. The event comes on the
+    // window's thread while it handles the key, so that state is the key's own.
+    let ctrl_held = unsafe { GetKeyState(i32::from(VK_CONTROL)) } < 0;
+    let reload = key == u32::from(VK_F5)
+        || key == u32::from(VK_BROWSER_REFRESH)
+        || (key == u32::from(b'R') && ctrl_held);
+    if reload {
+        // WebView2 still passes the key on to the page.
+        let args: ICoreWebView2AcceleratorKeyPressedEventArgs2 = args.cast()?;
+        // SAFETY: a plain property setter on a live interface.
+        unsafe { args.SetIsBrowserAcceleratorKeyEnabled(false)? };
+    }
+    Ok(())
 }
 
 /// When Windows created this process, so first paint counts the loader's work before `main` too.

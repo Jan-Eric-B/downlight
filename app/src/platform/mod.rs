@@ -6,8 +6,13 @@ mod windows;
 
 #[cfg(windows)]
 pub use windows::{
-    custom_scheme_origin, fold_case, has_backdrop, process_start, show_error, with_backdrop,
+    custom_scheme_origin, fold_case, has_backdrop, leave_reload_keys_to_the_page, process_start,
+    show_error, with_backdrop,
 };
+
+/// Other systems' webviews get their reload keys looked at with their ports.
+#[cfg(not(windows))]
+pub fn leave_reload_keys_to_the_page(_window: &tauri::WebviewWindow) {}
 
 /// Other systems print the error on stderr until their ports give it a native dialog.
 #[cfg(not(windows))]

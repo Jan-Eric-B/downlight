@@ -10,7 +10,7 @@
 //! does for a further window's cost from its `window-opening`.
 
 use std::io::Write as _;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use serde::Deserialize;
 use tauri::{State, WebviewWindow};
@@ -25,11 +25,35 @@ pub struct Timing {
     process_start_ms: Option<f64>,
 }
 
-/// When reading and rendering a document started, and how long each took.
-pub struct ReadAndRenderTimes {
-    pub started: SystemTime,
-    pub read: Duration,
-    pub render: Duration,
+/// The clock for a piece of work in stages, such as reading and rendering a document: when it
+/// started, and how long each stage took. [`Timing::report`] reports it as one line.
+///
+/// It runs whether the switch is on or not, since the work may start before the window's
+/// `Timing` is at hand (a render ahead starts when the window is given its document).
+pub struct Stages {
+    event: &'static str,
+    started: SystemTime,
+    last_lap: Instant,
+    laps: Vec<(&'static str, Duration)>,
+}
+
+impl Stages {
+    /// Starts the clock for the work the report names `event`, such as `reload`.
+    pub fn start(event: &'static str) -> Self {
+        Self {
+            event,
+            started: SystemTime::now(),
+            last_lap: Instant::now(),
+            laps: Vec::new(),
+        }
+    }
+
+    /// Ends the stage named `stage`, which began when the work or the stage before ended.
+    pub fn lap(&mut self, stage: &'static str) {
+        let now = Instant::now();
+        self.laps.push((stage, now - self.last_lap));
+        self.last_lap = now;
+    }
 }
 
 impl Timing {
@@ -41,8 +65,22 @@ impl Timing {
         Self { process_start_ms }
     }
 
-    pub fn is_on(&self) -> bool {
-        self.process_start_ms.is_some()
+    /// The page and what it is told in its query: `timing` turns on its timing reports, and
+    /// `backdrop` says the window is transparent over the system's backdrop (Mica on Windows), so
+    /// the page draws no background of its own.
+    pub fn page_url(&self, backdrop: bool) -> String {
+        let flags = [
+            ("timing", self.process_start_ms.is_some()),
+            ("backdrop", backdrop),
+        ]
+        .into_iter()
+        .filter_map(|(flag, on)| on.then_some(flag))
+        .collect::<Vec<_>>();
+        if flags.is_empty() {
+            "index.html".to_owned()
+        } else {
+            format!("index.html?{}", flags.join("&"))
+        }
     }
 
     /// Notes that a window starts opening, which is where a further window in a running process
@@ -57,19 +95,25 @@ impl Timing {
         self.report_now(window, "window-shown");
     }
 
-    pub fn read_and_render(&self, window: &str, times: &ReadAndRenderTimes) {
-        let Some(start) = self.process_start_ms else {
-            return;
-        };
-        report(
+    /// Reports `window`'s work in stages: when it started, then each stage's duration.
+    pub fn report(&self, window: &str, stages: &Stages) {
+        if let Some(line) = self.line(window, stages) {
+            write_line(&line);
+        }
+    }
+
+    fn line(&self, window: &str, stages: &Stages) -> Option<String> {
+        let start = self.process_start_ms?;
+        let at = ("at", epoch_ms_of(stages.started) - start);
+        let laps = stages
+            .laps
+            .iter()
+            .map(|&(stage, duration)| (stage, duration.as_secs_f64() * 1000.0));
+        Some(line_of(
             window,
-            "read-and-render",
-            &[
-                ("at", epoch_ms_of(times.started) - start),
-                ("read", times.read.as_secs_f64() * 1000.0),
-                ("render", times.render.as_secs_f64() * 1000.0),
-            ],
-        );
+            stages.event,
+            &std::iter::once(at).chain(laps).collect::<Vec<_>>(),
+        ))
     }
 
     fn first_paint(&self, window: &str, marks: &FirstPaintMarks) {
@@ -86,6 +130,21 @@ impl Timing {
                 ("requested", marks.document_requested - start),
                 ("received", marks.document_received - start),
                 ("inserted", marks.document_inserted - start),
+            ],
+        );
+    }
+
+    fn reload_shown(&self, window: &str, marks: &ReloadMarks) {
+        let Some(start) = self.process_start_ms else {
+            return;
+        };
+        report(
+            window,
+            "reload-shown",
+            &[
+                ("at", marks.received - start),
+                ("insert", marks.inserted - marks.received),
+                ("anchor", marks.anchored - marks.inserted),
             ],
         );
     }
@@ -114,10 +173,19 @@ impl Timing {
 }
 
 fn report(window: &str, event: &str, fields: &[(&str, f64)]) {
+    write_line(&line_of(window, event, fields));
+}
+
+/// `timing <window> <event> key=value ...`, the format `scripts/measure.js` reads.
+fn line_of(window: &str, event: &str, fields: &[(&str, f64)]) -> String {
     let mut line = format!("timing {window} {event}");
     for (key, value) in fields {
         line.push_str(&format!(" {key}={value:.1}"));
     }
+    line
+}
+
+fn write_line(line: &str) {
     // A report that can't be written is only lost; it must never stop the window.
     let _ = writeln!(std::io::stderr().lock(), "{line}");
 }
@@ -142,6 +210,16 @@ pub struct FirstPaintMarks {
     document_inserted: f64,
     /// When the frame after the document was inserted finished.
     first_frame: f64,
+}
+
+/// The page's marks while it shows a reload, in ms since the Unix epoch.
+#[derive(Deserialize)]
+pub struct ReloadMarks {
+    /// When the reloaded document's HTML arrived.
+    received: f64,
+    inserted: f64,
+    /// When the view was back at the reading position.
+    anchored: f64,
 }
 
 /// A page task or frame that kept the page from answering for over 100 ms.
@@ -182,6 +260,72 @@ pub fn report_first_paint(
 }
 
 #[tauri::command]
+pub fn report_reload(window: WebviewWindow, marks: ReloadMarks, timing: State<'_, Timing>) {
+    timing.reload_shown(window.label(), &marks);
+}
+
+#[tauri::command]
 pub fn report_long_task(window: WebviewWindow, task: LongTask, timing: State<'_, Timing>) {
     timing.long_task(window.label(), &task);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn report_line_keeps_the_measure_format() {
+        let timing = Timing {
+            process_start_ms: Some(1000.0),
+        };
+        let stages = Stages {
+            event: "reload",
+            started: SystemTime::UNIX_EPOCH + Duration::from_millis(1001),
+            laps: vec![
+                ("read", Duration::from_millis(2)),
+                ("render", Duration::from_millis(3)),
+            ],
+            ..Stages::start("reload")
+        };
+        assert_eq!(
+            timing.line("document-0", &stages).as_deref(),
+            Some("timing document-0 reload at=1.0 read=2.0 render=3.0")
+        );
+    }
+
+    #[test]
+    fn report_with_the_switch_off_is_no_line() {
+        let timing = Timing {
+            process_start_ms: None,
+        };
+        assert_eq!(timing.line("document-0", &Stages::start("reload")), None);
+    }
+
+    #[test]
+    fn page_url_tells_the_page_about_timing_and_backdrop() {
+        let off = Timing {
+            process_start_ms: None,
+        };
+        let on = Timing {
+            process_start_ms: Some(0.0),
+        };
+        assert_eq!(off.page_url(false), "index.html");
+        assert_eq!(on.page_url(false), "index.html?timing");
+        assert_eq!(off.page_url(true), "index.html?backdrop");
+        assert_eq!(on.page_url(true), "index.html?timing&backdrop");
+    }
+
+    #[test]
+    fn stages_lap_the_time_since_the_lap_before() {
+        let mut stages = Stages::start("read-and-render");
+        std::thread::sleep(Duration::from_millis(20));
+        stages.lap("read");
+        stages.lap("render");
+        let [(read, first), (render, second)] = stages.laps[..] else {
+            panic!("expected two laps, got {:?}", stages.laps);
+        };
+        assert_eq!((read, render), ("read", "render"));
+        assert!(first >= Duration::from_millis(20), "{first:?}");
+        assert!(second < first, "{second:?} after {first:?}");
+    }
 }

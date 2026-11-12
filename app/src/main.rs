@@ -7,10 +7,13 @@
 mod command_line;
 mod image;
 mod menu;
+mod notice;
 mod open;
 mod platform;
+mod reload;
 mod render;
 mod timing;
+mod watch;
 mod window;
 
 use std::path::Path;
@@ -45,11 +48,13 @@ fn main() -> ExitCode {
         .manage(OpenWindows::default())
         .invoke_handler(tauri::generate_handler![
             render::render_document,
+            reload::reload_document,
             open::open_document,
             menu::show_document_menu,
             window::close_window,
             window::show_window,
             timing::report_first_paint,
+            timing::report_reload,
             timing::report_long_task,
         ])
         .on_menu_event(menu::forward_choice)

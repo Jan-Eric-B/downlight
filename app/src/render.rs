@@ -3,65 +3,66 @@
 use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::time::{Instant, SystemTime};
 
 use downlight_core::RenderedDocument;
 use tauri::async_runtime::JoinHandle;
-use tauri::{State, WebviewWindow};
+use tauri::{Manager as _, State, WebviewWindow};
 
-use crate::image;
-use crate::timing::{ReadAndRenderTimes, Timing};
+use crate::timing::{Stages, Timing};
 use crate::window::OpenWindows;
+use crate::{image, notice};
 
 /// Reads and renders the calling window's document, or gives None while the window shows none.
 ///
 /// The page passes nothing: the path comes from the app's own state, so the page can't ask for
 /// other files. The work runs on a blocking thread, off the main thread, so the window keeps
 /// answering while a large document renders. The first request after the window was given its
-/// document gets the render started then (`OpenWindows::render_of`).
+/// document gets the render started then (`OpenWindows::render_of`), and any notice held for the
+/// page until it asked (`OpenWindows::hold_notice`).
 #[tauri::command]
 pub async fn render_document(
     window: WebviewWindow,
     open_windows: State<'_, OpenWindows>,
     timing: State<'_, Timing>,
 ) -> Result<Option<RenderedDocument>, DocumentError> {
-    let Some(task) = open_windows.render_of(window.label()) else {
+    let Some(handover) = open_windows.render_of(window.label()) else {
         return Ok(None);
     };
-    let (document, times) = task
+    if let Some(message) = &handover.notice {
+        notice::show_notice(window.app_handle(), window.label(), message);
+    }
+    let (document, stages) = handover
+        .render
         .await
         .map_err(|source| DocumentError::ReadAndRenderStopped { source })??;
-    timing.read_and_render(window.label(), &times);
+    timing.report(window.label(), &stages);
     Ok(Some(document))
 }
 
-pub type ReadAndRender = Result<(RenderedDocument, ReadAndRenderTimes), DocumentError>;
+/// The rendered document, with how long reading and rendering it took for the timing switch.
+pub type ReadAndRender = Result<(RenderedDocument, Stages), DocumentError>;
 
 /// A document being read and rendered on a blocking thread, by [`start`].
 pub type RenderTask = JoinHandle<ReadAndRender>;
 
 /// Starts reading and rendering `path` on a blocking thread, off the main thread and the async
-/// runtime's workers.
-pub fn start(path: &Path) -> RenderTask {
+/// runtime's workers. The timing switch reports it as `event`: `read-and-render` for a document
+/// a window was given, `reload` for reading it again.
+pub fn start(path: &Path, event: &'static str) -> RenderTask {
     let path = path.to_owned();
-    tauri::async_runtime::spawn_blocking(move || read_and_render(&path))
+    tauri::async_runtime::spawn_blocking(move || read_and_render(&path, event))
 }
 
-fn read_and_render(path: &Path) -> ReadAndRender {
-    let started = SystemTime::now();
-    let clock = Instant::now();
+fn read_and_render(path: &Path, event: &'static str) -> ReadAndRender {
+    let mut stages = Stages::start(event);
     let bytes = std::fs::read(path).map_err(|source| DocumentError::Read {
         path: path.to_owned(),
         source,
     })?;
-    let read = clock.elapsed();
+    stages.lap("read");
     let document = downlight_core::render(&bytes, path, &image::origin());
-    let times = ReadAndRenderTimes {
-        started,
-        read,
-        render: clock.elapsed().saturating_sub(read),
-    };
-    Ok((document, times))
+    stages.lap("render");
+    Ok((document, stages))
 }
 
 /// Why the window can't show its document. The page shows the message to the reader.

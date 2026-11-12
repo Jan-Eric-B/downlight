@@ -10,6 +10,8 @@ tauri-build = { version = "2.7.4", features = [] }
 
 [dependencies]
 downlight-core = { path = "../core" }
+# Watching a document's folder for saves (ticket 10).
+notify = "8.2.2"
 # The open dialog. No default features: they are Linux's portal and Wayland, which the Linux port
 # adds back.
 rfd = { version = "0.18.0", default-features = false }
@@ -23,5 +25,9 @@ tauri-plugin-single-instance = "2.5.5"
 workspace = true
 
 [target."cfg(windows)".dependencies]
-windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
+# WebView2's own interfaces, for leaving its reload keys to the page (ticket 10). The versions wry
+# uses, so they add nothing to the tree.
+webview2-com = "0.39.1"
+windows-core = "0.62.2"
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
 windows-version = "0.1.7"

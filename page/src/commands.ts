@@ -9,7 +9,9 @@ import { showNotice } from "./notice";
  */
 interface Command {
   /** The letter pressed with Ctrl, in lower case. */
-  ctrlLetter: string;
+  ctrlLetter?: string;
+  /** A named key pressed without modifiers, such as `F5`. The menu shows it before Ctrl+letter. */
+  key?: string;
   run(): void;
 }
 
@@ -30,6 +32,12 @@ export async function open(): Promise<void> {
 }
 
 const commands = {
+  reload: {
+    ctrlLetter: "r",
+    key: "F5",
+    // The app tells the page to reload, and the page shows why if the file can't be read.
+    run: () => void invoke("reload_document"),
+  },
   open: { ctrlLetter: "o", run: () => void open() },
   close: {
     ctrlLetter: "w",
@@ -48,6 +56,8 @@ type MenuLine = { command: CommandId; label: string } | "separator" | "copy";
 
 /** The right-click menu, top to bottom. */
 const menu: MenuLine[] = [
+  { command: "reload", label: "Reload" },
+  "separator",
   { command: "open", label: "Open..." },
   "separator",
   "copy",
@@ -57,14 +67,46 @@ const menu: MenuLine[] = [
 function menuEntries() {
   return menu.map((line) => {
     if (line === "separator" || line === "copy") return { kind: line };
-    const { ctrlLetter } = commands[line.command];
     return {
       kind: "command",
       id: line.command,
       label: line.label,
-      shortcut: `Ctrl+${ctrlLetter.toUpperCase()}`,
+      shortcut: shortcutOf(commands[line.command]),
     };
   });
+}
+
+function shortcutOf(command: Command): string | undefined {
+  if (command.key) return command.key;
+  return command.ctrlLetter && `Ctrl+${command.ctrlLetter.toUpperCase()}`;
+}
+
+function hasModifier(event: KeyboardEvent): boolean {
+  return event.ctrlKey || event.altKey || event.shiftKey || event.metaKey;
+}
+
+function pressesShortcutOf(event: KeyboardEvent, command: Command): boolean {
+  return (
+    (command.key !== undefined &&
+      event.key === command.key &&
+      !hasModifier(event)) ||
+    (command.ctrlLetter !== undefined &&
+      pressesCtrlLetter(event, command.ctrlLetter))
+  );
+}
+
+/**
+ * The webview's own reloads (Ctrl+F5, Shift+F5, Ctrl+Shift+R), which would load the page anew
+ * and lose the reading position. On Windows the app already turns them off in WebView2
+ * (`leave_reload_keys_to_the_page` in `app/src/platform/windows.rs`), so this check matters only
+ * if the app couldn't add that handler (it carries on without it), and on other systems until
+ * their ports.
+ */
+function isWebviewReload(event: KeyboardEvent): boolean {
+  if (event.altKey || event.metaKey) return false;
+  const f5 = event.key === "F5" && (event.ctrlKey || event.shiftKey);
+  const ctrlShiftR = event.ctrlKey && event.shiftKey && event.code === "KeyR";
+  return f5 || ctrlShiftR;
 }
 
 /**
@@ -95,8 +137,12 @@ export function startCommands(signal?: AbortSignal): void {
   addEventListener(
     "keydown",
     (event) => {
-      const command = Object.values(commands).find((candidate) =>
-        pressesCtrlLetter(event, candidate.ctrlLetter),
+      if (isWebviewReload(event)) {
+        event.preventDefault();
+        return;
+      }
+      const command = Object.values(commands).find((candidate: Command) =>
+        pressesShortcutOf(event, candidate),
       );
       if (!command) return;
       event.preventDefault();

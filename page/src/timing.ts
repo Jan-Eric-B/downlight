@@ -61,3 +61,17 @@ export function reportFirstPaint(marks: FirstPaintMarks): void {
     marks: { ...marks, navigationStart: performance.timeOrigin },
   });
 }
+
+/** The marks while a reload is shown, each from `epochMs()`. */
+interface ReloadMarks {
+  /** When the reloaded document's HTML arrived. */
+  received: number;
+  inserted: number;
+  /** When the view was back at the reading position. */
+  anchored: number;
+}
+
+export function reportReload(marks: ReloadMarks): void {
+  if (!isOn) return;
+  send("report_reload", { marks });
+}

@@ -3,7 +3,7 @@ import { open } from "./commands";
 import { addCopyButtons } from "./copy";
 import { listenToApp } from "./events";
 import { showNotice } from "./notice";
-import { epochMs, reportFirstPaint } from "./timing";
+import { epochMs, reportFirstPaint, reportReload } from "./timing";
 
 /**
  * Resolves once the next frame is done: the task queued from `requestAnimationFrame` runs after
@@ -15,6 +15,90 @@ function afterNextFrame(): Promise<void> {
       setTimeout(resolve, 0);
     });
   });
+}
+
+const shownListeners = new Set<() => void>();
+
+/**
+ * Runs `listener` each time a rendered document is in place in the view: when the window shows
+ * its document or another one, and after a reload, once the view is back at the reading
+ * position. This is the one hook for that, so Find recounts here (ticket 14). Returns a function
+ * that removes the listener.
+ */
+export function whenDocumentShown(listener: () => void): () => void {
+  shownListeners.add(listener);
+  return () => {
+    shownListeners.delete(listener);
+  };
+}
+
+function documentShown(): void {
+  for (const listener of shownListeners) listener();
+}
+
+/** The line of the file where `block` starts, from the core's `data-sourcepos`. */
+function startLine(block: Element): number | undefined {
+  const position = block.getAttribute("data-sourcepos");
+  if (position === null) return undefined;
+  const line = Number.parseInt(position);
+  return Number.isNaN(line) ? undefined : line;
+}
+
+/**
+ * The first of `elements` that isn't wholly above the top of the view. They are laid out top to
+ * bottom, so a binary search finds it with few layout reads, even among the 1 MB document's
+ * thousands of blocks.
+ */
+function firstNotAboveTop(elements: HTMLCollection): Element | undefined {
+  let low = 0;
+  let high = elements.length;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    const element = elements[middle];
+    if (element && element.getBoundingClientRect().bottom > 0) high = middle;
+    else low = middle + 1;
+  }
+  return elements[low] ?? undefined;
+}
+
+/**
+ * The reading position: the line number of the block at the top of the view, which is the
+ * innermost block crossing the top, or the first block below it when the top falls between two.
+ * Undefined at the start of the document, above its first block.
+ */
+function readingLine(view: HTMLElement): number | undefined {
+  const first = view.firstElementChild;
+  if (!first || first.getBoundingClientRect().top >= 0) return undefined;
+  let line: number | undefined;
+  let element = firstNotAboveTop(view.children);
+  while (element) {
+    const start = startLine(element);
+    line = start ?? line;
+    // Only a block that crosses the top has a block nearer the top inside it. An element with no
+    // line number, such as a code block's wrapper, is looked into for the block it holds.
+    if (start !== undefined && element.getBoundingClientRect().top >= 0) break;
+    element = firstNotAboveTop(element.children);
+  }
+  return line;
+}
+
+/**
+ * The block to put at the top of the view for the reading line `line`: the innermost one that
+ * starts on it, or else the one that starts last before it. Footnotes come last in the view but
+ * not in the file, so this goes by the line rather than by the order in the view.
+ */
+function blockAt(view: HTMLElement, line: number): Element | undefined {
+  let best: Element | undefined;
+  let bestLine = 0;
+  for (const block of view.querySelectorAll("[data-sourcepos]")) {
+    const start = startLine(block);
+    // On a tie the later one is inside the earlier, and so the innermost.
+    if (start !== undefined && start <= line && start >= bestLine) {
+      best = block;
+      bestLine = start;
+    }
+  }
+  return best;
 }
 
 /** What a window without a document shows: a way to open one. */
@@ -31,19 +115,47 @@ function createEmptyState(): HTMLElement {
   return empty;
 }
 
+/** The bar over the last render that says its file is gone. */
+function createGoneBar(): HTMLElement {
+  const bar = document.createElement("div");
+  // A markdown-body, for github-markdown-css's font and its light or dark colors.
+  bar.className = "file-gone markdown-body";
+  bar.setAttribute("role", "status");
+  bar.textContent = "File deleted or moved";
+  bar.hidden = true;
+  return bar;
+}
+
 /**
  * Shows the window's document, or the empty state while it has none, and shows the next one
- * whenever the app says the window shows another document. `scriptStart` is when the page's
- * script started, for the first paint report.
+ * whenever the app says the window shows another document. When the app says the document's file
+ * changed, it shows the reload at the same reading position, or says the file is gone.
+ * `scriptStart` is when the page's script started, for the first paint report.
  */
 export async function startDocumentView(scriptStart: number): Promise<void> {
+  const goneBar = createGoneBar();
   const view = document.createElement("article");
   view.className = "markdown-body";
   const empty = createEmptyState();
   empty.hidden = true;
-  document.body.append(view, empty);
+  document.body.append(goneBar, view, empty);
 
   let latestRequest = 0;
+  /** Whether the document's file went away since the window last asked for its render. */
+  let fileGone = false;
+
+  /**
+   * Shows `content` in the view: the core's rendered HTML, a render already parsed, or an error's
+   * text. Null shows the empty state instead.
+   */
+  const place = (content: string | Node | null) => {
+    view.hidden = content === null;
+    empty.hidden = content !== null;
+    goneBar.hidden = !fileGone;
+    if (content instanceof Node) view.replaceChildren(content);
+    // The HTML comes only from the core's render, never from the page.
+    else view.innerHTML = content ?? "";
+  };
 
   /**
    * Asks the app for the window's document and shows it. Returns when the HTML arrived, if this
@@ -51,24 +163,68 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
    * window ends up with the document it was shown last.
    */
   const showDocument = async (): Promise<number | undefined> => {
+    fileGone = false;
     const request = ++latestRequest;
     try {
       const html = await invoke<string | null>("render_document");
       if (request !== latestRequest) return undefined;
       const received = epochMs();
-      view.hidden = html === null;
-      empty.hidden = html !== null;
-      // The HTML comes only from the core's render, never from the page.
-      view.innerHTML = html ?? "";
+      place(html);
       addCopyButtons(view);
-      return html === null ? undefined : received;
+      if (html === null) return undefined;
+      documentShown();
+      return received;
     } catch (error) {
       if (request !== latestRequest) return undefined;
-      view.hidden = false;
-      empty.hidden = true;
-      view.textContent = String(error);
+      place(document.createTextNode(String(error)));
       return undefined;
     }
+  };
+
+  /**
+   * Shows the document's new render at the reading position. A reload that can't read the file
+   * keeps the last render and says why, so the reader can keep reading.
+   */
+  const reload = async () => {
+    // The reload reads the file as it is now, so only a "gone" after this keeps the bar. A reload
+    // that can't read the file leaves the bar as it is.
+    fileGone = false;
+    const request = ++latestRequest;
+    let html: string | null;
+    try {
+      html = await invoke<string | null>("render_document");
+    } catch (error) {
+      if (request === latestRequest) showNotice(String(error));
+      return;
+    }
+    if (request !== latestRequest) return;
+    const received = epochMs();
+    // Parsed in a task and a frame of its own, apart from the swap and the layout for the
+    // anchoring, so that neither holds up the page for over 100 ms with a 1 MB document. The
+    // template's content is inert: its images load only once it is in the view.
+    const parsed = document.createElement("template");
+    // The HTML comes only from the core's render, never from the page. The app reloads only a
+    // window that shows a document, so the render is never null here.
+    parsed.innerHTML = html ?? "";
+    addCopyButtons(parsed.content);
+    await afterNextFrame();
+    if (request !== latestRequest) return;
+    // Read now, so a scroll while the new render was parsed counts.
+    const line = readingLine(view);
+    place(parsed.content);
+    const inserted = epochMs();
+    const block = line === undefined ? undefined : blockAt(view, line);
+    if (block) {
+      block.scrollIntoView({ block: "start" });
+      // The blocks above it had estimated heights until this frame laid them out (ADR 0003),
+      // so it may have moved.
+      await afterNextFrame();
+      if (request !== latestRequest) return;
+      block.scrollIntoView({ block: "start" });
+    }
+    const anchored = epochMs();
+    documentShown();
+    reportReload({ received, inserted, anchored });
   };
 
   // The listeners only start: waiting for them would hold up first paint.
@@ -76,6 +232,13 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
     void showDocument().then(() => {
       scrollTo(0, 0);
     });
+  });
+  listenToApp("document-changed", (change) => {
+    if (change === "gone") {
+      fileGone = true;
+      goneBar.hidden = false;
+    }
+    if (change === "reload") void reload();
   });
   listenToApp("notice", showNotice);
 
