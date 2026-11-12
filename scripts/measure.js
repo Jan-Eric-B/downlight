@@ -152,10 +152,24 @@ const NEXT_FRAME =
   "new Promise((done) => requestAnimationFrame(() => setTimeout(done, 0)))";
 
 /**
- * Opens the find bar with Ctrl+F and types each of `FIND_QUERIES` into it, one character a
- * frame; Ctrl+F before each selects the box's text, so the query's first character replaces it.
- * Returns each keystroke's time from its `input` event to the end of the next frame, and when the
- * typing started and ended.
+ * In the page: resolves with the time from `start` to the end of the first frame that shows the
+ * find bar's count. Until the document's text is indexed the bar shows none, and a keystroke
+ * before then counts until it does.
+ */
+const AFTER_COUNT = `(start) => new Promise((done) => {
+  const status = document.querySelector(".find-bar [role=status]");
+  const check = () => {
+    if (status.textContent === "") requestAnimationFrame(check);
+    else setTimeout(() => done(performance.now() - start), 0);
+  };
+  requestAnimationFrame(check);
+})`;
+
+/**
+ * Opens the find bar with Ctrl+F and types each of `FIND_QUERIES` into it, one character at a
+ * time, each once the last one's count is shown; Ctrl+F before each selects the box's text, so
+ * the query's first character replaces it. Returns each keystroke's time from its `input` event
+ * to the end of the first frame that shows its count, and when the typing started and ended.
  */
 async function typeInFind() {
   const { send, evaluate, close } = await connect();
@@ -164,9 +178,10 @@ async function typeInFind() {
     // first.
     await evaluate(`(() => {
       window.findKeystrokes = [];
+      window.findCounted = Promise.resolve();
+      const afterCount = ${AFTER_COUNT};
       addEventListener("input", () => {
-        const start = performance.now();
-        requestAnimationFrame(() => setTimeout(() => findKeystrokes.push(performance.now() - start), 0));
+        findCounted = afterCount(performance.now()).then((time) => findKeystrokes.push(time));
       }, true);
     })()`);
     const ctrlF = async () => {
@@ -185,10 +200,10 @@ async function typeInFind() {
       await ctrlF();
       for (const character of query) {
         await send("Input.insertText", { text: character });
-        await evaluate(NEXT_FRAME);
+        await evaluate("findCounted");
       }
     }
-    // The last keystroke's frame is done by now, as the wait after it was.
+    // The last keystroke's count is shown by now, as the wait after it was.
     const keystrokes = await evaluate("findKeystrokes");
     return { keystrokes, started, ended: performance.now() };
   } finally {
@@ -462,16 +477,19 @@ function reloaded({ reports, after: saved }) {
   };
 }
 
-/** Typing into the find bar: each keystroke until its frame is done, and the longest task. */
+/** Typing into the find bar: each keystroke until its count is shown, and the longest task. */
 function typed({ reports, after: found }) {
   const during = reports
     .filter((r) => r.event === "long-task" || r.event === "long-frame")
     // A report reaches the script a little after its task, so it counts until the run's end.
     .filter((r) => r.seen >= found.started)
     .map((r) => r.duration);
+  const [first, ...later] = found.keystrokes;
   return {
-    keystrokeToFrame: median(found.keystrokes),
-    longestKeystrokeToFrame: Math.max(...found.keystrokes),
+    keystrokeToCount: median(found.keystrokes),
+    // The first keystroke can wait for the text index that Ctrl+F started, so it is reported apart.
+    firstKeystrokeToCount: first,
+    longestLaterKeystrokeToCount: Math.max(...later),
     longestWhileTyping: Math.max(0, ...during),
   };
 }
@@ -552,7 +570,7 @@ console.log();
 console.log(table([reload]));
 console.log();
 console.log(
-  `Typing ${FIND_QUERIES.map((q) => `"${q}"`).join(", ")} into the find bar, one character a frame:`,
+  `Typing ${FIND_QUERIES.map((q) => `"${q}"`).join(", ")} into the find bar, each character once the last one's count is shown:`,
 );
 console.log();
 console.log(table(finding));
