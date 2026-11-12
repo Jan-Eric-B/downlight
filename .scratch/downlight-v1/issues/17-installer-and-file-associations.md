@@ -16,3 +16,7 @@ Spec: [Downlight v1](../spec.md)
 - [ ] The installer is unsigned, with no updater and no network requests of Downlight's own.
 - [ ] Uninstalling removes the app, its file associations and its PATH entry.
 - [ ] With Downlight set as the default app, double-clicking a `.md` file in Explorer opens it in Downlight, and a second double-click opens a second window in the same process.
+
+## Comments
+
+**2026-11-10, from ticket 07.** The exe now embeds bat's grammars (two-face). Their licenses (`two_face::acknowledgement::listing()`) still need listing, checking against GPL-3.0 and shipping with the other notices.

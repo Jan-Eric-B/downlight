@@ -137,7 +137,7 @@ Downlight renders Markdown in Rust (comrak) and shows the result in the system w
 ### Stack
 
 - Tauri 2 on the latest stable 2.x (2.12.5 at the time of writing; Tauri 3 is in alpha and stays out of v1).
-- comrak 0.59 for Markdown, with syntect through comrak's plugin (the pure-Rust `syntect-fancy` feature), producing CSS classes rather than inline colors so that switching between light and dark needs no new render.
+- comrak 0.59 for Markdown, with syntect 5 through comrak's highlighter plugin interface: Downlight's own adapter, bat's grammars from two-face, and the pure-Rust regex engine (fancy-regex). Scopes map to GitHub's own `pl-*` classes, which github-markdown-css colors for light and dark, so switching needs no new render (ADR 0004). PowerShell's grammar needs Oniguruma, so PowerShell shows as plain code.
 - ammonia 4 for sanitizing, `encoding_rs` for decoding, `notify` for watching.
 - The page is plain TypeScript built with Vite, with no UI framework and no CSS framework: github-markdown-css (MIT) in its light and dark variants, plus a small stylesheet of Downlight's own.
 - One process, a window per document (ADR 0001). Rendering happens in Rust, not in the page; ADR 0002 records why once the spike confirms the numbers.

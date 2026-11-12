@@ -1,11 +1,13 @@
 use std::path::Path;
 
 use comrak::nodes::{Node, NodeCodeBlock, NodeValue};
-use comrak::{Arena, Options, parse_document};
+use comrak::options::Plugins;
+use comrak::{Arena, Options, format_html_with_plugins, parse_document};
 
 use crate::decode::decode;
+use crate::highlight::GithubHighlighter;
 use crate::image::ImageSources;
-use crate::sanitize::sanitized_html;
+use crate::sanitize::{drop_filtered_tags, sanitize};
 
 /// A document rendered to HTML by [`render`].
 ///
@@ -47,9 +49,15 @@ pub fn render(bytes: &[u8], path: &Path, image_origin: &str) -> RenderedDocument
     let root = parse_document(&arena, &text, &options);
     show_front_matter_as_yaml(root);
     keep_line_numbers_on_blocks_only(root);
+    drop_filtered_tags(root);
+    let mut plugins = Plugins::default();
+    plugins.render.codefence_syntax_highlighter = Some(&GithubHighlighter);
+    let mut html = String::new();
+    // Writing to a String never fails, so there is no error to pass on.
+    let _ = format_html_with_plugins(root, &options, &mut html, &plugins);
     let images = ImageSources::new(path, image_origin);
     RenderedDocument {
-        html: sanitized_html(root, &options, images),
+        html: sanitize(&html, images),
     }
 }
 
@@ -359,12 +367,15 @@ mod tests {
     #[test]
     fn front_matter_shows_as_a_yaml_code_block_at_the_top() {
         let html = html_of("---\ntitle: Notes\ntags: [a, b]\n---\n# Doc\n");
+        // Highlighted as YAML since ticket 07, so its text is split into spans.
         assert!(
             html.starts_with(
-                "<pre data-sourcepos=\"1:1-4:3\"><code class=\"language-yaml\">title: Notes\ntags: [a, b]\n</code></pre>"
+                "<pre data-sourcepos=\"1:1-4:3\"><code class=\"language-yaml\"><span class=\"pl-ent\">title</span>: "
             ),
             "{html}"
         );
+        assert!(html.contains(">tags</span>: "), "{html}");
+        assert!(!html.contains("---"), "{html}");
         assert_eq!(start_lines(&html, "h1"), [Some(5)], "{html}");
     }
 
@@ -372,7 +383,9 @@ mod tests {
     fn front_matter_with_crlf_line_endings_shows_as_yaml() {
         let html = html_of("---\r\ntitle: Notes\r\n---\r\n\r\n# Doc\r\n");
         assert!(
-            html.contains("<code class=\"language-yaml\">title: Notes\n</code>"),
+            html.contains(
+                "<code class=\"language-yaml\"><span class=\"pl-ent\">title</span>: <span class=\"pl-s\">Notes</span>\n</code>"
+            ),
             "{html}"
         );
         assert_eq!(start_lines(&html, "h1"), [Some(5)], "{html}");
@@ -381,7 +394,8 @@ mod tests {
     #[test]
     fn front_matter_with_html_in_it_shows_as_text() {
         let html = html_of("---\nnote: <b>bold</b>\n---\n");
-        assert!(html.contains("note: &lt;b&gt;bold&lt;/b&gt;"), "{html}");
+        assert!(html.contains("&lt;b&gt;bold&lt;/b&gt;"), "{html}");
+        assert!(!html.contains("<b>"), "{html}");
     }
 
     #[test]

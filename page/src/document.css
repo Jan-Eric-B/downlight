@@ -55,6 +55,81 @@ body {
   }
 }
 
+/* A code block's copy button (copy.ts), at its top right as on GitHub. It shows while the pointer
+   is over the block or the button has the keyboard's focus, and is drawn with a mask, so it holds
+   no text and takes the text color, light or dark. */
+.markdown-body .highlight {
+  position: relative;
+}
+
+/* github-markdown-css gives a block with a copy button a min-height of 52px, meant for github.com's
+   border-box sizing, so that a one-line block fits the button. Without it the padding came on top,
+   and short blocks grew by 32px. */
+.markdown-body .highlight pre {
+  box-sizing: border-box;
+}
+
+.markdown-body .zeroclipboard-container {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
+
+.copy-code {
+  display: block;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--borderColor-default);
+  border-radius: 6px;
+  background-color: var(--bgColor-muted);
+  color: var(--fgColor-muted);
+  cursor: pointer;
+  opacity: 0;
+}
+
+.highlight:hover .copy-code,
+.copy-code:focus-visible {
+  opacity: 1;
+}
+
+.copy-code:hover {
+  background-color: var(--bgColor-neutral-muted);
+}
+
+.copy-code:focus-visible {
+  outline: 2px solid var(--borderColor-accent-emphasis);
+  outline-offset: -2px;
+}
+
+.copy-code::before {
+  content: "";
+  display: block;
+  width: 16px;
+  height: 16px;
+  margin: auto;
+  background-color: currentColor;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.5'%3E%3Crect x='5.75' y='0.75' width='9.5' height='9.5' rx='1.5'/%3E%3Cpath d='M3.5 5.25H2.25a1.5 1.5 0 0 0-1.5 1.5v7a1.5 1.5 0 0 0 1.5 1.5h7a1.5 1.5 0 0 0 1.5-1.5V12.5'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+}
+
+.copy-code.copied {
+  color: var(--fgColor-success);
+}
+
+.copy-code.copied::before {
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.5 8.5l3.5 3.5 7.5-8'/%3E%3C/svg%3E");
+}
+
+/* High contrast: the icon in the reader's button text color, which forced colors would otherwise
+   replace with the background color it is drawn with. */
+@media (forced-colors: active) {
+  .copy-code::before {
+    forced-color-adjust: none;
+    background-color: ButtonText;
+  }
+}
+
 /* A window without a document: "Open file" in the middle of the window. It is a markdown-body too,
    so it takes github-markdown-css's font and its light or dark colors. */
 .empty-window {

@@ -5,6 +5,7 @@
 
 mod decode;
 mod format;
+mod highlight;
 mod image;
 mod render;
 mod sanitize;

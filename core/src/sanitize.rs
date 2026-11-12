@@ -7,10 +7,10 @@ use std::collections::{HashMap, HashSet};
 
 use ammonia::Builder;
 use comrak::nodes::{Node, NodeValue};
-use comrak::{Options, format_html};
 
 use url::Url;
 
+use crate::highlight::is_highlight_class;
 use crate::image::{ImageSources, is_drive};
 
 /// The elements GitHub allows in a document, and the ones rendering writes besides: `section`
@@ -186,22 +186,9 @@ const DROPPED_PREFIX: &str = "dropped-";
 /// The renamed tags whose content goes with them, as ammonia does for `script` and `style`.
 const DROPPED_WITH_CONTENT: [&str; 2] = ["dropped-script", "dropped-style"];
 
-/// The sanitized HTML of a document's tree, with its images loading from `images`.
-pub(crate) fn sanitized_html<'a>(
-    root: Node<'a>,
-    options: &Options<'_>,
-    images: ImageSources,
-) -> String {
-    drop_filtered_tags(root);
-    let mut html = String::new();
-    // Writing to a String never fails, so there is no error to pass on.
-    let _ = format_html(root, options, &mut html);
-    sanitize(&html, images)
-}
-
 /// Renames the filtered and the rendering-only tags in the document's raw HTML, the only place
 /// they can come from: comrak escapes `<` everywhere else.
-fn drop_filtered_tags<'a>(root: Node<'a>) {
+pub(crate) fn drop_filtered_tags<'a>(root: Node<'a>) {
     for node in root.descendants() {
         let mut data = node.data_mut();
         let raw = match &mut data.value {
@@ -252,8 +239,9 @@ fn names_tag(bytes: &[u8], start: usize, tag: &str) -> bool {
             .is_none_or(|next| matches!(next, b'\t' | b'\n' | b'\x0c' | b'\r' | b' ' | b'/' | b'>'))
 }
 
-/// Sanitizes the HTML that comrak rendered.
-fn sanitize(html: &str, images: ImageSources) -> String {
+/// Sanitizes the HTML that comrak rendered, with its images loading from `images`. Run
+/// [`drop_filtered_tags`] on the document's tree before rendering it.
+pub(crate) fn sanitize(html: &str, images: ImageSources) -> String {
     let tag_attributes = TAG_ATTRIBUTES
         .iter()
         .map(|(tag, attributes)| (*tag, attributes.iter().copied().collect()))
@@ -295,7 +283,9 @@ fn allowed_classes<'v>(element: &str, classes: &'v str) -> Option<Cow<'v, str>> 
     let allowed = classes
         .split_ascii_whitespace()
         .filter(|class| {
-            CLASSES.contains(class) || (element == "code" && class.starts_with(LANGUAGE_CLASS))
+            CLASSES.contains(class)
+                || (element == "code" && class.starts_with(LANGUAGE_CLASS))
+                || (element == "span" && is_highlight_class(class))
         })
         .collect::<Vec<_>>();
     (!allowed.is_empty()).then(|| allowed.join(" ").into())
@@ -483,6 +473,16 @@ mod tests {
             let html = html_of(&format!("Text {raw} more\n\n# Next\n"));
             assert!(html.contains(">Next<a "), "{raw}: {html}");
         }
+    }
+
+    #[test]
+    fn sanitizing_keeps_highlighting_classes_on_spans_only() {
+        let html = html_of(
+            "```rust\nfn main() {}\n```\n\n<span class=\"pl-k pl-nope notice\">a</span> <em class=\"pl-k\">b</em>\n",
+        );
+        assert!(html.contains(r#"<span class="pl-k">fn</span>"#), "{html}");
+        assert!(html.contains(r#"<span class="pl-k">a</span>"#), "{html}");
+        assert!(html.contains("<em>b</em>"), "{html}");
     }
 
     #[test]

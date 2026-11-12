@@ -7,7 +7,12 @@ targets = ["x86_64-pc-windows-msvc"]
 
 [advisories]
 # Vulnerabilities, unsound and unmaintained crates fail the check; an ignore needs a reason.
-ignore = []
+ignore = [
+    # syntect 5.3 (ticket 07) reads its grammars with bincode 1, the last release. It only reads the
+    # grammar dump compiled into the exe, never anything from a document. Unmaintained, with no
+    # vulnerability; revisit when syntect moves off bincode.
+    { id = "RUSTSEC-2025-0141", reason = "syntect reads only its own compiled-in grammar dump with it" },
+]
 
 [licenses]
 # Each of these is compatible with GPL-3.0, whichever of GPL-3.0-only or -or-later Downlight

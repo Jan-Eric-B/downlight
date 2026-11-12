@@ -1,0 +1,33 @@
+<pre data-sourcepos="1:1-4:3"><code class="language-yaml"><span class="pl-ent">title</span>: <span class="pl-s">Code blocks</span>
+<span class="pl-ent">tags</span>: [<span class="pl-s">highlighting</span>, <span class="pl-s">copy</span>]
+</code></pre>
+<h1 id="code-blocks" data-sourcepos="6:1-6:13">Code blocks<a href="#code-blocks" aria-label="Link to heading 'Code blocks'" data-heading-content="Code blocks" class="anchor"></a></h1>
+<p data-sourcepos="8:1-8:88">Code in the languages a reader meets most, for the page's copy button tests (ticket 07).</p>
+<pre data-sourcepos="10:1-16:3"><code class="language-rust"><span class="pl-c">/// Says hello.
+</span><span class="pl-k">fn</span> <span class="pl-en">main</span>() {
+    <span class="pl-k">let</span> name <span class="pl-k">=</span> <span class="pl-pds">"</span><span class="pl-s">&lt;world&gt; &amp; co</span><span class="pl-pds">"</span>;
+    <span class="pl-c1">println!</span>(<span class="pl-pds">"</span><span class="pl-s">Hello, </span><span class="pl-c1">{name}</span><span class="pl-s">!</span><span class="pl-pds">"</span>);
+}
+</code></pre>
+<pre data-sourcepos="18:1-22:3"><code class="language-typescript"><span class="pl-k">export</span> <span class="pl-k">function</span> <span class="pl-en">greet</span>(<span class="pl-v">name</span><span class="pl-k">:</span> <span class="pl-c1">string</span>)<span class="pl-k">:</span> <span class="pl-c1">string</span> {
+  <span class="pl-k">return</span> <span class="pl-pds">`</span><span class="pl-s">Hello, ${</span>name<span class="pl-s">}!</span><span class="pl-pds">`</span>;
+}
+</code></pre>
+<pre data-sourcepos="24:1-28:3"><code class="language-toml">[<span class="pl-en">package</span>]
+<span class="pl-ent">name</span> = <span class="pl-pds">"</span><span class="pl-s">lamplighter</span><span class="pl-pds">"</span>
+<span class="pl-ent">version</span> = <span class="pl-pds">"</span><span class="pl-s">0.1.0</span><span class="pl-pds">"</span>
+</code></pre>
+<pre data-sourcepos="30:1-33:3"><code class="language-diff"><span class="pl-md">- old line
+</span><span class="pl-mi1">+ new line
+</span></code></pre>
+<p data-sourcepos="35:1-35:101">A language bat's grammars don't know, and PowerShell, which the pure-Rust regex engine can't compile:</p>
+<pre data-sourcepos="37:1-39:3"><code class="language-no-such-language">plain &lt;text&gt; &amp; more
+</code></pre>
+<pre data-sourcepos="41:1-43:3"><code class="language-powershell">Get-ChildItem -Path . | Where-Object { $_.Length -gt 0 }
+</code></pre>
+<p data-sourcepos="45:1-45:12">No language:</p>
+<pre data-sourcepos="47:1-50:3"><code>	indented with a tab
+trailing spaces   
+</code></pre>
+<pre data-sourcepos="52:5-52:23"><code>indented code block
+</code></pre>

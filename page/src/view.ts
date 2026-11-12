@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "./commands";
+import { addCopyButtons } from "./copy";
 import { listenToApp } from "./events";
 import { showNotice } from "./notice";
 import { epochMs, reportFirstPaint } from "./timing";
@@ -59,6 +60,7 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
       empty.hidden = html !== null;
       // The HTML comes only from the core's render, never from the page.
       view.innerHTML = html ?? "";
+      addCopyButtons(view);
       return html === null ? undefined : received;
     } catch (error) {
       if (request !== latestRequest) return undefined;
