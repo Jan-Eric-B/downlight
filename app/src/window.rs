@@ -76,6 +76,10 @@ impl ShownDocument {
             heading: document.heading.map(str::to_owned),
         }
     }
+
+    fn start_reload(&mut self) {
+        self.render_ahead = Some(render::start(&self.path, "reload"));
+    }
 }
 
 /// What a window's page gets when it asks for its document.
@@ -263,14 +267,28 @@ impl OpenWindows {
     }
 
     /// Starts reading and rendering `window`'s document again, for the page's next request (a
-    /// reload). False while the window shows no document, and then there is nothing to reload.
+    /// reload by hand). False while the window shows no document, and then there is nothing to
+    /// reload.
     pub fn reload_ahead(&self, window: &str) -> bool {
         let mut table = self.lock();
-        let Some(shown) = table.shown.get_mut(window).and_then(Option::as_mut) else {
-            return false;
-        };
-        shown.render_ahead = Some(render::start(&shown.path, "reload"));
-        true
+        table
+            .shown
+            .get_mut(window)
+            .and_then(Option::as_mut)
+            .map(ShownDocument::start_reload)
+            .is_some()
+    }
+
+    /// Starts reading and rendering the document with `key` again, for `window`'s page's next
+    /// request (a reload on a change to its file), while the window still shows it. False if the
+    /// window has left it or closed, and then nothing is reloaded. The check and the render start
+    /// under one lock, so a document the window is given in between keeps its render ahead
+    /// (ticket 21).
+    pub fn reload_ahead_while_shown(&self, window: &str, key: &Path) -> bool {
+        self.lock()
+            .shown_mut(window, key)
+            .map(ShownDocument::start_reload)
+            .is_some()
     }
 
     /// Whether `window` still shows the document with `key`. A watch can report a change after

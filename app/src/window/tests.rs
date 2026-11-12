@@ -522,6 +522,40 @@ fn reload_ahead_reads_the_file_again() {
 }
 
 #[test]
+fn reload_for_the_shown_document_reads_the_file_again() {
+    let path = document("reload-shown", "# First");
+    let windows = OpenWindows::default();
+    let label = open_new(&windows, Some(&path));
+    rendered_html(&windows, &label);
+    std::fs::write(&path, "# Second").unwrap();
+    assert!(windows.reload_ahead_while_shown(&label, &document_key(&path)));
+    wait_for_render_ahead(&windows, &label);
+    // Written after the reload's read, so only a read on the page's request would see it.
+    std::fs::write(&path, "# Third").unwrap();
+    let shown = rendered_html(&windows, &label);
+    std::fs::remove_file(&path).unwrap();
+    assert!(shown.contains("Second"), "{shown}");
+}
+
+#[test]
+fn reload_for_a_document_the_window_has_left_keeps_the_new_render_ahead() {
+    let first = document("reload-left-first", "# First document");
+    let second = document("reload-left-second", "# Second document");
+    let windows = OpenWindows::default();
+    let label = open_new(&windows, Some(&first));
+    windows.claim(Some(DocumentAt::new(&second)), Target::Window(&label));
+    wait_for_render_ahead(&windows, &label);
+    // A render started now would read this, and the page would get it instead of the one ahead.
+    std::fs::write(&second, "# Changed since").unwrap();
+    let reloaded = windows.reload_ahead_while_shown(&label, &document_key(&first));
+    let shown = rendered_html(&windows, &label);
+    std::fs::remove_file(&first).unwrap();
+    std::fs::remove_file(&second).unwrap();
+    assert!(!reloaded);
+    assert!(shown.contains("Second document"), "{shown}");
+}
+
+#[test]
 fn window_without_a_document_has_nothing_to_reload() {
     let windows = OpenWindows::default();
     let label = open_new(&windows, None);

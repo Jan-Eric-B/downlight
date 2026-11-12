@@ -18,15 +18,11 @@ const DOCUMENT_CHANGED: &str = "document-changed";
 /// save to its file does: the page is told, and then asks for the new render.
 #[tauri::command]
 pub fn reload_document(window: WebviewWindow) -> tauri::Result<()> {
-    reload(window.app_handle(), window.label())
-}
-
-/// Starts reading `window`'s document again and tells the page, which then asks for the render.
-fn reload(app: &AppHandle, window: &str) -> tauri::Result<()> {
-    if !app.state::<OpenWindows>().reload_ahead(window) {
+    let (app, label) = (window.app_handle(), window.label());
+    if !app.state::<OpenWindows>().reload_ahead(label) {
         return Ok(());
     }
-    app.emit_to(window, DOCUMENT_CHANGED, "reload")
+    app.emit_to(label, DOCUMENT_CHANGED, "reload")
 }
 
 /// Starts watching the file of `document`, which `window` was just given with `key`, on a blocking
@@ -57,12 +53,17 @@ pub fn watch_document(app: &AppHandle, window: &str, document: &Path, key: PathB
 
 /// Acts on a change to the file of the document with `key`, unless `window` has left it since.
 fn on_document_change(app: &AppHandle, window: &str, key: &Path, change: Change) {
-    if !app.state::<OpenWindows>().shows(window, key) {
-        return;
-    }
-    // The only way to fail is that the window has closed, and then nothing is left to do.
-    let _ = match change {
-        Change::Changed | Change::Back => reload(app, window),
-        Change::Gone => app.emit_to(window, DOCUMENT_CHANGED, "gone"),
+    let open_windows = app.state::<OpenWindows>();
+    // Checked and acted on under one lock (ticket 21): a document the window is given after a
+    // separate check would have its render ahead replaced by one for the window's new document.
+    let (still_shown, event) = match change {
+        Change::Changed | Change::Back => {
+            (open_windows.reload_ahead_while_shown(window, key), "reload")
+        }
+        Change::Gone => (open_windows.shows(window, key), "gone"),
     };
+    if still_shown {
+        // The only way to fail is that the window has closed, and then nothing is left to do.
+        let _ = app.emit_to(window, DOCUMENT_CHANGED, event);
+    }
 }
