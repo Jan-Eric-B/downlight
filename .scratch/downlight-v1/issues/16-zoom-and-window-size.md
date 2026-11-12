@@ -12,3 +12,15 @@ Spec: [Downlight v1](../spec.md)
 - [ ] The zoom level is saved in the settings file and used by every new window.
 - [ ] A new window takes the size of the last window that closed and opens offset down and to the right of the active window, staying on screen.
 - [ ] Zoom in, Zoom out and Reset zoom are in the right-click menu.
+
+## Comments
+
+**2026-11-12, from ticket 10's code quality review.** What ticket 10 left in place that this ticket builds on:
+
+- Ticket 10 left WebView2's zoom keys (Ctrl+plus, Ctrl+minus, Ctrl+0) working on purpose: its `AcceleratorKeyPressed` handler (`leave_reload_keys_to_the_page` in `app/src/platform/windows.rs`) turns off only the reload keys. There are two ways to take zoom over:
+  - Add the zoom keys to that handler.
+  - Turn off all of WebView2's browser keys (`SetAreBrowserAcceleratorKeysEnabled(false)`) and remove the handler. The page must then handle the keys the handler covered, and still swallow Ctrl+F5, Shift+F5 and Ctrl+Shift+R.
+
+  Either way, Ctrl+wheel is a separate setting (`IsZoomControlEnabled`). Check each key by hand in the release build.
+- `Command` in `page/src/commands.ts` has `ctrlLetter` (a letter) and `key` (a key without modifiers). Ctrl+plus fits neither. Widen the shape for all commands rather than adding a special case for zoom; ticket 12 needs the same for Alt+Left.
+- An OS hook that can't be added shouldn't fail the window (see `leave_reload_keys_to_the_page`).
