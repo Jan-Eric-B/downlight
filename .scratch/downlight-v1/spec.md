@@ -110,7 +110,7 @@ Downlight renders Markdown in Rust (comrak) and shows the result in the system w
 68. As a reader, I want Ctrl+plus, Ctrl+minus, Ctrl+0 and Ctrl+wheel to zoom, so that I can read small text.
 69. As a reader, I want the zoom level remembered and used by every new window, so that I set it once.
 70. As a reader, I want a new window to open at the size of the last window I closed, offset from the active window, so that windows don't stack exactly on top of each other.
-71. As a reader, I want the native title bar with Windows' snap layouts, so that the window behaves like every other window.
+71. As a reader, I want the native title bar with Windows' snap layouts, so that the window behaves like every other window. (Replaced by [Window design](../window-design/spec.md): the page draws the title bar, and snap layouts still work, ADR 0005.)
 72. As a reader, I want Mica behind the whole window on Windows 11, so that Downlight looks at home on my desktop.
 73. As a reader on Windows 10, with transparency effects turned off, or in high contrast, I want a solid, readable background, so that the document is always legible.
 74. As a reader, I want a right-click menu on the document with Back, Forward, Reload, Find, Edit, Choose editor..., Open, Zoom and Copy, so that every command is reachable with the mouse.
@@ -186,7 +186,7 @@ Downlight renders Markdown in Rust (comrak) and shows the result in the system w
   - Link clicks go to the core's link resolution through an app command, and the page carries out the action. Hovering a link shows its target.
 - **Find.** A plain, case-insensitive text match over the document's text. Matches are highlighted without changing the document's DOM (the CSS Custom Highlight API). The bar shows "N of M" and supports next and previous with wrapping, scrolling the current match into view. Esc closes the bar and clears the highlights.
 - **Code copy button** on each code block.
-- **Zoom** through the webview's zoom, with the level saved in the settings.
+- **Zoom** through the webview's zoom, with the level saved in the settings. (Changed by [Window design](../window-design/spec.md): zoom applies to the document view only, so the page's title bar keeps its size.)
 
 ### Keyboard shortcuts
 
@@ -267,7 +267,7 @@ If the cold start takes more than 1.5 s, the stack is reopened before any featur
 **v1.x**, the next releases:
 
 - edit at the reading line;
-- full width, Keep on top, full screen;
+- full width, Keep on top, full screen (full width and Keep on top moved into v1 with [Window design](../window-design/spec.md));
 - pasting or dropping Markdown text;
 - Copy as Markdown;
 - Outline;
@@ -298,7 +298,7 @@ If the cold start takes more than 1.5 s, the stack is reopened before any featur
 - reading from stdin or a `--text` argument;
 - opening URLs;
 - TOML front matter;
-- a theme override and an accent color;
+- a theme override and an accent color (reversed 2026-11-13: [Window design](../window-design/spec.md) adds both, with a title bar, its buttons and a settings flyout);
 - WinDown's code, rules and backlog. Downlight is a new app and ports nothing.
 
 **Platforms:** v1 is Windows x64 only.

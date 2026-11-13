@@ -63,3 +63,31 @@ _Avoid_: URL, href
 **Link action**:
 The one thing following a link does, as the core's link resolution returns it: show a document (optionally at a heading), scroll to a heading, reveal a file, open a folder, hand a URL to the system, or nothing.
 _Avoid_: Navigation, link handler
+
+**Title bar**:
+The strip at the top of a window with the logo, the document's file name and the window's buttons. The page draws it (ADR 0005); the window's title that Alt+Tab and the taskbar show is a separate thing.
+_Avoid_: Header, toolbar, caption
+
+**Accent color**:
+The color scale, in seven shades, that marks what Downlight adds to a document: links, the selection, Find's matches, ticks and switched-on buttons. Amber unless the reader picks Windows' own accent color. The icon always stays amber.
+_Avoid_: Theme color, highlight color, brand color
+
+**Theme**:
+Light or dark. It follows Windows unless the reader picks one in the settings.
+_Avoid_: Mode, color scheme
+
+**Backdrop**:
+The material Windows draws behind a window, showing through wherever the page draws no background: Mica, Mica Alt, Acrylic, or none, which means a solid background.
+_Avoid_: Background, material, transparency
+
+**Full width**:
+The document filling the window's width instead of GitHub's reading width. One choice for every window, kept in the settings.
+_Avoid_: Fixed width, wide mode
+
+**Keep on top**:
+A window staying above all others. It belongs to one window and is gone when the window closes.
+_Avoid_: Pin, always on top
+
+**Settings**:
+The reader's choices that every window shares (editor, zoom, theme, backdrop, accent color, Full width), kept in one file and changed from the settings flyout under the title bar's gear.
+_Avoid_: Preferences, options, config
