@@ -33,10 +33,12 @@ body {
   background-color: transparent;
 }
 
-/* Lays out and paints only the blocks near the view, so showing a 1 MB document never holds up
-   the page for more than 100 ms (measured in ticket 02). Until a block has been shown, its height
-   is estimated; after that it is remembered. ADR 0003 records the trade-off. */
-.markdown-body > * {
+/* Lays out and paints only the document's blocks near the view, so showing a 1 MB document never
+   holds up the page for more than 100 ms (measured in ticket 02). Until a block has been shown, its
+   height is estimated; after that it is remembered. ADR 0003 records the trade-off. Only the
+   document view (an article, see DOCUMENT_VIEW_SELECTOR in view.ts): the page's own parts are
+   markdown-bodies too, for github-markdown-css's font and colors, and need no estimating. */
+article.markdown-body > * {
   content-visibility: auto;
   contain-intrinsic-size: auto 3em;
 }
@@ -172,11 +174,24 @@ body {
 /* The bar that says the document's file was deleted or moved (view.ts). It stays at the top of the
    window while the reader scrolls through the last render, on a solid background, since the
    document scrolls under it. */
+:root {
+  /* The bar's padding, one line of github-markdown-css's 16px text at line-height 1.5, and its
+     border. The bar is set to it, so the scroll padding below always matches. */
+  --file-gone-height: calc(8px + 24px + 8px + 1px);
+}
+
+/* While the bar shows, a block scrolled to the top of the view (a heading link, Reload, Find)
+   stops below the bar rather than under it. scrollIntoView honors the scroll padding. */
+:root:has(.file-gone:not([hidden])) {
+  scroll-padding-top: var(--file-gone-height);
+}
+
 .file-gone {
   position: sticky;
   top: 0;
   z-index: 1;
   max-width: none;
+  height: var(--file-gone-height);
   padding: 8px 32px;
   border-bottom: 1px solid var(--borderColor-attention-muted);
   /* GitHub's dark attention color is translucent, so it lies over the solid default color. */
