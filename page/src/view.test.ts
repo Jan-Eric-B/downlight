@@ -14,7 +14,13 @@ import {
   type AtHeading,
   type Read,
 } from "./test-support";
-import { startDocumentView, whenDocumentShown } from "./view";
+import { afterNextFrame } from "./reading-position";
+import {
+  requestDocument,
+  startDocumentView,
+  whenDocumentShown,
+  type ShownReason,
+} from "./view";
 
 let commands: string[] = [];
 
@@ -717,4 +723,120 @@ test("a reload overtaken by a request the app gives no answer to still runs the 
     expect(headings).toEqual(["Field notes"]);
   });
   stop();
+});
+
+test("the whenDocumentShown listeners hear whether another document was shown or the document reloaded", async () => {
+  documents = [
+    () => Promise.resolve(readme),
+    () => Promise.resolve(notes),
+    () => Promise.resolve(notes),
+  ];
+  await startDocumentView(0);
+  await settle();
+  const reasons: ShownReason[] = [];
+  const stop = whenDocumentShown((_view, reason) => {
+    reasons.push(reason);
+  });
+
+  let shown = nextShown();
+  await emit("document-changed", "reload");
+  await shown;
+  shown = nextShown();
+  await giveAnotherDocument();
+  await shown;
+  stop();
+  expect(reasons).toEqual(["reload", "shown"]);
+});
+
+test("a reload overtaken after its swap by a reload that can't read the file is heard as a reload", async () => {
+  documents = [
+    () => Promise.resolve(readme),
+    () => Promise.resolve(notes),
+    () => Promise.reject(new Error("Can't read C:\\docs\\readme.md: in use")),
+  ];
+  await startDocumentView(0);
+  await settle();
+  layOut(15.5);
+  let overtaken = false;
+  vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(() => {
+    if (overtaken) return;
+    overtaken = true;
+    void emit("document-changed", "reload");
+  });
+  const reasons: ShownReason[] = [];
+  const stop = whenDocumentShown((_view, reason) => {
+    reasons.push(reason);
+  });
+
+  await emit("document-changed", "reload");
+  await vi.waitFor(() => {
+    expect(reasons).toEqual(["reload"]);
+  });
+  stop();
+});
+
+test("asking for the document again reloads it at the reading position", async () => {
+  let reads = 0;
+  documents = [
+    () => {
+      reads += 1;
+      return Promise.resolve(readme);
+    },
+  ];
+  await startDocumentView(0);
+  await settle();
+  layOut(15.5);
+  const scrolledTo = spyOnScrolls();
+
+  await requestDocument();
+  expect(reads).toBe(2);
+  expect(new Set(scrolledTo())).toEqual(new Set([15]));
+});
+
+test("the window shows with its document when a save overtakes its first request", async () => {
+  let sendFirst: (html: string) => void = () => {};
+  let sendSecond: (html: string) => void = () => {};
+  documents = [
+    () =>
+      new Promise((resolve) => {
+        sendFirst = resolve;
+      }),
+    () =>
+      new Promise((resolve) => {
+        sendSecond = resolve;
+      }),
+  ];
+  const started = startDocumentView(0);
+  await settle();
+
+  await emit("document-changed", "reload");
+  sendFirst(notes);
+  // Long enough for a window shown on the overtaken answer to be shown before the next arrives.
+  await afterNextFrame();
+  await afterNextFrame();
+  sendSecond(readme);
+  await started;
+  expect(textWhenShown).toContain("Lamplighter");
+  expect(heading()).toBe("Lamplighter");
+});
+
+test("a reload under the 'File deleted or moved' bar keeps the block just below the bar", async () => {
+  documents = [() => Promise.resolve(readme), () => Promise.resolve(readme)];
+  await startDocumentView(0);
+  await settle();
+  await emit("document-changed", "gone");
+  // The page's stylesheet, which the tests don't load, sets this while the bar shows.
+  document.documentElement.style.scrollPaddingTop = "41px";
+  // Line 13.5 is at the top of the window, and "## Options" on line 15 at the bar's lower edge.
+  layOut(13.5);
+  const scrolledTo = spyOnScrolls();
+
+  try {
+    const shown = nextShown();
+    await emit("document-changed", "reload");
+    await shown;
+    expect(new Set(scrolledTo())).toEqual(new Set([15]));
+  } finally {
+    document.documentElement.style.scrollPaddingTop = "";
+  }
 });

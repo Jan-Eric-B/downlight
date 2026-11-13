@@ -105,17 +105,32 @@ function startLine(block: Element): number | undefined {
 }
 
 /**
- * The first of `elements` that isn't wholly above the top of the view. They are laid out top to
- * bottom, so a binary search finds it with few layout reads, even among the 1 MB document's
- * thousands of blocks.
+ * Where what the reader sees starts, below the window's top: the scroll padding, which the page's
+ * stylesheet sets to the "File deleted or moved" bar's height while the bar shows. A block
+ * scrolled to the top stops there too, so the reading position is read where it is put back.
  */
-function firstNotAboveTop(elements: HTMLCollection): Element | undefined {
+function viewTop(): number {
+  const padding = Number.parseFloat(
+    getComputedStyle(document.documentElement).scrollPaddingTop,
+  );
+  return Number.isNaN(padding) ? 0 : padding;
+}
+
+/**
+ * The first of `elements` that isn't wholly above `top`. They are laid out top to bottom, so a
+ * binary search finds it with few layout reads, even among the 1 MB document's thousands of
+ * blocks.
+ */
+function firstNotAbove(
+  elements: HTMLCollection,
+  top: number,
+): Element | undefined {
   let low = 0;
   let high = elements.length;
   while (low < high) {
     const middle = Math.floor((low + high) / 2);
     const element = elements[middle];
-    if (element && element.getBoundingClientRect().bottom > 0) high = middle;
+    if (element && element.getBoundingClientRect().bottom > top) high = middle;
     else low = middle + 1;
   }
   return elements[low] ?? undefined;
@@ -127,17 +142,18 @@ function firstNotAboveTop(elements: HTMLCollection): Element | undefined {
  * line number. Undefined at the start of the document, above its first block.
  */
 function readingBlock(view: HTMLElement): Element | undefined {
+  const top = viewTop();
   const first = view.firstElementChild;
-  if (!first || first.getBoundingClientRect().top >= 0) return undefined;
+  if (!first || first.getBoundingClientRect().top >= top) return undefined;
   let block: Element | undefined;
-  let element = firstNotAboveTop(view.children);
+  let element = firstNotAbove(view.children, top);
   while (element) {
     block = element;
     // Only a block that crosses the top has a block nearer the top inside it. An element with no
     // line number, such as a code block's wrapper, is looked into for the block it holds.
     const hasLine = startLine(element) !== undefined;
-    if (hasLine && element.getBoundingClientRect().top >= 0) break;
-    element = firstNotAboveTop(element.children);
+    if (hasLine && element.getBoundingClientRect().top >= top) break;
+    element = firstNotAbove(element.children, top);
   }
   return block;
 }

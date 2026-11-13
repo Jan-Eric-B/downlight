@@ -55,8 +55,52 @@ interface FirstPaintMarks {
   firstFrame: number;
 }
 
-export function reportFirstPaint(marks: FirstPaintMarks): void {
-  if (!isOn) return;
+/** First paint's marks so far, each made where it happens. */
+const firstPaint: Partial<FirstPaintMarks> = {};
+
+let firstPaintReported = false;
+
+/**
+ * Makes first paint's `mark`, now or at `at`, until first paint is reported. A mark made again
+ * replaces the one before: when a later request overtakes the first, the reader waits for the
+ * later one's document.
+ */
+export function markFirstPaint(
+  mark: keyof FirstPaintMarks,
+  at = epochMs(),
+): void {
+  if (!isOn || firstPaintReported) return;
+  firstPaint[mark] = at;
+}
+
+/** Reports first paint with its marks, once. */
+export function reportFirstPaint(): void {
+  if (!isOn || firstPaintReported) return;
+  firstPaintReported = true;
+  const {
+    scriptStart,
+    documentRequested,
+    documentReceived,
+    documentInserted,
+    firstFrame,
+  } = firstPaint;
+  // Each is made on the way to the frame that reports, so a missing one is a page bug, and the
+  // missing report makes `npm run measure` say so.
+  if (
+    scriptStart === undefined ||
+    documentRequested === undefined ||
+    documentReceived === undefined ||
+    documentInserted === undefined ||
+    firstFrame === undefined
+  )
+    return;
+  const marks: FirstPaintMarks = {
+    scriptStart,
+    documentRequested,
+    documentReceived,
+    documentInserted,
+    firstFrame,
+  };
   send("report_first_paint", {
     marks: { ...marks, navigationStart: performance.timeOrigin },
   });
