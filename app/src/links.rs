@@ -6,14 +6,11 @@ use std::path::{Path, PathBuf};
 use std::{fmt, io};
 
 use downlight_core::{LinkAction, LinkError, PathKind, resolve_link};
-use tauri::{AppHandle, Emitter as _, Manager as _, WebviewWindow};
+use tauri::{AppHandle, Manager as _, WebviewWindow};
 
+use crate::documents::{DocumentAt, Documents, Target};
 use crate::platform;
-use crate::window::{self, DocumentAt, OpenWindows, Shown, Target};
-
-/// The event that tells a window's page to scroll to a heading: a link in another window named
-/// a heading in this window's document.
-const SCROLL_TO_HEADING: &str = "scroll-to-heading";
+use crate::window::{self, Shown};
 
 /// Follows the link `target`, as written in the calling window's document, and tells the page
 /// what is left for it to do. With `new_window` (Ctrl+click), a Markdown document opens in a new
@@ -53,7 +50,7 @@ fn follow(
     new_window: bool,
 ) -> Result<Followed, FollowError> {
     // A window that shows no document has no links.
-    let Some(document) = app.state::<OpenWindows>().document_path(label) else {
+    let Some(document) = app.state::<Documents>().document_path(label) else {
         return Ok(Followed::Nothing);
     };
     match resolve_link(&document, target, path_kind)? {
@@ -78,9 +75,10 @@ fn follow(
 }
 
 /// Shows the linked document `path` in window `label`, or in a new window with `new_window`. A
-/// document that is open already has its window brought to the front: this window scrolls to the
-/// heading (or the top), and another window scrolls only if the link names a heading, so that
-/// otherwise it keeps its reading position (`OpenWindows::claim`).
+/// document that is open already has its window brought to the front: this window's page scrolls
+/// to the heading (or the top) on the link's result, and another window's page is told to scroll
+/// by `Documents::give`, only if the link names a heading, so that otherwise it keeps its reading
+/// position.
 fn show_document(
     app: &AppHandle,
     label: &str,
@@ -92,38 +90,29 @@ fn show_document(
         path: &path,
         heading: heading.as_deref(),
     };
-    let shown = window::show(app, Some(document), destination(label, new_window))
+    let shown = window::show(app, document, destination(label, new_window))
         .map_err(|source| FollowError::Show { path, source })?;
-    if let Shown::AlreadyOpen {
-        window,
-        scroll_to: Some(scroll_to),
-    } = &shown
-        && window != label
-    {
-        // The only way to fail is that the window has closed, and then there is nothing to
-        // scroll.
-        let _ = app.emit_to(window.as_str(), SCROLL_TO_HEADING, scroll_to);
-    }
-    Ok(left_for_the_page(label, &shown, heading))
+    Ok(left_for_the_page(&shown, heading))
 }
 
 /// The window a link in window `label` shows a Markdown document in: this one, or a new one with
 /// Ctrl+click.
 fn destination(label: &str, new_window: bool) -> Target<'_> {
     if new_window {
-        Target::NewWindow
+        Target::NewWindowFrom(label)
     } else {
         Target::Window(label)
     }
 }
 
-/// What is left for the page in window `label` after its link to a document at `heading` was
-/// `shown`: a link to the document this window shows already scrolls to the heading, or else to
-/// the top.
-fn left_for_the_page(label: &str, shown: &Shown, heading: Option<String>) -> Followed {
+/// What is left for the page after its link to a document at `heading` was `shown`: a link to the
+/// document this window shows already scrolls to the heading, or else to the top, also with
+/// Ctrl+click. `Documents::give` sends this window no `scroll-to-heading`, so the page scrolls
+/// only on this.
+fn left_for_the_page(shown: &Shown, heading: Option<String>) -> Followed {
     match shown {
-        Shown::AlreadyOpen { window, .. } if window == label => Followed::ScrollTo { heading },
-        Shown::AlreadyOpen { .. } | Shown::Given => Followed::Nothing,
+        Shown::AlreadyHere => Followed::ScrollTo { heading },
+        Shown::AlreadyElsewhere | Shown::Opened => Followed::Nothing,
     }
 }
 
@@ -257,7 +246,10 @@ mod tests {
 
     #[test]
     fn ctrl_click_shows_the_document_in_a_new_window() {
-        assert!(matches!(destination("document-0", true), Target::NewWindow));
+        assert!(matches!(
+            destination("document-0", true),
+            Target::NewWindowFrom("document-0")
+        ));
         assert!(matches!(
             destination("document-0", false),
             Target::Window("document-0")
@@ -266,22 +258,14 @@ mod tests {
 
     #[test]
     fn link_to_the_document_this_window_shows_scrolls_to_its_heading_or_the_top() {
-        let here = |scroll_to: Option<&str>| Shown::AlreadyOpen {
-            window: "document-0".to_owned(),
-            scroll_to: scroll_to.map(str::to_owned),
-        };
         assert_eq!(
-            left_for_the_page(
-                "document-0",
-                &here(Some("install")),
-                Some("install".to_owned())
-            ),
+            left_for_the_page(&Shown::AlreadyHere, Some("install".to_owned())),
             Followed::ScrollTo {
                 heading: Some("install".to_owned())
             }
         );
         assert_eq!(
-            left_for_the_page("document-0", &here(None), None),
+            left_for_the_page(&Shown::AlreadyHere, None),
             Followed::ScrollTo { heading: None }
         );
     }
@@ -289,17 +273,13 @@ mod tests {
     #[test]
     fn link_to_a_document_shown_elsewhere_leaves_this_page_nothing_to_do() {
         // Another window scrolls on the app's word (`scroll-to-heading`), not this page's.
-        let elsewhere = Shown::AlreadyOpen {
-            window: "document-1".to_owned(),
-            scroll_to: Some("install".to_owned()),
-        };
         let heading = || Some("install".to_owned());
         assert_eq!(
-            left_for_the_page("document-0", &elsewhere, heading()),
+            left_for_the_page(&Shown::AlreadyElsewhere, heading()),
             Followed::Nothing
         );
         assert_eq!(
-            left_for_the_page("document-0", &Shown::Given, heading()),
+            left_for_the_page(&Shown::Opened, heading()),
             Followed::Nothing
         );
     }

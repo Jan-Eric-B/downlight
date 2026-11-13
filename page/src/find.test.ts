@@ -1,11 +1,18 @@
-import { clearMocks, mockIPC, mockWindows } from "@tauri-apps/api/mocks";
+import { clearMocks, mockWindows } from "@tauri-apps/api/mocks";
 import { emit } from "@tauri-apps/api/event";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import find from "../../core/tests/fixtures/find.html?raw";
 import notes from "../../core/tests/fixtures/notes.html?raw";
 import { startCommands } from "./commands";
 import { findMatches, startFind } from "./find";
-import { layOut, nextShown, settle } from "./test-support";
+import {
+  answerAsTheApp,
+  giveAnotherDocument,
+  layOut,
+  mockTheApp,
+  nextShown,
+  settle,
+} from "./test-support";
 import { afterNextFrame } from "./reading-position";
 import { startDocumentView } from "./view";
 
@@ -22,12 +29,15 @@ let stop: AbortController;
 beforeEach(async () => {
   mockWindows("document-0");
   documents = [find];
-  mockIPC(
-    (command) => {
+  mockTheApp(
+    (command, args) => {
       if (command !== "render_document") return undefined;
       const next = documents.length > 1 ? documents.shift() : documents[0];
-      if (next instanceof Error) throw next;
-      return next === undefined ? null : { document: next, heading: null };
+      return answerAsTheApp(args, () =>
+        next instanceof Error
+          ? Promise.reject(next)
+          : Promise.resolve(next ?? null),
+      );
     },
     { shouldMockEvents: true },
   );
@@ -121,7 +131,7 @@ function spyOnScrolls(): () => [Element, unknown][] {
 async function show(html: string): Promise<void> {
   documents = [html];
   const shown = nextShown();
-  await emit("document-shown");
+  await giveAnotherDocument();
   await shown;
 }
 
@@ -410,7 +420,7 @@ test("a document shown while the bar is open is counted again", async () => {
   expect(status()).toBe("No results");
 
   const shown = nextShown();
-  await emit("document-shown");
+  await giveAnotherDocument();
   await shown;
   // "A second, short document, for the page tests that show one document after another."
   expect(status()).toBe("1 of 2");
@@ -453,7 +463,7 @@ test("a new document doesn't scroll to a match", async () => {
   const scrolled = spyOnScrolls();
 
   const shown = nextShown();
-  await emit("document-shown");
+  await giveAnotherDocument();
   await shown;
   await settle();
   expect(status()).toBe("1 of 2");
@@ -465,7 +475,7 @@ test("a window whose document goes away finds nothing", async () => {
   documents = [];
   // The app answers null: the window shows no document.
   const shown = nextShown();
-  await emit("document-shown");
+  await giveAnotherDocument();
   await shown;
   expect(status()).toBe("No results");
   expect(findMatches().matches).toEqual([]);

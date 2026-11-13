@@ -1,24 +1,36 @@
-import { clearMocks, mockIPC, mockWindows } from "@tauri-apps/api/mocks";
+import { clearMocks, mockWindows } from "@tauri-apps/api/mocks";
 import { emit } from "@tauri-apps/api/event";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import notes from "../../core/tests/fixtures/notes.html?raw";
 import readme from "../../core/tests/fixtures/readme.html?raw";
-import { layOut, linesOf, nextShown, settle } from "./test-support";
+import {
+  answerAsTheApp,
+  giveAnotherDocument,
+  layOut,
+  linesOf,
+  mockTheApp,
+  nextShown,
+  settle,
+  type AtHeading,
+  type Read,
+} from "./test-support";
 import { startDocumentView, whenDocumentShown } from "./view";
 
 let commands: string[] = [];
 
-/** A document shown at a heading, as `render_document` answers for a link like `a.md#install`. */
-interface AtHeading {
-  document: string;
-  heading: string;
+/**
+ * A `render_document` call that fails before the app can answer it, so `invoke` itself rejects,
+ * with why as Tauri gives it.
+ */
+interface NoAnswer {
+  noAnswer: string;
 }
 
 /**
- * What `render_document` gives, in turn: the HTML, the HTML at a heading, or null for no
- * document. The last answer repeats.
+ * What reading the window's document gives `render_document`, in turn: the HTML, the HTML at a
+ * heading, or null for no document; or no answer at all. The last one repeats.
  */
-let documents: (() => Promise<string | AtHeading | null>)[] = [];
+let documents: (Read | NoAnswer)[] = [];
 
 /** The page's text when it asked the app to show its window, or undefined until then. */
 let textWhenShown: string | undefined;
@@ -28,8 +40,8 @@ beforeEach(() => {
   commands = [];
   documents = [];
   textWhenShown = undefined;
-  mockIPC(
-    (command) => {
+  mockTheApp(
+    (command, args) => {
       commands.push(command);
       if (command === "show_window") {
         textWhenShown = document.body.textContent;
@@ -37,11 +49,12 @@ beforeEach(() => {
       }
       if (command !== "render_document") return undefined;
       const next = documents.length > 1 ? documents.shift() : documents[0];
-      return next?.().then((answer) =>
-        typeof answer === "string"
-          ? { document: answer, heading: null }
-          : answer,
-      );
+      if (typeof next === "object")
+        // Tauri rejects a call it can't hand to the command (a denied or malformed one) with a
+        // string, not an Error.
+        // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- as Tauri does
+        return Promise.reject(next.noAnswer);
+      return next && answerAsTheApp(args, next);
     },
     { shouldMockEvents: true },
   );
@@ -81,7 +94,7 @@ test("a document shown in the window replaces the one before", async () => {
   expect(heading()).toBe("Lamplighter");
   await settle();
 
-  await emit("document-shown");
+  await giveAnotherDocument();
   await vi.waitFor(() => {
     expect(heading()).toBe("Field notes");
   });
@@ -93,7 +106,7 @@ test("an empty window shows the document it is given", async () => {
   await startDocumentView(0);
   await settle();
 
-  await emit("document-shown");
+  await giveAnotherDocument();
   await vi.waitFor(() => {
     expect(heading()).toBe("Field notes");
   });
@@ -113,8 +126,8 @@ test("of two documents shown in quick succession, the later one stays", async ()
   await startDocumentView(0);
   await settle();
 
-  await emit("document-shown");
-  await emit("document-shown");
+  await giveAnotherDocument();
+  await giveAnotherDocument();
   await vi.waitFor(() => {
     expect(heading()).toBe("Field notes");
   });
@@ -314,7 +327,7 @@ test("showing another document removes the bar", async () => {
   await emit("document-changed", "gone");
 
   const shown = nextShown();
-  await emit("document-shown");
+  await giveAnotherDocument();
   await shown;
   expect(heading()).toBe("Field notes");
   expect(goneBar()?.hidden).toBe(true);
@@ -352,7 +365,7 @@ test("showing another document runs the whenDocumentShown listeners", async () =
     headings.push(heading());
   });
 
-  await emit("document-shown");
+  await giveAnotherDocument();
   await vi.waitFor(() => {
     expect(headings).toEqual(["Field notes"]);
   });
@@ -406,7 +419,7 @@ test("a reload overtaken by a newer document-shown shows the newer document", as
   await settle();
 
   await emit("document-changed", "reload");
-  await emit("document-shown");
+  await giveAnotherDocument();
   await vi.waitFor(() => {
     expect(heading()).toBe("Field notes");
   });
@@ -423,6 +436,57 @@ function spyOnHeadingScrolls(): () => string[] {
   return () => scrolls.mock.contexts.map((element) => (element as Element).id);
 }
 
+test("a reload for the document the window left, arriving after another was shown, shows the new one at its heading", async () => {
+  // Ticket 23: the app sent `reload` for the document the window showed, and a link then gave the
+  // window another one at a heading, so `reload` reaches the page after `document-shown`.
+  let sendShown: (answer: AtHeading) => void = () => {};
+  const atOptions = { document: readme, heading: "options" };
+  documents = [
+    () => Promise.resolve(notes),
+    () =>
+      new Promise((resolve) => {
+        sendShown = resolve;
+      }),
+    () => Promise.resolve(atOptions),
+  ];
+  await startDocumentView(0);
+  await settle();
+  // The old document's reading position, partway down it.
+  layOut(3.5);
+  const scrolledTo = spyOnHeadingScrolls();
+
+  const shown = nextShown();
+  await giveAnotherDocument();
+  await emit("document-changed", "reload");
+  sendShown(atOptions);
+  await shown;
+  await settle();
+  expect(heading()).toBe("Lamplighter");
+  expect(new Set(scrolledTo())).toEqual(new Set(["options"]));
+});
+
+test("a 'gone' for the document the window left, arriving after another was shown, leaves no bar over the new one", async () => {
+  // The watch on the old document reported its file gone just as the window was given another.
+  let sendShown: (html: string) => void = () => {};
+  documents = [
+    () => Promise.resolve(notes),
+    () =>
+      new Promise((resolve) => {
+        sendShown = resolve;
+      }),
+  ];
+  await startDocumentView(0);
+  await settle();
+
+  const shown = nextShown();
+  await giveAnotherDocument();
+  await emit("document-changed", "gone");
+  sendShown(readme);
+  await shown;
+  expect(heading()).toBe("Lamplighter");
+  expect(goneBar()?.hidden).toBe(true);
+});
+
 test("document shown at a heading scrolls to that heading", async () => {
   documents = [
     () => Promise.resolve(notes),
@@ -433,7 +497,7 @@ test("document shown at a heading scrolls to that heading", async () => {
   const scrolledTo = spyOnHeadingScrolls();
 
   const shown = nextShown();
-  await emit("document-shown");
+  await giveAnotherDocument();
   await shown;
   expect(heading()).toBe("Lamplighter");
   expect(scrolledTo().length).toBeGreaterThan(0);
@@ -448,7 +512,7 @@ test("document shown without a heading starts at the top", async () => {
   const toTop = vi.spyOn(window, "scrollTo").mockImplementation(() => {});
 
   const shown = nextShown();
-  await emit("document-shown");
+  await giveAnotherDocument();
   await shown;
   expect(toTop).toHaveBeenCalledWith(0, 0);
   expect(scrolledTo()).toEqual([]);
@@ -477,7 +541,7 @@ test("scroll-to-heading from the app scrolls an open document to that heading", 
 });
 
 test("a reload of a document shown at a heading keeps the reading position", async () => {
-  // The heading comes with every render of the document, the reload's too.
+  // Shown at a heading first; the app answers the reload without it.
   const atOptions = { document: readme, heading: "options" };
   documents = [() => Promise.resolve(atOptions)];
   await startDocumentView(0);
@@ -500,9 +564,68 @@ test("a document that can't be read runs the whenDocumentShown listeners", async
   await settle();
 
   const shown = nextShown();
-  await emit("document-shown");
+  await giveAnotherDocument();
   await shown;
   expect(document.querySelector("article")?.textContent).toContain(
     "Can't read gone.md",
   );
+});
+
+/** Why the app gives no answer in the tests below, as Tauri words a denied command. */
+const NOT_ALLOWED = "render_document not allowed. Command not found";
+
+test("a window whose app gives no answer for its first document shows why", async () => {
+  documents = [{ noAnswer: NOT_ALLOWED }];
+  const shown = nextShown();
+  await startDocumentView(0);
+  await shown;
+
+  const view = document.querySelector<HTMLElement>("article.markdown-body");
+  expect(view?.hidden).toBe(false);
+  expect(view?.textContent).toBe(NOT_ALLOWED);
+  expect(emptyWindow()?.hidden).toBe(true);
+  expect(textWhenShown).toContain(NOT_ALLOWED);
+});
+
+test("a shown document stays when the app gives no answer, and a notice says why", async () => {
+  documents = [() => Promise.resolve(readme), { noAnswer: NOT_ALLOWED }];
+  await startDocumentView(0);
+  await settle();
+
+  await emit("document-changed", "reload");
+  await vi.waitFor(() => {
+    expect(document.querySelector(".notice")?.textContent).toBe(NOT_ALLOWED);
+  });
+  expect(heading()).toBe("Lamplighter");
+});
+
+test("a reload overtaken by a request the app gives no answer to still runs the whenDocumentShown listeners", async () => {
+  documents = [
+    () => Promise.resolve(readme),
+    () => Promise.resolve(notes),
+    { noAnswer: NOT_ALLOWED },
+  ];
+  await startDocumentView(0);
+  await settle();
+  layOut(15.5);
+  // The second request starts while the reload anchors its render, which overtakes the reload.
+  let overtaken = false;
+  vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(() => {
+    if (overtaken) return;
+    overtaken = true;
+    void emit("document-changed", "reload");
+  });
+  const headings: (string | null | undefined)[] = [];
+  const stop = whenDocumentShown(() => {
+    headings.push(heading());
+  });
+
+  await emit("document-changed", "reload");
+  await vi.waitFor(() => {
+    expect(document.querySelector(".notice")?.textContent).toBe(NOT_ALLOWED);
+  });
+  await vi.waitFor(() => {
+    expect(headings).toEqual(["Field notes"]);
+  });
+  stop();
 });

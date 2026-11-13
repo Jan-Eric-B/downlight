@@ -1,13 +1,14 @@
-import { clearMocks, mockIPC, mockWindows } from "@tauri-apps/api/mocks";
+import { clearMocks, mockWindows } from "@tauri-apps/api/mocks";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import code from "../../core/tests/fixtures/code.html?raw";
+import { answerAsTheApp, mockTheApp } from "./test-support";
 import { startDocumentView } from "./view";
 
 beforeEach(() => {
   mockWindows("document-0");
-  mockIPC((command) =>
+  mockTheApp((command, args) =>
     command === "render_document"
-      ? { document: code, heading: null }
+      ? answerAsTheApp(args, () => Promise.resolve(code))
       : undefined,
   );
 });

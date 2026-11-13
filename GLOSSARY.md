@@ -28,6 +28,10 @@ _Avoid_: Check, complete, done
 Showing the document again after its file changed, at the same reading position.
 _Avoid_: Refresh
 
+**Notice**:
+A short message a window shows the reader for a few seconds, such as why a dropped file didn't open or why the document's file isn't watched. One that comes before the window's page is ready is held until the page first asks for its document.
+_Avoid_: Toast, alert, popup
+
 **Reading position**:
 The block at the top of the view, kept as the line number it starts on. Reload, and Back and Forward, return to it, and Find's first current match is the first one from it on.
 _Avoid_: Scroll position, anchor

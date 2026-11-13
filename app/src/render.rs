@@ -1,4 +1,5 @@
-//! The command that reads and renders a window's document, and the read and render it runs.
+//! Reading a document's file and rendering it on a blocking thread. The documents module starts
+//! these and hands what they give to the window's page; this module knows nothing of windows.
 
 use std::fmt;
 use std::io;
@@ -6,51 +7,9 @@ use std::path::{Path, PathBuf};
 
 use downlight_core::RenderedDocument;
 use tauri::async_runtime::JoinHandle;
-use tauri::{Manager as _, State, WebviewWindow};
 
-use crate::timing::{Stages, Timing};
-use crate::window::OpenWindows;
-use crate::{image, notice};
-
-/// Reads and renders the calling window's document, with the heading to show it at, or gives None
-/// while the window shows none.
-///
-/// The page passes nothing: the path comes from the app's own state, so the page can't ask for
-/// other files. The work runs on a blocking thread, off the main thread, so the window keeps
-/// answering while a large document renders. The first request after the window was given its
-/// document gets the render started then (`OpenWindows::render_of`), and any notice held for the
-/// page until it asked (`OpenWindows::hold_notice`).
-#[tauri::command]
-pub async fn render_document(
-    window: WebviewWindow,
-    open_windows: State<'_, OpenWindows>,
-    timing: State<'_, Timing>,
-) -> Result<Option<DocumentToShow>, DocumentError> {
-    let Some(handover) = open_windows.render_of(window.label()) else {
-        return Ok(None);
-    };
-    if let Some(message) = &handover.notice {
-        notice::show_notice(window.app_handle(), window.label(), message);
-    }
-    let (document, stages) = handover
-        .render
-        .await
-        .map_err(|source| DocumentError::ReadAndRenderStopped { source })??;
-    timing.report(window.label(), &stages);
-    Ok(Some(DocumentToShow {
-        document,
-        heading: handover.heading,
-    }))
-}
-
-/// What the page gets when it asks for its document: the rendered document and the heading to
-/// show it at, from a link like `guide.md#install` (ticket 11), or None for its top. The page
-/// ignores the heading on a reload, which keeps the reading position.
-#[derive(serde::Serialize)]
-pub struct DocumentToShow {
-    document: RenderedDocument,
-    heading: Option<String>,
-}
+use crate::image;
+use crate::timing::Stages;
 
 /// The rendered document, with how long reading and rendering it took for the timing switch.
 pub type ReadAndRender = Result<(RenderedDocument, Stages), DocumentError>;
@@ -102,37 +61,9 @@ impl fmt::Display for DocumentError {
     }
 }
 
-// Tauri sends a command's error to the page serialized; the page shows it as text.
+// The page gets the error inside its answer, serialized, and shows it as text.
 impl serde::Serialize for DocumentError {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.collect_str(self)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn document_to_show_serializes_as_the_page_reads_it() {
-        // `DocumentToShow` in page/src/view.ts: the rendered document goes as its HTML.
-        let rendered = || downlight_core::render(b"# Install", Path::new(r"C:\docs\a.md"), "");
-        let html = rendered().as_str().to_owned();
-        let at_install = DocumentToShow {
-            document: rendered(),
-            heading: Some("install".to_owned()),
-        };
-        assert_eq!(
-            serde_json::to_value(at_install).unwrap(),
-            serde_json::json!({ "document": html, "heading": "install" })
-        );
-        let at_top = DocumentToShow {
-            document: rendered(),
-            heading: None,
-        };
-        assert_eq!(
-            serde_json::to_value(at_top).unwrap(),
-            serde_json::json!({ "document": html, "heading": null })
-        );
     }
 }

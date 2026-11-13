@@ -5,13 +5,13 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod command_line;
+mod documents;
 mod image;
 mod links;
 mod menu;
-mod notice;
+mod message;
 mod open;
 mod platform;
-mod reload;
 mod render;
 mod timing;
 mod watch;
@@ -22,14 +22,14 @@ use std::process::ExitCode;
 
 use tauri::Manager as _;
 
-use window::OpenWindows;
+use documents::Documents;
 
 const APP_NAME: &str = "Downlight";
 
 fn main() -> ExitCode {
     let timing = timing::Timing::from_env();
 
-    let ran = tauri::Builder::default()
+    let built = tauri::Builder::default()
         // First, so that a second launch hands over its documents and exits before anything
         // else starts (ADR 0001).
         .plugin(tauri_plugin_single_instance::init(|app, args, folder| {
@@ -46,11 +46,10 @@ fn main() -> ExitCode {
         }))
         .register_asynchronous_uri_scheme_protocol(image::SCHEME, image::serve)
         .manage(timing)
-        .manage(OpenWindows::default())
         .invoke_handler(tauri::generate_handler![
-            render::render_document,
+            documents::render_document,
+            documents::reload_document,
             links::follow_link,
-            reload::reload_document,
             open::open_document,
             menu::show_document_menu,
             window::close_window,
@@ -83,9 +82,16 @@ fn main() -> ExitCode {
             std::thread::spawn(move || platform::show_error(&report));
             Ok(())
         })
-        .run(tauri::generate_context!());
-    match ran {
-        Ok(()) => ExitCode::SUCCESS,
+        .build(tauri::generate_context!());
+    match built {
+        Ok(app) => {
+            // Its messages go to the pages through the app's handle, which exists only once the
+            // app is built. Managed before the event loop runs, so the launches in `setup` and a
+            // second launch's documents find it.
+            app.manage(Documents::new(app.handle().clone()));
+            app.run(|_, _| {});
+            ExitCode::SUCCESS
+        }
         Err(error) => {
             platform::show_error(&format!("{APP_NAME} can't start: {error}"));
             ExitCode::FAILURE

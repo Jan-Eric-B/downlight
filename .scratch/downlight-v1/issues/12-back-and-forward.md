@@ -4,7 +4,7 @@
 
 Spec: [Downlight v1](../spec.md)
 
-**Blocked by:** 03 (Page test harness), 09 (Opening from inside a window), 10 (Reload), 11 (Links)
+**Blocked by:** 03 (Page test harness), 09 (Opening from inside a window), 10 (Reload), 11 (Links), 22 (One module owns a window's shown document), 23 (The app decides whether a page shows or reloads its document), 24 (The documents module sends a link's scroll where it decides it)
 
 **Status:** ready-for-agent
 

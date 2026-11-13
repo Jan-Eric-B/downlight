@@ -8,8 +8,9 @@ use std::path::{Path, PathBuf};
 use downlight_core::{MARKDOWN_EXTENSIONS, is_markdown};
 use tauri::{DragDropEvent, Manager as _, WebviewWindow, WindowEvent};
 
-use crate::notice;
-use crate::window::{self, DocumentAt, Target};
+use crate::documents::{DocumentAt, Target};
+use crate::message::{Message, Pages as _};
+use crate::window;
 
 /// Shows the open dialog, filtered to Markdown files, and shows the chosen document in the
 /// calling window. Choosing nothing changes nothing.
@@ -29,7 +30,7 @@ pub async fn open_document(window: WebviewWindow) -> Result<(), OpenError> {
         };
         window::show(
             &app,
-            Some(DocumentAt::new(&document)),
+            DocumentAt::new(&document),
             Target::Window(window.label()),
         )
         .map(|_| ())
@@ -53,18 +54,16 @@ pub fn show_when_dropped(window: &tauri::Window, event: &WindowEvent) {
     tauri::async_runtime::spawn_blocking(move || {
         let failure = match dropped_document(&paths).map(Path::to_path_buf) {
             Some(document) => {
-                match window::show(
-                    &app,
-                    Some(DocumentAt::new(&document)),
-                    Target::Window(&label),
-                ) {
+                match window::show(&app, DocumentAt::new(&document), Target::Window(&label)) {
                     Ok(_) => return,
                     Err(source) => OpenError::Show { document, source },
                 }
             }
             None => OpenError::NotMarkdown,
         };
-        notice::show_notice(&app, &label, &failure.to_string());
+        // The notice is the only way to tell the reader about the drop, so a notice that can't be
+        // sent leaves nobody to tell.
+        let _ = app.send(&label, Message::Notice(failure.to_string()));
     });
 }
 

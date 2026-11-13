@@ -4,10 +4,9 @@
 
 use serde::Deserialize;
 use tauri::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
-use tauri::{AppHandle, Emitter as _, WebviewWindow};
+use tauri::{AppHandle, WebviewWindow};
 
-/// The event that tells a window's page which command the reader chose in its menu.
-const MENU_COMMAND: &str = "menu-command";
+use crate::message::{Message, Pages as _};
 
 /// One line of the menu, as the page describes it.
 #[derive(Deserialize)]
@@ -52,8 +51,8 @@ pub fn show_document_menu(window: WebviewWindow, entries: Vec<MenuEntry>) -> tau
 /// Passes the reader's choice to the page of the window whose menu it was.
 pub fn forward_choice(app: &AppHandle, event: MenuEvent) {
     if let Some((window, command)) = chosen(event.id().as_ref()) {
-        // The only way to fail is that the window has closed, and then nothing is left to do.
-        let _ = app.emit_to(window, MENU_COMMAND, command);
+        // A menu choice arrives as an app event that nobody waits on, so nobody is left to tell.
+        let _ = app.send(window, Message::MenuCommand(command.to_owned()));
     }
 }
 

@@ -1,0 +1,305 @@
+//! Watching a window's document: a change to its file reloads it or tells the page it is gone,
+//! a watch or change for a document the window has left is dropped, and a notice waits until the
+//! page first asks. The reload by hand sits here beside the watch's own.
+
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+
+use super::*;
+
+#[test]
+fn reload_by_hand_tells_the_page_and_reads_the_file_again() {
+    let path = document("reload", "# First");
+    let (documents, pages) = documents();
+    let label = open_new(&documents, &path);
+    rendered_html(&documents, &label);
+    std::fs::write(&path, "# Second").unwrap();
+    documents.reload(&label).unwrap();
+    wait_for_render_ahead(&documents, &label);
+    // Written after the reload's read, so only a read on the page's request would see it.
+    std::fs::write(&path, "# Third").unwrap();
+    let shown = rendered_html(&documents, &label);
+    std::fs::remove_file(&path).unwrap();
+    assert!(shown.contains("Second"), "{shown}");
+    assert_eq!(pages.sent(), [to(&label, Message::Reload)]);
+}
+
+#[test]
+fn window_without_a_document_has_nothing_to_reload() {
+    let (documents, pages) = documents();
+    let label = documents.open_empty();
+    documents.reload(&label).unwrap();
+    documents.reload("document-99").unwrap();
+    assert_eq!(pages.sent(), []);
+}
+
+#[test]
+fn reload_for_the_shown_document_tells_the_page_and_reads_the_file_again() {
+    let path = document("reload-shown", "# First");
+    let (documents, pages) = documents();
+    let label = open_new(&documents, &path);
+    let mut on_change = watch_callback(&documents, &label, &path);
+    rendered_html(&documents, &label);
+    std::fs::write(&path, "# Second").unwrap();
+    on_change(Change::Changed);
+    wait_for_render_ahead(&documents, &label);
+    // Written after the reload's read, so only a read on the page's request would see it.
+    std::fs::write(&path, "# Third").unwrap();
+    let shown = rendered_html(&documents, &label);
+    std::fs::remove_file(&path).unwrap();
+    assert!(shown.contains("Second"), "{shown}");
+    assert_eq!(pages.sent(), [to(&label, Message::Reload)]);
+}
+
+#[test]
+fn file_of_the_shown_document_back_again_reloads_it() {
+    let (documents, pages) = documents();
+    let label = open_new(&documents, &manifest());
+    let mut on_change = watch_callback(&documents, &label, &manifest());
+    on_change(Change::Back);
+    assert_eq!(pages.sent(), [to(&label, Message::Reload)]);
+}
+
+#[test]
+fn file_of_the_shown_document_gone_tells_the_page() {
+    let (documents, pages) = documents();
+    let label = open_new(&documents, &manifest());
+    let mut on_change = watch_callback(&documents, &label, &manifest());
+    on_change(Change::Gone);
+    assert_eq!(pages.sent(), [to(&label, Message::Gone)]);
+}
+
+#[test]
+fn reload_overtaken_by_another_document_sends_nothing() {
+    // Ticket 21: the watch on the first document reports a save just after the window was given
+    // the second, before that watch has stopped.
+    let first = document("reload-left-first", "# First document");
+    let second = document("reload-left-second", "# Second document");
+    let (documents, pages) = documents();
+    let label = open_new(&documents, &first);
+    let mut on_first_change = watch_callback(&documents, &label, &first);
+    give(&documents, DocumentAt::new(&second), Target::Window(&label));
+    wait_for_render_ahead(&documents, &label);
+    // A render started now would read this, and the page would get it instead of the one ahead.
+    std::fs::write(&second, "# Changed since").unwrap();
+    on_first_change(Change::Changed);
+    on_first_change(Change::Gone);
+    let shown = rendered_html(&documents, &label);
+    std::fs::remove_file(&first).unwrap();
+    std::fs::remove_file(&second).unwrap();
+    assert!(shown.contains("Second document"), "{shown}");
+    assert_eq!(pages.sent(), [to(&label, Message::DocumentShown)]);
+}
+
+/// A watch on `path` whose callback holds the sender of the returned receiver. A dropped watch
+/// ends its thread, which drops the callback, so the receiver tells a running watch (Timeout)
+/// from a dropped one (Disconnected).
+#[expect(
+    clippy::unwrap_used,
+    reason = "a helper isn't a #[test] function, and its panic fails the test that called it"
+)]
+fn watch_with_its_life(path: &Path) -> (Watch, Receiver<Change>) {
+    let (sender, receiver) = mpsc::channel();
+    let watch = Watch::start(path, move |change| {
+        let _ = sender.send(change);
+    })
+    .unwrap();
+    (watch, receiver)
+}
+
+/// Long enough for a dropped watch's thread to end.
+const WATCH_END_WAIT: Duration = Duration::from_secs(1);
+
+#[test]
+fn watch_for_a_document_the_window_has_left_is_dropped() {
+    let first = document("left-first", "# First");
+    let second = document("left-second", "# Second");
+    let (documents, _) = documents();
+    let label = open_new(&documents, &first);
+    give(&documents, DocumentAt::new(&second), Target::Window(&label));
+    let (watch, life) = watch_with_its_life(&first);
+    documents.keep_watch(&label, &document_key(&first), watch);
+    let running = life.recv_timeout(WATCH_END_WAIT);
+    std::fs::remove_file(&first).unwrap();
+    std::fs::remove_file(&second).unwrap();
+    assert_eq!(running, Err(RecvTimeoutError::Disconnected));
+}
+
+#[test]
+fn change_to_a_document_the_window_has_left_is_ignored() {
+    let (documents, pages) = documents();
+    let label = open_new(&documents, &manifest());
+    let mut on_change = watch_callback(&documents, &label, &manifest());
+    give(
+        &documents,
+        DocumentAt::new(&app_file("build.rs")),
+        Target::Window(&label),
+    );
+    for change in [Change::Changed, Change::Gone, Change::Back] {
+        on_change(change);
+    }
+    assert_eq!(pages.sent(), [to(&label, Message::DocumentShown)]);
+}
+
+#[test]
+fn change_for_a_closed_window_is_ignored() {
+    let (documents, pages) = documents();
+    let label = open_new(&documents, &manifest());
+    let mut on_change = watch_callback(&documents, &label, &manifest());
+    documents.forget(&label);
+    for change in [Change::Changed, Change::Gone, Change::Back] {
+        on_change(change);
+    }
+    assert_eq!(pages.sent(), []);
+}
+
+/// Longer than any watch takes to report a save, so a missing report fails the test rather than
+/// hangs it.
+const REPORT_WAIT: Duration = Duration::from_secs(3);
+
+/// Saves `path` until its watch has reported it to `window`'s page, and returns every message sent
+/// by then. The watch starts on a thread of its own after the window was given the document, and a
+/// save before it started goes unreported, so the file is saved again until one is reported.
+#[expect(
+    clippy::unwrap_used,
+    clippy::panic,
+    reason = "a helper isn't a #[test] function, and its panic fails the test that called it"
+)]
+fn save_until_reported(pages: &Recorder, window: &str, path: &Path) -> Vec<Sent> {
+    let before = pages.sent().len();
+    for save in 0..10 {
+        std::fs::write(path, format!("# Saved {save}")).unwrap();
+        let sent = pages.wait_until(Duration::from_millis(500), |sent| sent.len() > before);
+        if sent.len() > before {
+            return sent;
+        }
+    }
+    panic!("no save to {} was reported to {window}", path.display());
+}
+
+#[test]
+fn document_given_and_then_saved_reloads_with_the_saved_text() {
+    let path = document("saved", "# First");
+    let (documents, pages) = documents();
+    let label = open_new(&documents, &path);
+    rendered_html(&documents, &label);
+    let sent = save_until_reported(&pages, &label, &path);
+    let shown = rendered_html(&documents, &label);
+    std::fs::remove_file(&path).unwrap();
+    assert_eq!(sent.first(), Some(&to(&label, Message::Reload)));
+    assert!(shown.contains("Saved"), "{shown}");
+}
+
+#[test]
+fn document_given_and_then_deleted_tells_the_page_it_is_gone() {
+    let path = document("deleted", "# First");
+    let (documents, pages) = documents();
+    let label = open_new(&documents, &path);
+    save_until_reported(&pages, &label, &path);
+    std::fs::remove_file(&path).unwrap();
+    let gone = to(&label, Message::Gone);
+    let sent = pages.wait_until(REPORT_WAIT, |sent| sent.contains(&gone));
+    assert_eq!(sent.last(), Some(&gone));
+}
+
+#[test]
+fn window_forgotten_before_its_page_asks_hands_over_nothing_and_drops_its_late_watch() {
+    let path = document("closed", "# First");
+    let (documents, _) = documents();
+    let label = open_new(&documents, &path);
+    // The window closes straight after it was given its document: its render ahead may still
+    // run, and its watch starts only after the window was forgotten.
+    let (watch, life) = watch_with_its_life(&path);
+    documents.forget(&label);
+    let handover = documents.handover(&label, None);
+    documents.keep_watch(&label, &document_key(&path), watch);
+    let running = life.recv_timeout(WATCH_END_WAIT);
+    std::fs::remove_file(&path).unwrap();
+    assert!(handover.is_none());
+    assert_eq!(running, Err(RecvTimeoutError::Disconnected));
+}
+
+/// A document whose file can't be watched: its folder is missing.
+fn unwatchable() -> PathBuf {
+    std::env::temp_dir()
+        .join(format!(
+            "downlight-documents-{}-missing",
+            std::process::id()
+        ))
+        .join("unwatched.md")
+}
+
+/// Long enough for a watch that can't start to have failed.
+const WATCH_START_WAIT: Duration = Duration::from_millis(500);
+
+#[test]
+fn watch_that_cannot_start_is_noticed_once_the_page_asks() {
+    let (documents, pages) = documents();
+    let label = open_new(&documents, &unwatchable());
+    let before_asking = pages.wait_until(WATCH_START_WAIT, |sent| !sent.is_empty());
+    let _ = documents.handover(&label, None);
+    let sent = pages.wait_until(REPORT_WAIT, |sent| !sent.is_empty());
+    assert_eq!(before_asking, []);
+    assert!(
+        matches!(
+            sent.as_slice(),
+            [(window, Message::Notice(notice))]
+                if *window == label && notice.starts_with("Can't watch")
+        ),
+        "{sent:?}"
+    );
+}
+
+#[test]
+fn notice_held_before_the_page_asks_is_sent_when_it_first_asks() {
+    let (documents, pages) = documents();
+    let label = open_new(&documents, &manifest());
+    documents.notice(&label, &document_key(&manifest()), "Can't watch".to_owned());
+    let before_asking = pages.sent();
+    let _ = documents.handover(&label, None);
+    let _ = documents.handover(&label, None);
+    assert_eq!(before_asking, []);
+    assert_eq!(
+        pages.sent(),
+        [to(&label, Message::Notice("Can't watch".to_owned()))]
+    );
+}
+
+#[test]
+fn notice_after_the_page_asked_is_sent_now() {
+    let (documents, pages) = documents();
+    let label = open_new(&documents, &manifest());
+    let _ = documents.handover(&label, None);
+    documents.notice(&label, &document_key(&manifest()), "Can't watch".to_owned());
+    assert_eq!(
+        pages.sent(),
+        [to(&label, Message::Notice("Can't watch".to_owned()))]
+    );
+}
+
+#[test]
+fn notice_for_a_document_the_window_has_left_is_dropped() {
+    let (documents, pages) = documents();
+    let label = open_new(&documents, &manifest());
+    give(
+        &documents,
+        DocumentAt::new(&app_file("build.rs")),
+        Target::Window(&label),
+    );
+    documents.notice(&label, &document_key(&manifest()), "Can't watch".to_owned());
+    let _ = documents.handover(&label, None);
+    assert_eq!(pages.sent(), [to(&label, Message::DocumentShown)]);
+}
+
+#[test]
+fn notice_for_a_document_the_window_had_before_is_not_sent_with_the_new_one() {
+    let (documents, pages) = documents();
+    let label = open_new(&documents, &manifest());
+    documents.notice(&label, &document_key(&manifest()), "Can't watch".to_owned());
+    give(
+        &documents,
+        DocumentAt::new(&app_file("build.rs")),
+        Target::Window(&label),
+    );
+    let _ = documents.handover(&label, None);
+    assert_eq!(pages.sent(), [to(&label, Message::DocumentShown)]);
+}

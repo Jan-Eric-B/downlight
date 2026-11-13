@@ -41,11 +41,35 @@ export async function scrollToHeading(heading: string | null): Promise<void> {
 }
 
 /**
- * The app's answer when the page asks for its document (`DocumentToShow` in `app/src/render.rs`):
- * the rendered document as its HTML, and the heading to show it at, from a link like `guide.md#install`,
- * or null for its top. Null while the window shows no document.
+ * What the page does with a render, as the app decides it from the showing the page's view shows
+ * (`Place` in `app/src/documents.rs`): show the document at the heading a link like
+ * `guide.md#install` named, or at its top for null, or reload it at the reading position.
  */
-type DocumentToShow = { document: string; heading: string | null } | null;
+export type Place =
+  { place: "show"; heading: string | null } | { place: "reload" };
+
+/**
+ * What the page sends with `render_document`: the showing whose render its view shows, or null
+ * while it shows the empty state, an error or nothing yet. Exported, with `DocumentToShow`, so the
+ * page's tests answer as the app does in the shape the page reads.
+ */
+export type RenderDocumentArgs = { showing: number | null };
+
+/**
+ * The app's answer when the page asks for its document (`DocumentToShow` in
+ * `app/src/documents.rs`), or null while the window shows no document: the showing the window is
+ * at, for the next request, what to do with the render, and the rendered document as its HTML or
+ * why it can't be read.
+ */
+export type DocumentToShow =
+  | ({ showing: number } & Place & ({ document: string } | { error: string }))
+  | null;
+
+/** An answer that says to show the document. */
+type ToShow = Extract<NonNullable<DocumentToShow>, { place: "show" }>;
+
+/** An answer that says to reload the document. */
+type ToReload = Extract<NonNullable<DocumentToShow>, { place: "reload" }>;
 
 type ShownListener = (view: HTMLElement) => void;
 
@@ -93,10 +117,12 @@ function createGoneBar(): HTMLElement {
 }
 
 /**
- * Shows the window's document, or the empty state while it has none, and shows the next one
- * whenever the app says the window shows another document. When the app says the document's file
- * changed, it shows the reload at the same reading position, or says the file is gone.
- * `scriptStart` is when the page's script started, for the first paint report.
+ * Shows the window's document, or the empty state while it has none, and asks for it again
+ * whenever the app says the window shows another document or the document's file changed. The
+ * app's answer says whether to show it, at its heading or top, or reload it at the same reading
+ * position (ticket 23); the page never decides that by which message made it ask. When the app
+ * says the file is gone, it says so over the last render. `scriptStart` is when the page's script
+ * started, for the first paint report.
  */
 export async function startDocumentView(scriptStart: number): Promise<void> {
   const goneBar = createGoneBar();
@@ -107,6 +133,11 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
   document.body.append(goneBar, view, empty);
 
   let latestRequest = 0;
+  /**
+   * The showing whose render the view shows, sent with each request so the app can tell a show
+   * from a reload; null while it shows the empty state, an error or nothing yet.
+   */
+  let showing: number | null = null;
   /** Whether the document's file went away since the window last asked for its render. */
   let fileGone = false;
   /** Whether the view's content changed since the `whenDocumentShown` listeners last ran. */
@@ -138,68 +169,89 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
   };
 
   /**
-   * Asks the app for the window's document and shows it, at its heading if a link named one and
-   * otherwise at the top. Returns when the HTML arrived, if this request inserted a document; a
-   * request that a later one overtook shows nothing, so the window ends up with the document it
-   * was shown last.
+   * Asks the app for the window's document, sending the showing the view shows, and shows or
+   * reloads it as the answer says. Returns when the HTML arrived, if this request showed a
+   * document; a request that a later one overtook does nothing more, so the window ends up with
+   * what it was given last.
    */
-  const showDocument = async (): Promise<number | undefined> => {
+  const requestDocument = async (): Promise<number | undefined> => {
+    // The file is read for this request, so only a "gone" after this keeps the bar. A reload that
+    // can't read the file leaves the bar as it is.
     fileGone = false;
     const request = ++latestRequest;
+    let answer: DocumentToShow;
+    const args: RenderDocumentArgs = { showing };
     try {
-      const shown = await invoke<DocumentToShow>("render_document");
-      if (request !== latestRequest) return undefined;
-      const received = epochMs();
-      place(shown?.document ?? null);
-      addCopyButtons(view);
-      if (shown === null) {
-        announce();
-        return undefined;
-      }
-      scrollTo(0, 0);
-      if (shown.heading !== null) {
-        await scrollToHeading(shown.heading);
-        if (request !== latestRequest) return undefined;
-      }
-      announce();
-      return received;
+      answer = await invoke<DocumentToShow>("render_document", args);
     } catch (error) {
+      // The app couldn't be asked at all, so there is no answer to say what to do: a view that
+      // shows a document keeps it, as a failed reload does.
       if (request !== latestRequest) return undefined;
-      place(document.createTextNode(String(error)));
+      if (showing === null) place(document.createTextNode(String(error)));
+      else showNotice(String(error));
       announce();
       return undefined;
     }
+    if (request !== latestRequest) return undefined;
+    if (answer === null) {
+      showing = null;
+      place(null);
+      announce();
+      return undefined;
+    }
+    if (answer.place === "show") return show(answer, request);
+    await reload(answer, request);
+    return undefined;
+  };
+
+  /**
+   * Shows a document the view didn't show, at its heading if a link named one and otherwise at
+   * the top, or why it can't be read. Returns when the HTML arrived, if it showed the document.
+   */
+  const show = async (
+    answer: ToShow,
+    request: number,
+  ): Promise<number | undefined> => {
+    const received = epochMs();
+    // A "gone" that came while this was on the way was for the document the window has left, as
+    // the app sends it after `document-shown` at times (ticket 23); this one was just read.
+    fileGone = false;
+    if ("error" in answer) {
+      showing = null;
+      place(document.createTextNode(answer.error));
+      announce();
+      return undefined;
+    }
+    showing = answer.showing;
+    place(answer.document);
+    addCopyButtons(view);
+    scrollTo(0, 0);
+    if (answer.heading !== null) {
+      await scrollToHeading(answer.heading);
+      if (request !== latestRequest) return undefined;
+    }
+    announce();
+    return received;
   };
 
   /**
    * Shows the document's new render at the reading position. A reload that can't read the file
    * keeps the last render and says why, so the reader can keep reading.
    */
-  const reload = async () => {
-    // The reload reads the file as it is now, so only a "gone" after this keeps the bar. A reload
-    // that can't read the file leaves the bar as it is.
-    fileGone = false;
-    const request = ++latestRequest;
-    let shown: DocumentToShow;
-    try {
-      shown = await invoke<DocumentToShow>("render_document");
-    } catch (error) {
-      if (request !== latestRequest) return;
-      showNotice(String(error));
+  const reload = async (answer: ToReload, request: number) => {
+    if ("error" in answer) {
+      showNotice(answer.error);
       // The last render stays, but a reload this one overtook may have put it in place.
       announce();
       return;
     }
-    if (request !== latestRequest) return;
     const received = epochMs();
     // Parsed in a task and a frame of its own, apart from the swap and the layout for the
     // anchoring, so that neither holds up the page for over 100 ms with a 1 MB document. The
     // template's content is inert: its images load only once it is in the view.
     const parsed = document.createElement("template");
-    // The HTML comes only from the core's render, never from the page. The app reloads only a
-    // window that shows a document, so the render is never null here. A heading the document was
-    // shown at is left alone: a reload keeps the reading position.
-    parsed.innerHTML = shown?.document ?? "";
+    // The HTML comes only from the core's render, never from the page.
+    parsed.innerHTML = answer.document;
     addCopyButtons(parsed.content);
     await afterNextFrame();
     if (request !== latestRequest) return;
@@ -223,7 +275,7 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
 
   // The listeners only start: waiting for them would hold up first paint.
   listenToApp("document-shown", () => {
-    void showDocument();
+    void requestDocument();
   });
   listenToApp("scroll-to-heading", (heading) => {
     void scrollToHeading(heading);
@@ -233,12 +285,12 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
       fileGone = true;
       goneBar.hidden = false;
     }
-    if (change === "reload") void reload();
+    if (change === "reload") void requestDocument();
   });
   listenToApp("notice", showNotice);
 
   const documentRequested = epochMs();
-  const documentReceived = await showDocument();
+  const documentReceived = await requestDocument();
   const documentInserted = epochMs();
   // The window opens hidden and shows once the frame with its document, the empty state or the
   // error is drawn, so it never flashes white or shows an empty frame (ticket 04).

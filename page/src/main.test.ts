@@ -1,6 +1,7 @@
-import { clearMocks, mockIPC, mockWindows } from "@tauri-apps/api/mocks";
+import { clearMocks, mockWindows } from "@tauri-apps/api/mocks";
 import { afterEach, expect, test } from "vitest";
 import readme from "../../core/tests/fixtures/readme.html?raw";
+import { answerAsTheApp, mockTheApp } from "./test-support";
 
 afterEach(() => {
   clearMocks();
@@ -9,9 +10,9 @@ afterEach(() => {
 
 test("shows the document the core rendered", async () => {
   mockWindows("document-0");
-  mockIPC((command) =>
+  mockTheApp((command, args) =>
     command === "render_document"
-      ? { document: readme, heading: null }
+      ? answerAsTheApp(args, () => Promise.resolve(readme))
       : undefined,
   );
 
