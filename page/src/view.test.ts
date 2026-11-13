@@ -246,6 +246,51 @@ test("a reload anchors to the last block starting before that line when none sta
   expect(new Set(scrolledTo())).toEqual(new Set([10]));
 });
 
+test("a reload never anchors to a footnote that starts before the reading position", async () => {
+  // A footnote's definition on line 5, and the reader at the paragraph on line 7. A line added to
+  // the first paragraph moves that paragraph to line 8 and the footnote to line 6, while the
+  // footnotes still come last in the view.
+  const first = `<p data-sourcepos="1:1-1:5">First</p>
+<p data-sourcepos="3:1-3:6">Second<sup class="footnote-ref"><a href="#fn-1" id="fnref-1" data-footnote-ref="">1</a></sup></p>
+<p data-sourcepos="7:1-7:5">Third</p>
+<section data-sourcepos="5:1-5:10" class="footnotes" data-footnotes="">
+<ol>
+<li data-sourcepos="5:1-5:10" id="fn-1">
+<p data-sourcepos="5:7-5:10">note</p>
+</li>
+</ol>
+</section>`;
+  const reloaded = `<p data-sourcepos="1:1-2:4">First
+more</p>
+<p data-sourcepos="4:1-4:6">Second<sup class="footnote-ref"><a href="#fn-1" id="fnref-1" data-footnote-ref="">1</a></sup></p>
+<p data-sourcepos="8:1-8:5">Third</p>
+<section data-sourcepos="6:1-6:10" class="footnotes" data-footnotes="">
+<ol>
+<li data-sourcepos="6:1-6:10" id="fn-1">
+<p data-sourcepos="6:7-6:10">note</p>
+</li>
+</ol>
+</section>`;
+  const scrolledTo = await reload(first, reloaded, 7.5);
+  expect(new Set(scrolledTo())).toEqual(new Set([4]));
+});
+
+test("a reload in the footnotes anchors to the footnote that starts on the reading position", async () => {
+  // The footnote's definition is the file's last line, so the fake layout, which goes by lines,
+  // puts the footnotes last, as the view does.
+  const withFootnote = `<p data-sourcepos="1:1-1:6">First<sup class="footnote-ref"><a href="#fn-1" id="fnref-1" data-footnote-ref="">1</a></sup></p>
+<p data-sourcepos="3:1-3:5">Second</p>
+<section data-sourcepos="5:1-5:10" class="footnotes" data-footnotes="">
+<ol>
+<li data-sourcepos="5:1-5:10" id="fn-1">
+<p data-sourcepos="5:7-5:10">note</p>
+</li>
+</ol>
+</section>`;
+  const scrolledTo = await reload(withFootnote, withFootnote, 5.5);
+  expect(new Set(scrolledTo())).toEqual(new Set([5]));
+});
+
 test("a reload at the top of the document stays at the top", async () => {
   const scrolledTo = await reload(readme, readme, 0);
   expect(scrolledTo()).toEqual([]);
@@ -538,6 +583,50 @@ test("scroll-to-heading from the app scrolls an open document to that heading", 
     expect(scrolledTo()).toContain("before-a-release");
   });
   expect(heading()).toBe("Lamplighter");
+});
+
+/** A document with a heading in a closed section and one in that section's summary. */
+const withClosedSection = `<h1 id="guide" data-sourcepos="1:1-1:7">Guide</h1>
+<details>
+<summary><h2 id="more" data-sourcepos="4:10-4:16">More</h2></summary>
+<h2 id="hidden-step" data-sourcepos="6:1-6:14">Hidden step</h2>
+</details>`;
+
+test("scroll-to-heading into a closed section opens it", async () => {
+  documents = [() => Promise.resolve(withClosedSection)];
+  await startDocumentView(0);
+  await settle();
+  const scrolledTo = spyOnHeadingScrolls();
+  const section = document.querySelector("details");
+  expect(section?.open).toBe(false);
+
+  await emit("scroll-to-heading", "hidden-step");
+  await vi.waitFor(() => {
+    expect(scrolledTo()).toContain("hidden-step");
+  });
+  expect(section?.open).toBe(true);
+});
+
+test("a document shown at a heading in a closed section opens it", async () => {
+  documents = [
+    () =>
+      Promise.resolve({ document: withClosedSection, heading: "hidden-step" }),
+  ];
+  await startDocumentView(0);
+  expect(document.querySelector("details")?.open).toBe(true);
+});
+
+test("scroll-to-heading into a closed section's summary leaves it closed", async () => {
+  documents = [() => Promise.resolve(withClosedSection)];
+  await startDocumentView(0);
+  await settle();
+  const scrolledTo = spyOnHeadingScrolls();
+
+  await emit("scroll-to-heading", "more");
+  await vi.waitFor(() => {
+    expect(scrolledTo()).toContain("more");
+  });
+  expect(document.querySelector("details")?.open).toBe(false);
 });
 
 test("a reload of a document shown at a heading keeps the reading position", async () => {

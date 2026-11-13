@@ -5,6 +5,7 @@ import { showNotice } from "./notice";
 import { open } from "./open";
 import {
   afterNextFrame,
+  openSectionsAround,
   readingPosition,
   returnToReadingPosition,
   scrollToTop,
@@ -16,9 +17,9 @@ export const DOCUMENT_VIEW_SELECTOR = "article.markdown-body";
 
 /**
  * Scrolls the shown document to the element whose id is `heading`, or else to the anchor with
- * that name, as a browser does for a URL's fragment; null is the top. Only the document is
- * searched, never the page's own elements. A heading that isn't there leaves the view where it
- * is.
+ * that name, as a browser does for a URL's fragment; null is the top. A heading in a closed
+ * section opens it, as Find does. Only the document is searched, never the page's own elements. A
+ * heading that isn't there leaves the view where it is.
  */
 export async function scrollToHeading(heading: string | null): Promise<void> {
   if (heading === null) {
@@ -37,6 +38,7 @@ export async function scrollToHeading(heading: string | null): Promise<void> {
           (element) => element.localName === "a" && view.contains(element),
         );
   if (!target) return;
+  openSectionsAround(target);
   await scrollToTop(target, () => target.isConnected);
 }
 

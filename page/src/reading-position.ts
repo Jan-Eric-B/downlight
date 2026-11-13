@@ -35,6 +35,22 @@ async function scrollAndLand(
 }
 
 /**
+ * Opens every closed `<details>` around `node`, unless `node` is in its summary, which shows: a
+ * scroll to a node in a closed section would otherwise land on the section's summary.
+ */
+export function openSectionsAround(node: Node): void {
+  for (
+    let element = node.parentElement;
+    element;
+    element = element.parentElement
+  ) {
+    if (!(element instanceof HTMLDetailsElement) || element.open) continue;
+    const summary = element.querySelector(":scope > summary");
+    if (!summary?.contains(node)) element.open = true;
+  }
+}
+
+/**
  * Scrolls `element` to the top of the view, and once more after the next frame if `stillWanted`
  * says the scroll is still wanted then. Returns whether it was.
  */
@@ -76,6 +92,9 @@ export async function scrollToMiddle(
     () => stillWanted() && holder.isConnected,
   );
 }
+
+/** Selects the section the core renders the document's footnotes in, after all its other text. */
+const FOOTNOTES_SELECTOR = "section[data-footnotes]";
 
 /** The line of the file where `block` starts, from the core's `data-sourcepos`. */
 function startLine(block: Element): number | undefined {
@@ -134,8 +153,11 @@ export function readingPosition(view: HTMLElement): number | undefined {
 
 /**
  * The block to put at the top of the view for the reading position `line`: the innermost one
- * that starts on it, or else the one that starts last before it. Footnotes come last in the view
- * but not in the file, so this goes by the line rather than by the order in the view.
+ * that starts on it, or else the one outside the footnotes that starts last before it. Footnotes
+ * come last in the view but keep their definitions' lines, so this goes by the line rather than
+ * by the order in the view. A footnote that starts before the line is no nearer the reader than
+ * the text around its definition, and anchoring to it would send the view to the document's end
+ * whenever an edit moved the reader's block; one that starts on the line is where the reader was.
  */
 function blockAt(view: HTMLElement, line: number): Element | undefined {
   let best: Element | undefined;
@@ -143,10 +165,10 @@ function blockAt(view: HTMLElement, line: number): Element | undefined {
   for (const block of view.querySelectorAll("[data-sourcepos]")) {
     const start = startLine(block);
     // On a tie the later one is inside the earlier, and so the innermost.
-    if (start !== undefined && start <= line && start >= bestLine) {
-      best = block;
-      bestLine = start;
-    }
+    if (start === undefined || start > line || start < bestLine) continue;
+    if (start < line && block.closest(FOOTNOTES_SELECTOR)) continue;
+    best = block;
+    bestLine = start;
   }
   return best;
 }
