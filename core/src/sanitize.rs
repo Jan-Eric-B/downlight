@@ -157,9 +157,10 @@ const SCHEMES_TO_FILTER: &[&str] = &[
 
 /// The tags a document's raw HTML may not use: those GitHub's tagfilter escapes, which change how
 /// the HTML after them is read (an unclosed `<textarea>` turns the rest of the document into its
-/// text), and `noscript`, which does too while scripting is on, as it is for ammonia's parser.
-/// comrak 0.59 has no tagfilter (ticket 04).
-const FILTERED_TAGS: [&str; 10] = [
+/// text), `noscript`, which does too while scripting is on, as it is for ammonia's parser, and
+/// `template`, whose contents an unclosed one takes the rest of the document into and which
+/// sanitizing drops with them. comrak 0.59 has no tagfilter (ticket 04).
+const FILTERED_TAGS: [&str; 11] = [
     "title",
     "textarea",
     "style",
@@ -170,6 +171,7 @@ const FILTERED_TAGS: [&str; 10] = [
     "script",
     "plaintext",
     "noscript",
+    "template",
 ];
 
 /// The tags only rendering may write: task list checkboxes are rendering's, so a document can't
