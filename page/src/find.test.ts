@@ -548,6 +548,22 @@ test("a match never runs from one block into the next", async () => {
   expect(status()).toBe("No results");
 });
 
+test("a line break between inline elements matches a space", async () => {
+  // `**bold**` and `*italic*` on two lines of one paragraph, and two links on two lines of a list
+  // item: the reader sees a space between them.
+  await show(`<p data-sourcepos="1:1-2:12"><strong>lamp</strong>
+<em>light</em></p>
+<ul data-sourcepos="4:1-5:22">
+<li data-sourcepos="4:1-5:22"><a href="a.md">wick</a>
+<a href="b.md">glass</a></li>
+</ul>`);
+  type("lamp light");
+  expect(status()).toBe("1 of 1");
+  expect(matchedTexts()).toEqual(["lamp\nlight"]);
+  type("wick glass");
+  expect(status()).toBe("1 of 1");
+});
+
 test("code keeps its lines", async () => {
   await show(`<pre data-sourcepos="1:1-4:3"><code>lamp
 light

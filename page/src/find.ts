@@ -1,4 +1,8 @@
-import { atOrAfterReadingPosition, scrollToMiddle } from "./reading-position";
+import {
+  atOrAfterReadingPosition,
+  openSectionsAround,
+  scrollToMiddle,
+} from "./reading-position";
 import { whenDocumentShown } from "./view";
 
 /**
@@ -77,16 +81,72 @@ function lowerInPlace(text: string): string {
 }
 
 /**
- * A text node's text as Find matches it, folded and of the same length. In prose, a line break
- * from the file is a space on the page, so the reader's words match across it; a text node of
- * only line breaks and spaces sits between blocks, and its line breaks keep a match from running
- * from one block into the next, since the box takes no line breaks. Code keeps its lines. Every
- * other kind of space, a no-break space too, is a space to the reader, and each is one character.
+ * Text as Find matches it, folded and of the same length. In prose, a line break from the file is
+ * a space on the page, so the reader's words match across it. Text that `keepsLines` keeps its
+ * line breaks, which the box never holds, so no match runs across them: code, and the gaps between
+ * blocks. Every other kind of space, a no-break space too, is a space to the reader, and each is
+ * one character.
  */
-function searchable(text: string, inCode: boolean): string {
+function searchable(text: string, keepsLines: boolean): string {
   const folded = foldCase(text);
-  if (inCode || (!/\S/.test(text) && text.includes("\n"))) return folded;
-  return folded.replace(/\s/g, " ");
+  return keepsLines ? folded : folded.replace(/\s/g, " ");
+}
+
+/**
+ * The block elements of those a document can hold (`TAGS` in `core/src/sanitize.rs`), the `div`
+ * the page wraps code blocks in among them. Every other element is inline.
+ */
+const BLOCK_ELEMENTS = new Set([
+  "BLOCKQUOTE",
+  "CAPTION",
+  "DD",
+  "DETAILS",
+  "DIV",
+  "DL",
+  "DT",
+  "FIGCAPTION",
+  "FIGURE",
+  "H1",
+  "H2",
+  "H3",
+  "H4",
+  "H5",
+  "H6",
+  "HR",
+  "LI",
+  "OL",
+  "P",
+  "PRE",
+  "SECTION",
+  "SUMMARY",
+  "TABLE",
+  "TBODY",
+  "TD",
+  "TFOOT",
+  "TH",
+  "THEAD",
+  "TR",
+  "UL",
+]);
+
+/** Whether `node` is inline content: text, or an element that isn't a block. */
+function isInline(node: Node | null): boolean {
+  return node !== null && !BLOCK_ELEMENTS.has(node.nodeName);
+}
+
+/**
+ * Whether `text` is a gap between blocks: only line breaks and spaces, next to a block or at the
+ * edge of its parent. The same text between two inline elements, such as `**bold**` and `*italic*`
+ * on two lines of one paragraph, is a space the reader sees. Its neighbours tell which, rather
+ * than its parent: a list item holds both blocks and inline text. Element names rather than
+ * computed styles, so building the index never forces a layout.
+ */
+function isGapBetweenBlocks(text: Text): boolean {
+  return (
+    !/\S/.test(text.data) &&
+    text.data.includes("\n") &&
+    !(isInline(text.previousSibling) && isInline(text.nextSibling))
+  );
 }
 
 /**
@@ -123,7 +183,9 @@ class IndexBuilder {
       const text = node as Text;
       if (text.data.length > 0) {
         this.nodes.push({ node: text, start: this.length });
-        this.parts.push(searchable(text.data, this.preDepth > 0));
+        this.parts.push(
+          searchable(text.data, this.preDepth > 0 || isGapBetweenBlocks(text)),
+        );
         this.length += text.data.length;
       }
     } else if (node.nodeType === Node.ELEMENT_NODE && node.firstChild) {
@@ -194,19 +256,6 @@ function firstAfterReadingPosition(
     else low = middle + 1;
   }
   return low < matches.length ? low : 0;
-}
-
-/** Opens every closed `<details>` around `node`, unless `node` is in its summary, which shows. */
-function openSectionsAround(node: Node): void {
-  for (
-    let element = node.parentElement;
-    element;
-    element = element.parentElement
-  ) {
-    if (!(element instanceof HTMLDetailsElement) || element.open) continue;
-    const summary = element.querySelector(":scope > summary");
-    if (!summary?.contains(node)) element.open = true;
-  }
 }
 
 /** The find bar, the query and its matches. */
