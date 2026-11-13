@@ -91,3 +91,12 @@ Spec: [Downlight v1](../spec.md)
 - Messages to the reader go through `notice::show_notice` (`app/src/notice.rs`). A failure to launch the editor answers a command, so it can come back as that command's error, as `open_document`'s errors do.
 - Code in `app/src/platform/windows.rs` that sets up an OS hook shouldn't fail a window when the hook can't be added. Ticket 10's review found `leave_reload_keys_to_the_page` failing `open_window` after the window was built, which left a visible window without a document.
 - Two of ticket 10's review findings apply here too: a return value only the tests read, and the same value worked out in two places. Test the effect a caller sees, and pass a value that is computed once.
+
+**2026-11-13, from the architecture review.** The plan above names code that has moved since 2026-11-12:
+
+- `OpenWindows::document_path` exists already as `Documents::document_path` (`app/src/documents.rs`), so plan item 4 is done.
+- `app/src/reload.rs` folded into `app/src/documents.rs` (ticket 22).
+- `notice::show_notice` and `app/src/notice.rs` are gone. Messages to a page go as `Message::Notice` through `Pages` (`app/src/message.rs`). An Edit failure still comes back as the command's error, as the plan says.
+- `leave_reload_keys_to_the_page` is now `leave_reload_and_find_keys_to_the_page`, and ticket 29 removes it.
+- The `Command` shape note under "Fits with other tickets" is superseded by ticket 29, which widens `Command` to a key with its modifiers. If this ticket lands first, add Ctrl+E in today's shape (`ctrlLetter: "e"`).
+- If ticket 27 has landed, `edit_document` and `choose_editor` are declared in its page module, not called with string names.

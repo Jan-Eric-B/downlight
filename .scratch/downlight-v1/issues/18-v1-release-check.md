@@ -4,7 +4,7 @@
 
 Spec: [Downlight v1](../spec.md)
 
-**Blocked by:** 05 (Files in any common encoding), 07 (Syntax highlighting and copy buttons), 13 (Ticks), 14 (Find), 16 (Zoom and window size), 17 (Installer and file associations), 19 (Startup errors are shown), 20 (No credentials sent for remote images)
+**Blocked by:** 05 (Files in any common encoding), 07 (Syntax highlighting and copy buttons), 13 (Ticks), 14 (Find), 16 (Zoom and window size), 17 (Installer and file associations), 19 (Startup errors are shown), 20 (No credentials sent for remote images), 30 (A document's watch never goes quiet for good), 31 (Large and pathological documents fail gracefully), 32 (Local images show their file's latest version after a reload)
 
 **Status:** ready-for-human
 
@@ -21,3 +21,7 @@ Spec: [Downlight v1](../spec.md)
   - [ ] the installer, the PATH, the file associations, "Open with", Default apps and uninstalling.
 - [ ] Downlight is installed and set as the default app for Markdown on the work machine.
 - [ ] WinDown is uninstalled.
+
+## Comments
+
+**2026-11-13, from the architecture review.** Hand checks found by the review, for the checklist: renaming or deleting an open document's folder in Explorer (ticket 30); a watched document on a network share after sleep or a VPN reconnect (ticket 30); a local image changed, then the document saved (ticket 32); Ctrl+P, Ctrl+J, F7 and Esc doing nothing of WebView2's own (ticket 29); a 20 MB document and a huge image (ticket 31); a heading scrolled to the top while "File deleted or moved" shows.

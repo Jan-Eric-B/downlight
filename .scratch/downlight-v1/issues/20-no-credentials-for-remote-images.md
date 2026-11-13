@@ -13,3 +13,10 @@ Spec: [Downlight v1](../spec.md)
 - [ ] The change fits ticket 19's handling of browser arguments: a second launch whose `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` differs from the running process's still shows the document, or shows the message box as ticket 19 does.
 - [ ] Remote images on ordinary internet hosts still load.
 - [ ] Checked by hand on the release build against a server that asks for NTLM (for example a local IIS site with Windows authentication): no credentials are sent.
+
+## Comments
+
+**2026-11-13, from the architecture review.** Two more ways a document can make Windows send the reader's credentials, for the same promise (story 28):
+
+- **Links to shares.** One click on a link to `\host\share\x.md`, or a folder or file there, connects to that host: the link's lookup (`path_kind` in `app/src/links.rs`) and Explorer both do. The spec chose this ("paths on network shares are treated like local paths, since they only connect when clicked"), and the hover bubble shows the target. But a downloaded README can name any host, and one click sends the reader's NTLM hash. Decide here: keep it, ask before following a link to a share, or follow only shares the document itself lives on.
+- **Symlinked local images.** `is_local` (`core/src/image.rs`) checks the path's prefix, and `std::fs::read` (`app/src/image.rs`) then follows reparse points. A `logo.png` that is a symlink to `\host\share\x.png` (from a git clone with `core.symlinks`, or a tar extracted in Developer Mode) makes Windows connect. Check that no component of the path is a link to a non-local target without opening the target, since `canonicalize` would open it and so connect, then test it with a symlink in a temporary folder.

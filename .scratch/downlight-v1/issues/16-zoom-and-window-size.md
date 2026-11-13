@@ -4,7 +4,7 @@
 
 Spec: [Downlight v1](../spec.md)
 
-**Blocked by:** 15 (Edit and Choose editor)
+**Blocked by:** 15 (Edit and Choose editor), 28 (The documents module carries out the whole show), 29 (The page owns every key)
 
 **Status:** ready-for-agent
 
@@ -24,3 +24,5 @@ Spec: [Downlight v1](../spec.md)
   Either way, Ctrl+wheel is a separate setting (`IsZoomControlEnabled`). Check each key by hand in the release build.
 - `Command` in `page/src/commands.ts` has `ctrlLetter` (a letter) and `key` (a key without modifiers). Ctrl+plus fits neither. Widen the shape for all commands rather than adding a special case for zoom; ticket 12 needs the same for Alt+Left.
 - An OS hook that can't be added shouldn't fail the window (see `leave_reload_keys_to_the_page`).
+
+**2026-11-13, from the architecture review.** The two ways to take zoom over above: ticket 29 takes the second, so WebView2's browser keys are off and the page's command table owns Ctrl+plus, Ctrl+minus and Ctrl+0. Ctrl+wheel is still `IsZoomControlEnabled`. Ticket 28 gathers what a new window starts with (page URL flags, backdrop, key setup) in one place behind a windows port the tests can record; the zoom level, the size and the offset go there, and are tested there. `leave_reload_keys_to_the_page`, named above, is now `leave_reload_and_find_keys_to_the_page`, and ticket 29 removes it.
