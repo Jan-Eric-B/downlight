@@ -1,6 +1,6 @@
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::io;
-use std::os::windows::ffi::OsStrExt as _;
+use std::os::windows::ffi::{OsStrExt as _, OsStringExt as _};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
@@ -10,7 +10,7 @@ use webview2_com::AcceleratorKeyPressedEventHandler;
 use webview2_com::Microsoft::Web::WebView2::Win32::{
     ICoreWebView2AcceleratorKeyPressedEventArgs, ICoreWebView2AcceleratorKeyPressedEventArgs2,
 };
-use windows_core::Interface as _;
+use windows_core::{HRESULT, Interface as _};
 use windows_sys::Win32::Foundation::{
     ERROR_FILE_NOT_FOUND, ERROR_INVALID_DRIVE, ERROR_PATH_NOT_FOUND, FILETIME,
 };
@@ -58,19 +58,24 @@ pub fn custom_scheme_origin(scheme: &str) -> String {
 
 /// The path in one case, since Windows file names ignore case. NTFS compares names by
 /// upper-casing each character on its own, so a character whose upper case is longer, such as ß,
-/// stays as it is.
+/// stays as it is. The path is folded as UTF-16, which Windows names are, so an unpaired surrogate
+/// stays itself and two names that differ only in one don't fold to the same path.
 pub fn fold_case(path: PathBuf) -> PathBuf {
-    path.to_string_lossy()
-        .chars()
-        .map(|c| {
-            let mut upper = c.to_uppercase();
-            match (upper.next(), upper.next()) {
-                (Some(single), None) => single,
-                _ => c,
+    let mut folded = Vec::with_capacity(path.as_os_str().len());
+    for unit in char::decode_utf16(path.as_os_str().encode_wide()) {
+        match unit {
+            Ok(c) => {
+                let mut upper = c.to_uppercase();
+                let c = match (upper.next(), upper.next()) {
+                    (Some(single), None) => single,
+                    _ => c,
+                };
+                folded.extend_from_slice(c.encode_utf16(&mut [0; 2]));
             }
-        })
-        .collect::<String>()
-        .into()
+            Err(unpaired) => folded.push(unpaired.unpaired_surrogate()),
+        }
+    }
+    OsString::from_wide(&folded).into()
 }
 
 /// Shows an error in a message box and returns once the reader has dismissed it. It needs no
@@ -129,10 +134,22 @@ pub fn reveal_file(path: &Path) -> io::Result<()> {
         // SAFETY: `item` came from ILCreateFromPathW and isn't used after this.
         unsafe { ILFree(item) };
         if opened < 0 {
-            return Err(io::Error::from_raw_os_error(opened));
+            return Err(hresult_error(opened));
         }
         Ok(())
     })
+}
+
+/// The failure `hresult` as an I/O error. One that wraps a Win32 error code gives that code, so
+/// the error keeps its kind (a missing file is NotFound); `io::Error` reads a raw OS error as a
+/// Win32 code, which an HRESULT isn't, and windows-core's own conversion passes the HRESULT as one.
+fn hresult_error(hresult: i32) -> io::Error {
+    let win32 = hresult.cast_unsigned() & 0xFFFF;
+    if HRESULT::from_win32(win32).0 == hresult {
+        io::Error::from_raw_os_error(win32.cast_signed())
+    } else {
+        io::Error::from_raw_os_error(hresult)
+    }
 }
 
 /// Opens the folder at `path` in Explorer (ticket 11). With the `explore` verb rather than `open`,
@@ -281,7 +298,7 @@ pub fn process_start() -> Option<SystemTime> {
 #[cfg(test)]
 mod tests {
     use windows_sys::Win32::Foundation::{
-        ERROR_ACCESS_DENIED, ERROR_BAD_NET_NAME, ERROR_BAD_NETPATH,
+        E_FAIL, ERROR_ACCESS_DENIED, ERROR_BAD_NET_NAME, ERROR_BAD_NETPATH,
     };
 
     use super::*;
@@ -297,6 +314,30 @@ mod tests {
     #[test]
     fn fold_case_keeps_a_character_whose_upper_case_is_longer() {
         assert_eq!(fold_case(PathBuf::from("ß")), PathBuf::from("ß"));
+    }
+
+    #[test]
+    fn fold_case_keeps_unpaired_surrogates_apart() {
+        let name = |units: &[u16]| PathBuf::from(OsString::from_wide(units));
+        let (a, upper_a) = (u16::from(b'a'), u16::from(b'A'));
+        assert_eq!(fold_case(name(&[0xD800, a])), name(&[0xD800, upper_a]));
+        assert_ne!(fold_case(name(&[0xD800, a])), fold_case(name(&[0xD801, a])));
+    }
+
+    #[test]
+    fn win32_failure_in_an_hresult_keeps_its_kind() {
+        let not_found = HRESULT::from_win32(ERROR_FILE_NOT_FOUND).0;
+        let error = hresult_error(not_found);
+        assert_eq!(error.kind(), io::ErrorKind::NotFound);
+        assert_eq!(
+            error.raw_os_error(),
+            Some(ERROR_FILE_NOT_FOUND.cast_signed())
+        );
+    }
+
+    #[test]
+    fn other_hresult_failure_keeps_its_code() {
+        assert_eq!(hresult_error(E_FAIL).raw_os_error(), Some(E_FAIL));
     }
 
     #[test]
