@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import github from "../../core/tests/fixtures/github.html?raw";
 import readme from "../../core/tests/fixtures/readme.html?raw";
 import { startLinks } from "./links";
+import { settle } from "./test-support";
 
 /** Each `follow_link` call's arguments, in turn. */
 let follows: unknown[] = [];
@@ -39,11 +40,6 @@ function showDocument(html: string): HTMLElement {
   document.body.append(view);
   startLinks(stopLinks.signal);
   return view;
-}
-
-/** Lets the page's pending IPC calls finish. */
-function settle(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 /** Clicks `element` as a mouse would and tells whether the webview would still act on it. */
@@ -193,6 +189,54 @@ test("hovering or focusing a link shows its target, leaving hides it", () => {
 
   web.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
   expect(bubble()?.hidden).toBe(true);
+});
+
+/** The target the bubble shows while the pointer is over a link to `href`. */
+function shownTargetOf(href: string): string | null | undefined {
+  const view = showDocument("<p><a>Link</a></p>");
+  const anchor = view.querySelector("a");
+  if (!anchor) throw new Error("no link");
+  anchor.setAttribute("href", href);
+  anchor.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+  return bubble()?.textContent;
+}
+
+// The reader's browser goes to the punycode host, so a look-alike letter must not pass for the
+// real one.
+test("the target of a web link with a look-alike letter in its host shows the host in punycode", () => {
+  const shown = shownTargetOf("https://ex\u0430mple.com/");
+  expect(shown).toMatch(/^https:\/\/xn--[a-z0-9-]+\.com\/$/);
+});
+
+test.each([
+  [
+    "a bidi control",
+    "https://example.com/\u202Egnp.exe",
+    "https://example.com/%E2%80%AEgnp.exe",
+  ],
+  ["a space", "http://example.com/a b", "http://example.com/a%20b"],
+  [
+    "a mail address with a look-alike letter",
+    "mailto:ann@ex\u0430mple.com",
+    "mailto:ann@ex%D0%B0mple.com",
+  ],
+  ["capitals", "HTTPS://Example.COM", "https://example.com/"],
+])(
+  "the target of a web link with %s shows as the URL that is opened",
+  (_what, href, shown) => {
+    expect(shownTargetOf(href)).toBe(shown);
+  },
+);
+
+test.each([
+  "docs/my guide.md",
+  "C:\\docs\\\u00e4.md",
+  "\\\\server\\share\\a.md",
+  "file:///C:/docs/\u00e4.md",
+  "#\u00fcber",
+  "https://[not a host/",
+])("the target %s shows as the document wrote it", (href) => {
+  expect(shownTargetOf(href)).toBe(href);
 });
 
 test("moving within a link keeps its target shown", () => {

@@ -1,7 +1,7 @@
 import { clearMocks, mockWindows } from "@tauri-apps/api/mocks";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import code from "../../core/tests/fixtures/code.html?raw";
-import { answerAsTheApp, mockTheApp } from "./test-support";
+import { answerAsTheApp, mockTheApp, settle } from "./test-support";
 import { startDocumentView } from "./view";
 
 beforeEach(() => {
@@ -35,11 +35,6 @@ function copyButtonOf(start: string): HTMLButtonElement {
   if (!button)
     throw new Error(`No copy button on the block starting ${start}.`);
   return button;
-}
-
-/** Lets the click's pending promises, such as writing to the clipboard, finish. */
-function settle(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 test("each code block has one copy button", async () => {

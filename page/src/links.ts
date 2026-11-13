@@ -28,6 +28,20 @@ async function follow(target: string, newWindow: boolean): Promise<void> {
   }
 }
 
+/** The schemes whose link targets the bubble shows as the URL that is opened. */
+const NORMALIZED_SCHEMES = new Set(["http:", "https:", "mailto:"]);
+
+/**
+ * A link target as the bubble shows it. A web or mail link shows as the URL the system is handed,
+ * with its host in punycode and its control characters percent-encoded, so a look-alike letter or
+ * a bidi control can't make it pass for another. Paths, relative or not, show as written, since
+ * they name files the way the document does.
+ */
+function shownTarget(target: string): string {
+  const url = URL.parse(target);
+  return url && NORMALIZED_SCHEMES.has(url.protocol) ? url.href : target;
+}
+
 /** The bubble at the bottom left that shows a link's target, as a browser's status bar does. */
 function createTargetBubble(): HTMLElement {
   const bubble = document.createElement("div");
@@ -73,7 +87,7 @@ export function startLinks(signal?: AbortSignal): void {
   const showTarget = (event: Event) => {
     const link = linkAt(event.target);
     if (!link) return;
-    bubble.textContent = link.getAttribute("href");
+    bubble.textContent = shownTarget(link.getAttribute("href") ?? "");
     bubble.hidden = false;
   };
   /** Hides the target once the pointer or the focus leaves the link, not a part of it. */
