@@ -9,7 +9,8 @@ use std::time::Duration;
 
 use tauri::webview::NewWindowResponse;
 use tauri::{
-    AppHandle, Manager as _, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent,
+    AppHandle, Manager as _, State, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+    WindowEvent,
 };
 
 use crate::documents::{DocumentAt, Documents, Given, Target};
@@ -178,7 +179,7 @@ fn open_window(app: &AppHandle, label: &str, title: &str) -> tauri::Result<()> {
         // Links never navigate the webview or open one of its own windows: the page follows them
         // through the app (ticket 11). These stop whatever still tries, such as a link the page
         // missed, from loading another site or a file in the window.
-        .on_navigation(move |url| url.origin().ascii_serialization() == page)
+        .on_navigation(move |url| is_the_page(url, &page))
         .on_new_window(|_, _| NewWindowResponse::Deny);
     let builder = if backdrop {
         platform::with_backdrop(builder)
@@ -206,6 +207,14 @@ fn page_origin(app: &AppHandle) -> String {
         Some(dev_url) => dev_url.origin().ascii_serialization(),
         None => platform::custom_scheme_origin("tauri"),
     }
+}
+
+/// Whether `url` is the app's page on `page_origin`, the only URL a window may load. Tauri loads
+/// the page at the origin's root, or at `index.html` when the page's URL has a query, and Vite's
+/// reloads in development load the same URL again. Any other URL on the origin, such as a link
+/// dropped onto the window, would load the page anew and lose the reading position.
+fn is_the_page(url: &Url, page_origin: &str) -> bool {
+    url.origin().ascii_serialization() == page_origin && matches!(url.path(), "/" | "/index.html")
 }
 
 fn bring_to_front(app: &AppHandle, label: &str) -> tauri::Result<()> {

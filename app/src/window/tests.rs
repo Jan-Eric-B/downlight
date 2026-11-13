@@ -69,3 +69,42 @@ fn title_of_a_file_at_a_drive_root_names_the_drive() {
         r"README.md - C:\ - Downlight"
     );
 }
+
+#[test]
+fn only_the_page_itself_may_load_in_a_window() {
+    for (page, url) in [
+        ("http://tauri.localhost", "http://tauri.localhost/"),
+        (
+            "http://tauri.localhost",
+            "http://tauri.localhost/index.html",
+        ),
+        (
+            "http://tauri.localhost",
+            "http://tauri.localhost/index.html?timing&backdrop",
+        ),
+        ("http://localhost:5173", "http://localhost:5173/"),
+        (
+            "http://localhost:5173",
+            "http://localhost:5173/index.html?backdrop",
+        ),
+    ] {
+        let url = tauri::Url::parse(url).unwrap();
+        assert!(is_the_page(&url, page), "{url}");
+    }
+}
+
+#[test]
+fn other_urls_on_the_pages_origin_never_load_in_a_window() {
+    for url in [
+        "http://tauri.localhost/docs/guide.md",
+        "http://tauri.localhost/C:/work/README.md",
+        "http://tauri.localhost/assets/index.js",
+        "http://localhost:5174/",
+        "http://image.localhost/",
+        "https://example.com/",
+        "file:///C:/work/README.md",
+    ] {
+        let url = tauri::Url::parse(url).unwrap();
+        assert!(!is_the_page(&url, "http://tauri.localhost"), "{url}");
+    }
+}
