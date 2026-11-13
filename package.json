@@ -14,7 +14,7 @@
     "test": "npm run test:rust && npm run test:page",
     "test:rust": "cargo test --workspace --locked",
     "test:page": "vitest run",
-    "fixtures": "cargo test -p downlight-core --test rendered_fixtures --locked -- --ignored",
+    "fixtures": "cargo test -p downlight-core --test rendered_fixtures --locked -- --ignored && cargo test -p downlight --locked write_contract_samples -- --ignored",
     "documents": "node scripts/generate-documents.js",
     "measure": "node scripts/measure.js"
   },

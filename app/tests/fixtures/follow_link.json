@@ -1,0 +1,13 @@
+{
+  "nothing": {
+    "kind": "nothing"
+  },
+  "scrollToHeading": {
+    "heading": "install",
+    "kind": "scrollTo"
+  },
+  "scrollToTop": {
+    "heading": null,
+    "kind": "scrollTo"
+  }
+}

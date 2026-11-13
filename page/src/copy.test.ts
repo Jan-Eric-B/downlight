@@ -1,16 +1,15 @@
 import { clearMocks, mockWindows } from "@tauri-apps/api/mocks";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import code from "../../core/tests/fixtures/code.html?raw";
-import { answerAsTheApp, mockTheApp, settle } from "./test-support";
+import { answerAsTheApp, fakeTheApp, settle } from "./test-support";
 import { startDocumentView } from "./view";
 
 beforeEach(() => {
   mockWindows("document-0");
-  mockTheApp((command, args) =>
-    command === "render_document"
-      ? answerAsTheApp(args, () => Promise.resolve(code))
-      : undefined,
-  );
+  fakeTheApp({
+    render_document: (args) =>
+      answerAsTheApp(args, () => Promise.resolve(code)),
+  });
 });
 
 afterEach(() => {

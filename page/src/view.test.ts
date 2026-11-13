@@ -1,16 +1,22 @@
 import { clearMocks, mockWindows } from "@tauri-apps/api/mocks";
-import { emit } from "@tauri-apps/api/event";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import notes from "../../core/tests/fixtures/notes.html?raw";
 import readme from "../../core/tests/fixtures/readme.html?raw";
 import {
   answerAsTheApp,
+  askedOfTheApp,
+  emptyWindow,
   giveAnotherDocument,
+  goneBar,
+  heading,
   layOut,
   linesOf,
-  mockTheApp,
+  fakeTheApp,
+  nextInTurn,
   nextShown,
   settle,
+  spyOnHeadingScrolls,
+  tell,
   type AtHeading,
   type Read,
 } from "./test-support";
@@ -21,8 +27,6 @@ import {
   whenDocumentShown,
   type ShownReason,
 } from "./view";
-
-let commands: string[] = [];
 
 /**
  * A `render_document` call that fails before the app can answer it, so `invoke` itself rejects,
@@ -43,27 +47,24 @@ let textWhenShown: string | undefined;
 
 beforeEach(() => {
   mockWindows("document-0");
-  commands = [];
   documents = [];
   textWhenShown = undefined;
-  mockTheApp(
-    (command, args) => {
-      commands.push(command);
-      if (command === "show_window") {
-        textWhenShown = document.body.textContent;
-        return undefined;
-      }
-      if (command !== "render_document") return undefined;
-      const next = documents.length > 1 ? documents.shift() : documents[0];
+  fakeTheApp({
+    show_window: () => {
+      textWhenShown = document.body.textContent;
+      return null;
+    },
+    render_document: (args) => {
+      const next = nextInTurn(documents);
       if (typeof next === "object")
         // Tauri rejects a call it can't hand to the command (a denied or malformed one) with a
         // string, not an Error.
         // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- as Tauri does
         return Promise.reject(next.noAnswer);
-      return next && answerAsTheApp(args, next);
+      // No document given yet answers as a window that shows none.
+      return next ? answerAsTheApp(args, next) : null;
     },
-    { shouldMockEvents: true },
-  );
+  });
 });
 
 afterEach(() => {
@@ -72,14 +73,6 @@ afterEach(() => {
   clearMocks();
   document.body.replaceChildren();
 });
-
-function heading(): string | null | undefined {
-  return document.querySelector("article.markdown-body h1")?.textContent;
-}
-
-function emptyWindow(): HTMLElement | null {
-  return document.querySelector<HTMLElement>(".empty-window");
-}
 
 test("a window without a document offers to open one", async () => {
   documents = [() => Promise.resolve(null)];
@@ -91,7 +84,7 @@ test("a window without a document offers to open one", async () => {
   expect(empty?.textContent).toContain("or drop a file here");
 
   empty?.querySelector("button")?.click();
-  expect(commands).toContain("open_document");
+  expect(askedOfTheApp()).toContain("open_document");
 });
 
 test("a document shown in the window replaces the one before", async () => {
@@ -165,7 +158,7 @@ test("the window shows once its document is in it", async () => {
   await vi.waitFor(() => {
     expect(textWhenShown).toContain("Lamplighter");
   });
-  expect(commands.filter((c) => c === "show_window")).toHaveLength(1);
+  expect(askedOfTheApp().filter((c) => c === "show_window")).toHaveLength(1);
 });
 
 test("a window without a document shows once it offers to open one", async () => {
@@ -192,7 +185,7 @@ test("a notice from the app shows for a few seconds", async () => {
   await settle();
 
   vi.useFakeTimers();
-  await emit("notice", "Downlight opens Markdown files (.md).");
+  await tell("notice", "Downlight opens Markdown files (.md).");
   const notice = document.querySelector<HTMLElement>(".notice");
   expect(notice?.textContent).toBe("Downlight opens Markdown files (.md).");
   expect(notice?.getAttribute("role")).toBe("status");
@@ -223,13 +216,9 @@ async function reload(
   layOut(topLine);
   const scrolledTo = spyOnScrolls();
   const shown = nextShown();
-  await emit("document-changed", "reload");
+  await tell("document-changed", "reload");
   await shown;
   return scrolledTo;
-}
-
-function goneBar(): HTMLElement | null {
-  return document.querySelector<HTMLElement>(".file-gone");
 }
 
 test("a reload puts the block that was at the top of the view back at the top", async () => {
@@ -315,7 +304,7 @@ test("a reload that can't read the file keeps the last render and says why", asy
   await startDocumentView(0);
   await settle();
 
-  await emit("document-changed", "reload");
+  await tell("document-changed", "reload");
   await vi.waitFor(() => {
     expect(document.querySelector(".notice")?.textContent).toContain(
       "Can't read C:\\docs\\readme.md",
@@ -329,7 +318,7 @@ test("a deleted file leaves the last render under a 'File deleted or moved' bar"
   await startDocumentView(0);
   await settle();
 
-  await emit("document-changed", "gone");
+  await tell("document-changed", "gone");
   const bar = goneBar();
   expect(bar?.hidden).toBe(false);
   expect(bar?.textContent).toBe("File deleted or moved");
@@ -341,10 +330,10 @@ test("a file that comes back reloads and the bar goes away", async () => {
   documents = [() => Promise.resolve(readme), () => Promise.resolve(notes)];
   await startDocumentView(0);
   await settle();
-  await emit("document-changed", "gone");
+  await tell("document-changed", "gone");
 
   const shown = nextShown();
-  await emit("document-changed", "reload");
+  await tell("document-changed", "reload");
   await shown;
   expect(heading()).toBe("Field notes");
   expect(goneBar()?.hidden).toBe(true);
@@ -363,8 +352,8 @@ test("a file deleted while its reload is on the way keeps the bar", async () => 
   await settle();
 
   const shown = nextShown();
-  await emit("document-changed", "reload");
-  await emit("document-changed", "gone");
+  await tell("document-changed", "reload");
+  await tell("document-changed", "gone");
   sendReload(notes);
   await shown;
   expect(heading()).toBe("Field notes");
@@ -375,7 +364,7 @@ test("showing another document removes the bar", async () => {
   documents = [() => Promise.resolve(readme), () => Promise.resolve(notes)];
   await startDocumentView(0);
   await settle();
-  await emit("document-changed", "gone");
+  await tell("document-changed", "gone");
 
   const shown = nextShown();
   await giveAnotherDocument();
@@ -395,7 +384,7 @@ test("a reload runs the whenDocumentShown listeners once its render is in place 
     seen.push({ heading: heading(), scrolls: scrolledTo().length });
   });
 
-  await emit("document-changed", "reload");
+  await tell("document-changed", "reload");
   await vi.waitFor(() => {
     expect(seen).toHaveLength(1);
   });
@@ -437,14 +426,14 @@ test("a reload overtaken by a reload that can't read the file still runs the whe
   vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(() => {
     if (overtaken) return;
     overtaken = true;
-    void emit("document-changed", "reload");
+    void tell("document-changed", "reload");
   });
   const headings: (string | null | undefined)[] = [];
   const stop = whenDocumentShown(() => {
     headings.push(heading());
   });
 
-  await emit("document-changed", "reload");
+  await tell("document-changed", "reload");
   await vi.waitFor(() => {
     expect(document.querySelector(".notice")?.textContent).toContain(
       "Can't read C:\\docs\\readme.md",
@@ -469,7 +458,7 @@ test("a reload overtaken by a newer document-shown shows the newer document", as
   await startDocumentView(0);
   await settle();
 
-  await emit("document-changed", "reload");
+  await tell("document-changed", "reload");
   await giveAnotherDocument();
   await vi.waitFor(() => {
     expect(heading()).toBe("Field notes");
@@ -478,14 +467,6 @@ test("a reload overtaken by a newer document-shown shows the newer document", as
   await settle();
   expect(heading()).toBe("Field notes");
 });
-
-/** The ids of the elements the page scrolled to the top of the view, in turn. */
-function spyOnHeadingScrolls(): () => string[] {
-  const scrolls = vi
-    .spyOn(Element.prototype, "scrollIntoView")
-    .mockImplementation(() => {});
-  return () => scrolls.mock.contexts.map((element) => (element as Element).id);
-}
 
 test("a reload for the document the window left, arriving after another was shown, shows the new one at its heading", async () => {
   // Ticket 23: the app sent `reload` for the document the window showed, and a link then gave the
@@ -508,7 +489,7 @@ test("a reload for the document the window left, arriving after another was show
 
   const shown = nextShown();
   await giveAnotherDocument();
-  await emit("document-changed", "reload");
+  await tell("document-changed", "reload");
   sendShown(atOptions);
   await shown;
   await settle();
@@ -531,7 +512,7 @@ test("a 'gone' for the document the window left, arriving after another was show
 
   const shown = nextShown();
   await giveAnotherDocument();
-  await emit("document-changed", "gone");
+  await tell("document-changed", "gone");
   sendShown(readme);
   await shown;
   expect(heading()).toBe("Lamplighter");
@@ -575,7 +556,7 @@ test("a new window opened at a heading scrolls to it on its first show", async (
 
   await startDocumentView(0);
   expect(new Set(scrolledTo())).toEqual(new Set(["install"]));
-  expect(commands).toContain("show_window");
+  expect(askedOfTheApp()).toContain("show_window");
 });
 
 test("scroll-to-heading from the app scrolls an open document to that heading", async () => {
@@ -584,7 +565,7 @@ test("scroll-to-heading from the app scrolls an open document to that heading", 
   await settle();
   const scrolledTo = spyOnHeadingScrolls();
 
-  await emit("scroll-to-heading", "before-a-release");
+  await tell("scroll-to-heading", "before-a-release");
   await vi.waitFor(() => {
     expect(scrolledTo()).toContain("before-a-release");
   });
@@ -606,7 +587,7 @@ test("scroll-to-heading into a closed section opens it", async () => {
   const section = document.querySelector("details");
   expect(section?.open).toBe(false);
 
-  await emit("scroll-to-heading", "hidden-step");
+  await tell("scroll-to-heading", "hidden-step");
   await vi.waitFor(() => {
     expect(scrolledTo()).toContain("hidden-step");
   });
@@ -628,7 +609,7 @@ test("scroll-to-heading into a closed section's summary leaves it closed", async
   await settle();
   const scrolledTo = spyOnHeadingScrolls();
 
-  await emit("scroll-to-heading", "more");
+  await tell("scroll-to-heading", "more");
   await vi.waitFor(() => {
     expect(scrolledTo()).toContain("more");
   });
@@ -645,7 +626,7 @@ test("a reload of a document shown at a heading keeps the reading position", asy
   const scrolledTo = spyOnScrolls();
 
   const shown = nextShown();
-  await emit("document-changed", "reload");
+  await tell("document-changed", "reload");
   await shown;
   expect(new Set(scrolledTo())).toEqual(new Set([8]));
 });
@@ -687,7 +668,7 @@ test("a shown document stays when the app gives no answer, and a notice says why
   await startDocumentView(0);
   await settle();
 
-  await emit("document-changed", "reload");
+  await tell("document-changed", "reload");
   await vi.waitFor(() => {
     expect(document.querySelector(".notice")?.textContent).toBe(NOT_ALLOWED);
   });
@@ -708,14 +689,14 @@ test("a reload overtaken by a request the app gives no answer to still runs the 
   vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(() => {
     if (overtaken) return;
     overtaken = true;
-    void emit("document-changed", "reload");
+    void tell("document-changed", "reload");
   });
   const headings: (string | null | undefined)[] = [];
   const stop = whenDocumentShown(() => {
     headings.push(heading());
   });
 
-  await emit("document-changed", "reload");
+  await tell("document-changed", "reload");
   await vi.waitFor(() => {
     expect(document.querySelector(".notice")?.textContent).toBe(NOT_ALLOWED);
   });
@@ -739,7 +720,7 @@ test("the whenDocumentShown listeners hear whether another document was shown or
   });
 
   let shown = nextShown();
-  await emit("document-changed", "reload");
+  await tell("document-changed", "reload");
   await shown;
   shown = nextShown();
   await giveAnotherDocument();
@@ -761,14 +742,14 @@ test("a reload overtaken after its swap by a reload that can't read the file is 
   vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(() => {
     if (overtaken) return;
     overtaken = true;
-    void emit("document-changed", "reload");
+    void tell("document-changed", "reload");
   });
   const reasons: ShownReason[] = [];
   const stop = whenDocumentShown((_view, reason) => {
     reasons.push(reason);
   });
 
-  await emit("document-changed", "reload");
+  await tell("document-changed", "reload");
   await vi.waitFor(() => {
     expect(reasons).toEqual(["reload"]);
   });
@@ -809,7 +790,7 @@ test("the window shows with its document when a save overtakes its first request
   const started = startDocumentView(0);
   await settle();
 
-  await emit("document-changed", "reload");
+  await tell("document-changed", "reload");
   sendFirst(notes);
   // Long enough for a window shown on the overtaken answer to be shown before the next arrives.
   await afterNextFrame();
@@ -824,7 +805,7 @@ test("a reload under the 'File deleted or moved' bar keeps the block just below 
   documents = [() => Promise.resolve(readme), () => Promise.resolve(readme)];
   await startDocumentView(0);
   await settle();
-  await emit("document-changed", "gone");
+  await tell("document-changed", "gone");
   // The page's stylesheet, which the tests don't load, sets this while the bar shows.
   document.documentElement.style.scrollPaddingTop = "41px";
   // Line 13.5 is at the top of the window, and "## Options" on line 15 at the bar's lower edge.
@@ -833,7 +814,7 @@ test("a reload under the 'File deleted or moved' bar keeps the block just below 
 
   try {
     const shown = nextShown();
-    await emit("document-changed", "reload");
+    await tell("document-changed", "reload");
     await shown;
     expect(new Set(scrolledTo())).toEqual(new Set([15]));
   } finally {

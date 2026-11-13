@@ -1,5 +1,6 @@
-//! The handover to a page that asks for its document: the render started ahead, whether the page
-//! shows the document or reloads it (`Place`, `Showing`), and the answer as the page reads it.
+//! The handover to a page that asks for its document: the render started ahead, and whether the
+//! page shows the document or reloads it (`Place`, `Showing`). The answer as the page reads it is
+//! a contract sample (`contract_samples` in `documents.rs`).
 
 use super::*;
 
@@ -219,59 +220,4 @@ fn opening_a_shown_document_again_keeps_its_showing() {
     give(&documents, DocumentAt::new(&manifest()), Target::NewWindow);
     let next = handover(&documents, &label, Some(page_shows));
     assert_eq!(next.place, Place::Reload);
-}
-
-/// What the page reads of an answer to its request for its document, as JSON.
-#[expect(
-    clippy::unwrap_used,
-    reason = "a helper isn't a #[test] function, and its panic fails the test that called it"
-)]
-fn as_the_page_reads_it(place: Place, content: Content) -> serde_json::Value {
-    serde_json::to_value(DocumentToShow {
-        showing: Showing(7),
-        place,
-        content,
-    })
-    .unwrap()
-}
-
-#[test]
-fn document_to_show_serializes_as_the_page_reads_it() {
-    // `DocumentToShow` in page/src/view.ts: the rendered document goes as its HTML, and the
-    // heading only with a show.
-    let rendered = || downlight_core::render(b"# Install", Path::new(r"C:\docs\a.md"), "");
-    let html = rendered().as_str().to_owned();
-    let at_install = Place::Show {
-        heading: Some("install".to_owned()),
-    };
-    assert_eq!(
-        as_the_page_reads_it(at_install, Content::Document(rendered())),
-        serde_json::json!({
-            "showing": 7, "place": "show", "heading": "install", "document": html
-        })
-    );
-    assert_eq!(
-        as_the_page_reads_it(Place::Show { heading: None }, Content::Document(rendered())),
-        serde_json::json!({
-            "showing": 7, "place": "show", "heading": null, "document": html
-        })
-    );
-    assert_eq!(
-        as_the_page_reads_it(Place::Reload, Content::Document(rendered())),
-        serde_json::json!({ "showing": 7, "place": "reload", "document": html })
-    );
-}
-
-#[test]
-fn document_that_cannot_be_read_goes_with_why_as_the_page_reads_it() {
-    let unread = Content::Error(DocumentError::Read {
-        path: PathBuf::from(r"C:\docs\a.md"),
-        source: io::ErrorKind::NotFound.into(),
-    });
-    assert_eq!(
-        as_the_page_reads_it(Place::Reload, unread),
-        serde_json::json!({
-            "showing": 7, "place": "reload", "error": r"Can't read C:\docs\a.md: entity not found"
-        })
-    );
 }

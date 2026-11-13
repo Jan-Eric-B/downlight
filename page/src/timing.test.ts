@@ -1,37 +1,40 @@
 import { clearMocks, mockWindows } from "@tauri-apps/api/mocks";
-import { emit } from "@tauri-apps/api/event";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import notes from "../../core/tests/fixtures/notes.html?raw";
 import readme from "../../core/tests/fixtures/readme.html?raw";
-import type { Read } from "./test-support";
+import type { ArgsOf } from "./app";
+import type { Read, tell as Tell } from "./test-support";
 
 // The timing switch is read once, when `timing.ts` loads, so each test loads the page's modules
 // afresh after turning the switch on, as the app does by opening the page with `?timing`.
 
 /** The first paint reports the page sent. */
-let firstPaints: unknown[] = [];
+let firstPaints: ArgsOf<"report_first_paint">[] = [];
 
 /** What reading the window's document gives `render_document`, in turn. */
 let documents: Read[] = [];
 
 /**
- * Loads the document view with the timing switch on and a fresh fake app, and returns its start.
+ * Loads the document view with the timing switch on and a fresh fake app, and returns its start
+ * and the fake app's way to send the page a message.
  */
-async function loadTimedView(): Promise<
-  (scriptStart: number) => Promise<void>
-> {
-  const { answerAsTheApp, mockTheApp } = await import("./test-support");
+async function loadTimedView(): Promise<{
+  start: (scriptStart: number) => Promise<void>;
+  tell: typeof Tell;
+}> {
+  const { answerAsTheApp, fakeTheApp, tell } = await import("./test-support");
   const { startDocumentView } = await import("./view");
-  mockTheApp(
-    (command, args) => {
-      if (command === "report_first_paint") firstPaints.push(args);
-      if (command !== "render_document") return undefined;
-      const next = documents.shift();
-      return next && answerAsTheApp(args, next);
+  fakeTheApp({
+    report_first_paint: (args) => {
+      firstPaints.push(args);
+      return null;
     },
-    { shouldMockEvents: true },
-  );
-  return startDocumentView;
+    render_document: (args) => {
+      const next = documents.shift();
+      return next ? answerAsTheApp(args, next) : null;
+    },
+  });
+  return { start: startDocumentView, tell };
 }
 
 /** Lets the page's pending IPC calls, such as starting to listen, finish. */
@@ -55,7 +58,7 @@ afterEach(() => {
 
 test("first paint is reported once the window shows its document", async () => {
   documents = [() => Promise.resolve(readme)];
-  const start = await loadTimedView();
+  const { start } = await loadTimedView();
   await start(0);
 
   expect(firstPaints).toHaveLength(1);
@@ -74,11 +77,11 @@ test("a first request that a save overtakes still reports first paint", async ()
         sendSecond = resolve;
       }),
   ];
-  const start = await loadTimedView();
+  const { start, tell } = await loadTimedView();
   const started = start(0);
   await settle();
 
-  await emit("document-changed", "reload");
+  await tell("document-changed", "reload");
   sendFirst(notes);
   await settle();
   sendSecond(readme);
@@ -88,7 +91,7 @@ test("a first request that a save overtakes still reports first paint", async ()
 
 test("a window without a document reports no first paint", async () => {
   documents = [() => Promise.resolve(null)];
-  const start = await loadTimedView();
+  const { start } = await loadTimedView();
   await start(0);
 
   expect(firstPaints).toHaveLength(0);

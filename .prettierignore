@@ -3,3 +3,5 @@
 package-lock.json
 # Written by the core's render; the core's test compares them byte for byte.
 core/tests/fixtures/
+# Written by the app's tests as contract samples; the app's test compares them byte for byte.
+app/tests/fixtures/

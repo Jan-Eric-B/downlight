@@ -540,6 +540,51 @@ enum Content {
     Error(DocumentError),
 }
 
+/// A sample of each answer [`render_document`] gives, by name, which the page's tests read
+/// (`app/src/contract.rs`, ticket 27): the rendered document goes as its HTML, the heading only
+/// with a show, and a read that fails as why.
+#[cfg(test)]
+pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
+    // A new place or content stops the build here: give it a sample below, then name it here.
+    let _sampled = |answer: &Option<DocumentToShow>| match answer {
+        None
+        | Some(DocumentToShow {
+            place: Place::Show { .. } | Place::Reload,
+            content: Content::Document(_) | Content::Error(_),
+            ..
+        }) => {}
+    };
+    let answer = |place: Place, content: Content| {
+        serde_json::to_value(Some(DocumentToShow {
+            showing: Showing(7),
+            place,
+            content,
+        }))
+    };
+    let rendered = || {
+        Content::Document(downlight_core::render(
+            b"# Install\n\nRun the installer.\n",
+            Path::new("a.md"),
+            "",
+        ))
+    };
+    let unread = || {
+        Content::Error(DocumentError::Read {
+            path: PathBuf::from(r"C:\docs\a.md"),
+            source: io::ErrorKind::NotFound.into(),
+        })
+    };
+    let at_top = || Place::Show { heading: None };
+    Ok(serde_json::json!({
+        "showAtHeading": answer(Place::Show { heading: Some("install".to_owned()) }, rendered())?,
+        "showAtTop": answer(at_top(), rendered())?,
+        "reload": answer(Place::Reload, rendered())?,
+        "unreadShow": answer(at_top(), unread())?,
+        "unreadReload": answer(Place::Reload, unread())?,
+        "noDocument": serde_json::to_value(None::<DocumentToShow>)?,
+    }))
+}
+
 /// Reloads the calling window's document by hand (F5, Ctrl+R and the right-click menu).
 #[tauri::command]
 pub fn reload_document(

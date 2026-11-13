@@ -1,7 +1,7 @@
 import { clearMocks, mockWindows } from "@tauri-apps/api/mocks";
 import { afterEach, expect, test } from "vitest";
 import readme from "../../core/tests/fixtures/readme.html?raw";
-import { answerAsTheApp, mockTheApp } from "./test-support";
+import { answerAsTheApp, fakeTheApp } from "./test-support";
 
 afterEach(() => {
   clearMocks();
@@ -10,11 +10,10 @@ afterEach(() => {
 
 test("shows the document the core rendered", async () => {
   mockWindows("document-0");
-  mockTheApp((command, args) =>
-    command === "render_document"
-      ? answerAsTheApp(args, () => Promise.resolve(readme))
-      : undefined,
-  );
+  fakeTheApp({
+    render_document: (args) =>
+      answerAsTheApp(args, () => Promise.resolve(readme)),
+  });
 
   // The page starts when its script loads, and the import waits until it shows the document.
   await import("./main");

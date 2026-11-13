@@ -1,6 +1,6 @@
 import { clearMocks, mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import { afterEach, expect, test, vi } from "vitest";
-import { listenToApp } from "./events";
+import { listenToApp } from "./app";
 
 afterEach(() => {
   clearMocks();

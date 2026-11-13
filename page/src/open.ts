@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { askApp } from "./app";
 import { showNotice } from "./notice";
 
 let opening = false;
@@ -9,7 +9,7 @@ export async function open(): Promise<void> {
   if (opening) return;
   opening = true;
   try {
-    await invoke("open_document");
+    await askApp("open_document");
   } catch (error) {
     showNotice(String(error));
   } finally {

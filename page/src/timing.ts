@@ -1,4 +1,9 @@
-import { invoke } from "@tauri-apps/api/core";
+import {
+  askApp,
+  type FirstPaintMarks,
+  type LongTask,
+  type ReloadMarks,
+} from "./app";
 
 // The page's half of the timing switch (DOWNLIGHT_TIMING): the app opens the page with
 // `?timing` when the switch is on, and the app writes the reports out.
@@ -7,8 +12,8 @@ const isOn = new URLSearchParams(location.search).has("timing");
 
 // A report that can't reach the app has nowhere else to go; `npm run measure` then stops with
 // "No first paint or shown window", which is where the person measuring sees it.
-const send = (command: string, args: Record<string, unknown>) => {
-  invoke(command, args).catch(() => undefined);
+const send = (report: Promise<null>) => {
+  report.catch(() => undefined);
 };
 
 /** Tasks and frames longer than this keep the window from answering too long (the spec's target). */
@@ -25,17 +30,19 @@ export function epochMs(): number {
  */
 export function watchLongTasks(): void {
   if (!isOn) return;
-  const report = (kind: "task" | "frame", entry: PerformanceEntry) => {
+  const report = (kind: LongTask["kind"], entry: PerformanceEntry) => {
     if (entry.duration <= LONG_TASK_MS) return;
-    send("report_long_task", {
-      task: {
-        kind,
-        start: performance.timeOrigin + entry.startTime,
-        duration: entry.duration,
-      },
-    });
+    send(
+      askApp("report_long_task", {
+        task: {
+          kind,
+          start: performance.timeOrigin + entry.startTime,
+          duration: entry.duration,
+        },
+      }),
+    );
   };
-  const watch = (type: string, kind: "task" | "frame") => {
+  const watch = (type: string, kind: LongTask["kind"]) => {
     if (!PerformanceObserver.supportedEntryTypes.includes(type)) return;
     new PerformanceObserver((list) => {
       for (const entry of list.getEntries()) report(kind, entry);
@@ -45,18 +52,11 @@ export function watchLongTasks(): void {
   watch("long-animation-frame", "frame");
 }
 
-/** The marks on the way to first paint, each from `epochMs()`. */
-interface FirstPaintMarks {
-  scriptStart: number;
-  documentRequested: number;
-  documentReceived: number;
-  documentInserted: number;
-  /** When the frame after the document was inserted was done. */
-  firstFrame: number;
-}
+/** The marks the page makes on the way to first paint, each from `epochMs()`. */
+type PageMarks = Omit<FirstPaintMarks, "navigationStart">;
 
 /** First paint's marks so far, each made where it happens. */
-const firstPaint: Partial<FirstPaintMarks> = {};
+const firstPaint: Partial<PageMarks> = {};
 
 let firstPaintReported = false;
 
@@ -65,10 +65,7 @@ let firstPaintReported = false;
  * replaces the one before: when a later request overtakes the first, the reader waits for the
  * later one's document.
  */
-export function markFirstPaint(
-  mark: keyof FirstPaintMarks,
-  at = epochMs(),
-): void {
+export function markFirstPaint(mark: keyof PageMarks, at = epochMs()): void {
   if (!isOn || firstPaintReported) return;
   firstPaint[mark] = at;
 }
@@ -95,27 +92,18 @@ export function reportFirstPaint(): void {
   )
     return;
   const marks: FirstPaintMarks = {
+    navigationStart: performance.timeOrigin,
     scriptStart,
     documentRequested,
     documentReceived,
     documentInserted,
     firstFrame,
   };
-  send("report_first_paint", {
-    marks: { ...marks, navigationStart: performance.timeOrigin },
-  });
+  send(askApp("report_first_paint", { marks }));
 }
 
-/** The marks while a reload is shown, each from `epochMs()`. */
-interface ReloadMarks {
-  /** When the reloaded document's HTML arrived. */
-  received: number;
-  inserted: number;
-  /** When the view was back at the reading position. */
-  anchored: number;
-}
-
+/** Reports a reload with its marks, each from `epochMs()`. */
 export function reportReload(marks: ReloadMarks): void {
   if (!isOn) return;
-  send("report_reload", { marks });
+  send(askApp("report_reload", { marks }));
 }

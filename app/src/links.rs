@@ -43,6 +43,22 @@ pub enum Followed {
     Nothing,
 }
 
+/// A sample of each answer [`follow_link`] gives, by name, which the page's tests read
+/// (`app/src/contract.rs`, ticket 27).
+#[cfg(test)]
+pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
+    // A new answer stops the build here: give it a sample below, then name it here.
+    let _sampled = |followed: &Followed| match followed {
+        Followed::ScrollTo { .. } | Followed::Nothing => {}
+    };
+    let heading = Some("install".to_owned());
+    Ok(serde_json::json!({
+        "scrollToHeading": serde_json::to_value(Followed::ScrollTo { heading })?,
+        "scrollToTop": serde_json::to_value(Followed::ScrollTo { heading: None })?,
+        "nothing": serde_json::to_value(Followed::Nothing)?,
+    }))
+}
+
 fn follow(
     app: &AppHandle,
     label: &str,
@@ -281,26 +297,6 @@ mod tests {
         assert_eq!(
             left_for_the_page(&Shown::Opened, heading()),
             Followed::Nothing
-        );
-    }
-
-    #[test]
-    fn followed_serializes_as_the_page_reads_it() {
-        // `Followed` in page/src/links.ts.
-        let scroll_to = Followed::ScrollTo {
-            heading: Some("install".to_owned()),
-        };
-        assert_eq!(
-            serde_json::to_value(scroll_to).unwrap(),
-            serde_json::json!({ "kind": "scrollTo", "heading": "install" })
-        );
-        assert_eq!(
-            serde_json::to_value(Followed::ScrollTo { heading: None }).unwrap(),
-            serde_json::json!({ "kind": "scrollTo", "heading": null })
-        );
-        assert_eq!(
-            serde_json::to_value(Followed::Nothing).unwrap(),
-            serde_json::json!({ "kind": "nothing" })
         );
     }
 }

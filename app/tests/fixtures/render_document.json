@@ -1,0 +1,31 @@
+{
+  "noDocument": null,
+  "reload": {
+    "document": "<h1 id=\"install\" data-sourcepos=\"1:1-1:9\">Install<a href=\"#install\" aria-label=\"Link to heading 'Install'\" data-heading-content=\"Install\" class=\"anchor\"></a></h1>\n<p data-sourcepos=\"3:1-3:18\">Run the installer.</p>\n",
+    "place": "reload",
+    "showing": 7
+  },
+  "showAtHeading": {
+    "document": "<h1 id=\"install\" data-sourcepos=\"1:1-1:9\">Install<a href=\"#install\" aria-label=\"Link to heading 'Install'\" data-heading-content=\"Install\" class=\"anchor\"></a></h1>\n<p data-sourcepos=\"3:1-3:18\">Run the installer.</p>\n",
+    "heading": "install",
+    "place": "show",
+    "showing": 7
+  },
+  "showAtTop": {
+    "document": "<h1 id=\"install\" data-sourcepos=\"1:1-1:9\">Install<a href=\"#install\" aria-label=\"Link to heading 'Install'\" data-heading-content=\"Install\" class=\"anchor\"></a></h1>\n<p data-sourcepos=\"3:1-3:18\">Run the installer.</p>\n",
+    "heading": null,
+    "place": "show",
+    "showing": 7
+  },
+  "unreadReload": {
+    "error": "Can't read C:\\docs\\a.md: entity not found",
+    "place": "reload",
+    "showing": 7
+  },
+  "unreadShow": {
+    "error": "Can't read C:\\docs\\a.md: entity not found",
+    "heading": null,
+    "place": "show",
+    "showing": 7
+  }
+}

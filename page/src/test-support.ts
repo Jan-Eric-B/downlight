@@ -1,15 +1,28 @@
 // Helpers shared by the page's tests. The name has no `.test`, so Vitest doesn't run it as a test
 // file, and nothing the app runs imports it.
-import type { InvokeArgs } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
-import { mockIPC, type MockIPCOptions } from "@tauri-apps/api/mocks";
+import { mockIPC } from "@tauri-apps/api/mocks";
 import { vi } from "vitest";
-import {
-  whenDocumentShown,
-  type DocumentToShow,
-  type Place,
-  type RenderDocumentArgs,
-} from "./view";
+import followLinkSamples from "../../app/tests/fixtures/follow_link.json?raw";
+import menuEntrySamplesJson from "../../app/tests/fixtures/menu_entries.json?raw";
+import messageSamples from "../../app/tests/fixtures/messages.json?raw";
+import renderDocumentSamples from "../../app/tests/fixtures/render_document.json?raw";
+import timingReportSamples from "../../app/tests/fixtures/timing_reports.json?raw";
+import type {
+  AnswerOf,
+  ArgsOf,
+  Command,
+  DocumentToShow,
+  FirstPaintMarks,
+  Followed,
+  LongTask,
+  MenuEntry,
+  Message,
+  Messages,
+  Place,
+  ReloadMarks,
+} from "./app";
+import { whenDocumentShown } from "./view";
 
 /** A document shown at a heading, as the app hands it over for a link like `a.md#install`. */
 export interface AtHeading {
@@ -27,26 +40,134 @@ export type Read = () => Promise<string | AtHeading | null>;
 let currentShowing = 0;
 
 /**
- * Mocks the app's IPC with `handle`, as `mockIPC` does, with the fake app's window back at its
- * first showing, so that no test inherits the showings another test gave its window.
+ * How the fake app answers each command a test gives it, in the module's types, so a test can't
+ * answer a command the app doesn't have, or answer it in another shape. A command a test leaves
+ * out answers null, as a command that returns `()` does, except one whose answer is never null
+ * (`follow_link`), which fails with a message that names it. An answer that throws or rejects is
+ * a command that fails.
  */
-export function mockTheApp(
-  handle: Parameters<typeof mockIPC>[0],
-  options?: MockIPCOptions,
-): void {
-  currentShowing = 0;
-  mockIPC(handle, options);
+export type FakeApp = {
+  [C in Command]?: (args: ArgsOf<C>) => AnswerOf<C> | Promise<AnswerOf<C>>;
+};
+
+/** The commands whose answer is never null. */
+type AnsweredWithMore = {
+  [C in Command]: null extends AnswerOf<C> ? never : C;
+}[Command];
+
+/**
+ * The commands a test has to tell the fake app how to answer. A null answer would reach the page
+ * as a TypeError it shows as a notice, which hides the missing setup. The type makes a command the
+ * app adds with such an answer join the list.
+ */
+const MUST_BE_ANSWERED: Record<AnsweredWithMore, true> = { follow_link: true };
+
+/** The commands the page asked the fake app for, in turn. */
+let asked: Command[] = [];
+
+/** Answers `command` as `app` says. The IPC hands the arguments over untyped. */
+function answer<C extends Command>(
+  app: FakeApp,
+  command: C,
+  args: unknown,
+): AnswerOf<C> | Promise<AnswerOf<C>> | null {
+  asked.push(command);
+  const answering = app[command];
+  if (answering) return answering(args as ArgsOf<C>);
+  if (Object.hasOwn(MUST_BE_ANSWERED, command))
+    return Promise.reject(
+      new Error(`The fake app wasn't told how to answer ${command}.`),
+    );
+  return null;
 }
 
 /**
- * The page's `render_document` arguments as the IPC hands them over. They are checked rather than
- * cast, so a page that stops sending its showing fails its tests, as the app would reject it.
+ * Stands in for the app behind Tauri's IPC: answers the page's commands as `app` says and passes
+ * on the messages a test sends (`tell`). Its window is back at its first showing, and it has been
+ * asked nothing yet, so that no test inherits another's.
  */
-function renderDocumentArgs(args: InvokeArgs | undefined): RenderDocumentArgs {
-  const showing =
-    args !== undefined && "showing" in args ? args.showing : undefined;
-  if (typeof showing === "number" || showing === null) return { showing };
-  throw new Error("render_document needs its showing, a number or null");
+export function fakeTheApp(app: FakeApp = {}): void {
+  currentShowing = 0;
+  asked = [];
+  mockIPC((command, args) => answer(app, command as Command, args), {
+    shouldMockEvents: true,
+  });
+}
+
+/** The commands the page asked the fake app for since it started, in turn. */
+export function askedOfTheApp(): Command[] {
+  return [...asked];
+}
+
+/** Sends the page `message` with its `payload`, as the app does. */
+export async function tell<M extends Message>(
+  message: M,
+  payload: Messages[M],
+): Promise<void> {
+  await emit(message, payload);
+}
+
+/** A message as the app's tests wrote it: the event it goes as, and its payload. */
+export type MessageSample = {
+  [M in Message]: { event: M; payload: Messages[M] };
+}[Message];
+
+/** Sends the page a message as the app's tests wrote it. */
+export async function tellAsSampled(sample: MessageSample): Promise<void> {
+  await emit(sample.event, sample.payload);
+}
+
+/**
+ * The contract sample `name` in `json`, as the app's tests write them (`app/src/contract.rs`). A
+ * sample the app no longer writes fails the test that asks for it.
+ */
+function sampleIn(json: string, name: string): unknown {
+  const samples = JSON.parse(json) as Record<string, unknown>;
+  if (!Object.hasOwn(samples, name)) {
+    throw new Error(`The app writes no contract sample named ${name}.`);
+  }
+  return samples[name];
+}
+
+/** A sample of the app's answers to `render_document`, by name. */
+export function renderDocumentSample(name: string): DocumentToShow {
+  return sampleIn(renderDocumentSamples, name) as DocumentToShow;
+}
+
+/** A sample of the app's answers to `follow_link`, by name. */
+export function followLinkSample(name: string): Followed {
+  return sampleIn(followLinkSamples, name) as Followed;
+}
+
+/** A sample of the app's messages, by name. */
+export function messageSample(name: string): MessageSample {
+  return sampleIn(messageSamples, name) as MessageSample;
+}
+
+/**
+ * Every sample of the menu entries the app's `show_document_menu` takes: each kind of entry, and
+ * a command with and without its optional shortcut. All of them, so that a kind the app adds
+ * reaches the page's tests without a name to ask for.
+ */
+export function menuEntrySamples(): MenuEntry[] {
+  return Object.values(
+    JSON.parse(menuEntrySamplesJson) as object,
+  ) as MenuEntry[];
+}
+
+/** The timing reports the app takes, by the name of their sample. */
+type TimingReports = {
+  firstPaint: FirstPaintMarks;
+  reload: ReloadMarks;
+  longTask: LongTask;
+  longFrame: LongTask;
+};
+
+/** A sample of a timing report the app takes, by name. */
+export function timingReportSample<N extends keyof TimingReports>(
+  name: N,
+): TimingReports[N] {
+  return sampleIn(timingReportSamples, name) as TimingReports[N];
 }
 
 /**
@@ -55,21 +176,20 @@ function renderDocumentArgs(args: InvokeArgs | undefined): RenderDocumentArgs {
  */
 export async function giveAnotherDocument(): Promise<void> {
   currentShowing += 1;
-  await emit("document-shown");
+  await tell("document-shown", null);
 }
 
 /**
  * Answers `render_document` as the app does (`Documents::handover`): a page whose view shows the
  * current showing reloads its document, and any other page shows it, at its heading or the top.
- * Decided when the page asks, before the read, as the app does. `args` are the request's, as the
- * IPC hands them over.
+ * Decided when the page asks, before the read, as the app does. `args` are the request's.
  */
 export async function answerAsTheApp(
-  args: InvokeArgs | undefined,
+  args: ArgsOf<"render_document">,
   read: Read,
 ): Promise<DocumentToShow> {
   const showing = currentShowing;
-  const reloads = renderDocumentArgs(args).showing === showing;
+  const reloads = args.showing === showing;
   const placeAt = (heading: string | null): Place =>
     reloads ? { place: "reload" } : { place: "show", heading };
   let content: Awaited<ReturnType<Read>>;
@@ -85,6 +205,16 @@ export async function answerAsTheApp(
     : { showing, ...placeAt(content.heading), document: content.document };
 }
 
+/**
+ * Takes the next of `answers`, which a test lists in the order the page will ask for them. The
+ * last one stays and answers every request after it, since a test can't always tell how often the
+ * page asks, such as when a reload overtakes another. None left is undefined. Reads the array it
+ * is given at each call, so a test can set its answers after the fake app is set up.
+ */
+export function nextInTurn<T>(answers: T[]): T | undefined {
+  return answers.length > 1 ? answers.shift() : answers[0];
+}
+
 /** Lets the page's pending IPC calls, such as starting to listen, finish. */
 export function settle(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
@@ -98,6 +228,29 @@ export function nextShown(): Promise<void> {
       resolve();
     });
   });
+}
+
+/** The text of the shown document's first-level heading, if it has one. */
+export function heading(): string | null | undefined {
+  return document.querySelector("article.markdown-body h1")?.textContent;
+}
+
+/** What the document view shows while the window has no document. */
+export function emptyWindow(): HTMLElement | null {
+  return document.querySelector<HTMLElement>(".empty-window");
+}
+
+/** The 'File deleted or moved' bar over the document. */
+export function goneBar(): HTMLElement | null {
+  return document.querySelector<HTMLElement>(".file-gone");
+}
+
+/** The ids of the elements the page scrolled to the top of the view, in turn. */
+export function spyOnHeadingScrolls(): () => string[] {
+  const scrolls = vi
+    .spyOn(Element.prototype, "scrollIntoView")
+    .mockImplementation(() => {});
+  return () => scrolls.mock.contexts.map((element) => (element as Element).id);
 }
 
 /** The first and last line of the file that `element` comes from, by its `data-sourcepos`. */

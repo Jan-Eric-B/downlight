@@ -1,5 +1,4 @@
-import { invoke, type InvokeArgs } from "@tauri-apps/api/core";
-import { listenToApp } from "./events";
+import { askApp, listenToApp, type MenuEntry } from "./app";
 import { findNext, findPrevious, openFind } from "./find";
 import { showNotice } from "./notice";
 import { open } from "./open";
@@ -28,9 +27,9 @@ interface Command {
   run(): void;
 }
 
-/** Asks the app for `command`, and shows the reader why if the app couldn't do it. */
-function invokeShowingWhy(command: string, args?: InvokeArgs): void {
-  invoke(command, args).catch((error: unknown) => {
+/** Shows the reader why, if the app couldn't do what it was `asked`. */
+function showingWhy(asked: Promise<unknown>): void {
+  asked.catch((error: unknown) => {
     showNotice(String(error));
   });
 }
@@ -41,7 +40,7 @@ const commands = {
     key: "F5",
     // The app tells the page to reload, and the page shows why if the file can't be read.
     run: () => {
-      invokeShowingWhy("reload_document");
+      showingWhy(askApp("reload_document"));
     },
   },
   find: { ctrlLetter: "f", run: openFind },
@@ -56,7 +55,7 @@ const commands = {
   close: {
     ctrlLetter: "w",
     run: () => {
-      invokeShowingWhy("close_window");
+      showingWhy(askApp("close_window"));
     },
   },
 } satisfies Record<string, Command>;
@@ -80,8 +79,8 @@ const menu: MenuLine[] = [
 ];
 
 /** The menu as the app's `show_document_menu` takes it. */
-function menuEntries() {
-  return menu.map((line) => {
+function menuEntries(): MenuEntry[] {
+  return menu.map((line): MenuEntry => {
     if (line === "separator" || line === "copy") return { kind: line };
     return {
       kind: "command",
@@ -175,7 +174,7 @@ export function startCommands(signal?: AbortSignal): void {
     (event) => {
       // The app shows a native menu in place of the webview's own.
       event.preventDefault();
-      invokeShowingWhy("show_document_menu", { entries: menuEntries() });
+      showingWhy(askApp("show_document_menu", { entries: menuEntries() }));
     },
     { signal },
   );

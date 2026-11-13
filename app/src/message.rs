@@ -5,7 +5,7 @@
 use tauri::{AppHandle, Emitter as _};
 
 /// A message for one window's page. Each goes as the event the page listens for, with a string
-/// payload or none (`page/src/events.ts`).
+/// payload or none (`Messages` in `page/src/app.ts`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Message {
     /// The window shows another document now, and the page is to ask for it.
@@ -39,6 +39,33 @@ impl Message {
             Self::MenuCommand(id) => ("menu-command", Some(id)),
         }
     }
+}
+
+/// A sample of each message, by name, as the event and payload the page gets, which the page's
+/// tests read (`app/src/contract.rs`, ticket 27).
+#[cfg(test)]
+pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
+    // A new message stops the build here: give it a sample below, then name it here.
+    let _sampled = |message: &Message| match message {
+        Message::DocumentShown
+        | Message::Reload
+        | Message::Gone
+        | Message::ScrollToHeading(_)
+        | Message::Notice(_)
+        | Message::MenuCommand(_) => {}
+    };
+    let sample = |message: Message| {
+        let (event, payload) = message.event();
+        serde_json::json!({ "event": event, "payload": payload })
+    };
+    Ok(serde_json::json!({
+        "documentShown": sample(Message::DocumentShown),
+        "reload": sample(Message::Reload),
+        "gone": sample(Message::Gone),
+        "scrollToHeading": sample(Message::ScrollToHeading("install".to_owned())),
+        "notice": sample(Message::Notice("Can't watch the document's file".to_owned())),
+        "menuCommand": sample(Message::MenuCommand("open".to_owned())),
+    }))
 }
 
 /// Where messages for windows' pages go: their webviews in the app, a recorder in the tests.
@@ -123,40 +150,5 @@ pub mod recorder {
             self.sent.1.notify_all();
             Ok(())
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The event and its payload as JSON, as Tauri hands them to the page.
-    fn as_the_page_gets_it(message: &Message) -> (&'static str, String) {
-        let (event, payload) = message.event();
-        (event, serde_json::to_string(&payload).unwrap())
-    }
-
-    #[test]
-    fn messages_go_as_the_events_and_payloads_the_page_listens_for() {
-        // The listeners in page/src/view.ts and page/src/commands.ts.
-        let messages = [
-            Message::DocumentShown,
-            Message::Reload,
-            Message::Gone,
-            Message::ScrollToHeading("install".to_owned()),
-            Message::Notice("Can't watch".to_owned()),
-            Message::MenuCommand("open".to_owned()),
-        ];
-        assert_eq!(
-            messages.iter().map(as_the_page_gets_it).collect::<Vec<_>>(),
-            [
-                ("document-shown", "null".to_owned()),
-                ("document-changed", r#""reload""#.to_owned()),
-                ("document-changed", r#""gone""#.to_owned()),
-                ("scroll-to-heading", r#""install""#.to_owned()),
-                ("notice", r#""Can't watch""#.to_owned()),
-                ("menu-command", r#""open""#.to_owned()),
-            ]
-        );
     }
 }

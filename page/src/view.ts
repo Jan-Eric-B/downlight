@@ -1,6 +1,5 @@
-import { invoke } from "@tauri-apps/api/core";
+import { askApp, listenToApp, type DocumentToShow } from "./app";
 import { addCopyButtons } from "./copy";
-import { listenToApp } from "./events";
 import { showNotice } from "./notice";
 import { open } from "./open";
 import {
@@ -46,31 +45,6 @@ export async function scrollToHeading(heading: string | null): Promise<void> {
   openSectionsAround(target);
   await scrollToTop(target, () => target.isConnected);
 }
-
-/**
- * What the page does with a render, as the app decides it from the showing the page's view shows
- * (`Place` in `app/src/documents.rs`): show the document at the heading a link like
- * `guide.md#install` named, or at its top for null, or reload it at the reading position.
- */
-export type Place =
-  { place: "show"; heading: string | null } | { place: "reload" };
-
-/**
- * What the page sends with `render_document`: the showing whose render its view shows, or null
- * while it shows the empty state, an error or nothing yet. Exported, with `DocumentToShow`, so the
- * page's tests answer as the app does in the shape the page reads.
- */
-export type RenderDocumentArgs = { showing: number | null };
-
-/**
- * The app's answer when the page asks for its document (`DocumentToShow` in
- * `app/src/documents.rs`), or null while the window shows no document: the showing the window is
- * at, for the next request, what to do with the render, and the rendered document as its HTML or
- * why it can't be read.
- */
-export type DocumentToShow =
-  | ({ showing: number } & Place & ({ document: string } | { error: string }))
-  | null;
 
 /**
  * Why the view's content was replaced, as the `whenDocumentShown` listeners hear it: `shown` when
@@ -281,10 +255,9 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
    * do with the answer.
    */
   const ask = async (): Promise<Placement | Notice> => {
-    const args: RenderDocumentArgs = { showing };
     let answer: DocumentToShow;
     try {
-      answer = await invoke<DocumentToShow>("render_document", args);
+      answer = await askApp("render_document", { showing });
     } catch (error) {
       // The app couldn't be asked at all, so there is no answer to say what to do: a view that
       // shows a document keeps it, as a failed reload does.
@@ -404,6 +377,6 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
   await afterNextFrame();
   markFirstPaint("firstFrame");
   // If this fails, the app shows the window after a few seconds anyway.
-  invoke("show_window").catch(() => undefined);
+  askApp("show_window").catch(() => undefined);
   if (showsDocument) reportFirstPaint();
 }

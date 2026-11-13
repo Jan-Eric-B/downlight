@@ -8,19 +8,43 @@ use tauri::{AppHandle, WebviewWindow};
 
 use crate::message::{Message, Pages as _};
 
-/// One line of the menu, as the page describes it.
+/// One line of the menu, as the page describes it. Serialized only for its contract samples.
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(serde::Serialize))]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum MenuEntry {
     /// A command the page carries out, with the shortcut shown beside it, such as `Ctrl+O`.
     Command {
         id: String,
         label: String,
+        // The page leaves out the shortcut of a command that has none, so its sample does too.
+        #[cfg_attr(test, serde(skip_serializing_if = "Option::is_none"))]
         shortcut: Option<String>,
     },
     Separator,
     /// The system's own Copy, which copies the selection as Ctrl+C does.
     Copy,
+}
+
+/// A sample of each kind of menu entry the app takes, by name, which the page's tests check the
+/// entries it sends `show_document_menu` against (`app/src/contract.rs`, ticket 27).
+#[cfg(test)]
+pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
+    // A new kind of entry stops the build here: give it a sample below, then name it here.
+    let _sampled = |entry: &MenuEntry| match entry {
+        MenuEntry::Command { .. } | MenuEntry::Separator | MenuEntry::Copy => {}
+    };
+    let open = |shortcut: Option<&str>| MenuEntry::Command {
+        id: "open".to_owned(),
+        label: "Open...".to_owned(),
+        shortcut: shortcut.map(str::to_owned),
+    };
+    Ok(serde_json::json!({
+        "command": serde_json::to_value(open(Some("Ctrl+O")))?,
+        "commandWithoutShortcut": serde_json::to_value(open(None))?,
+        "separator": serde_json::to_value(MenuEntry::Separator)?,
+        "copy": serde_json::to_value(MenuEntry::Copy)?,
+    }))
 }
 
 /// Shows the page's menu at the pointer. It runs on the main thread, as a native menu must, and

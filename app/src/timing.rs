@@ -199,8 +199,11 @@ fn epoch_ms_of(at: SystemTime) -> f64 {
         * 1000.0
 }
 
+// The page's reports below are serialized only for their contract samples.
+
 /// The page's marks on the way to first paint, in ms since the Unix epoch.
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(serde::Serialize))]
 #[serde(rename_all = "camelCase")]
 pub struct FirstPaintMarks {
     navigation_start: f64,
@@ -214,6 +217,7 @@ pub struct FirstPaintMarks {
 
 /// The page's marks while it shows a reload, in ms since the Unix epoch.
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(serde::Serialize))]
 pub struct ReloadMarks {
     /// When the reloaded document's HTML arrived.
     received: f64,
@@ -224,6 +228,7 @@ pub struct ReloadMarks {
 
 /// A page task or frame that kept the page from answering for over 100 ms.
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(serde::Serialize))]
 pub struct LongTask {
     kind: LongTaskKind,
     /// In ms since the Unix epoch.
@@ -233,6 +238,7 @@ pub struct LongTask {
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(serde::Serialize))]
 #[serde(rename_all = "lowercase")]
 enum LongTaskKind {
     /// One task on the page's main thread.
@@ -248,6 +254,39 @@ impl LongTaskKind {
             Self::Frame => "long-frame",
         }
     }
+}
+
+/// A sample of each report the page sends with the timing switch on, by name, which the page's
+/// tests check the reports it sends against (`app/src/contract.rs`, ticket 27). A report the app
+/// can't take fails silently on the page, so only these samples catch a drift.
+#[cfg(test)]
+pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
+    // A new kind of long task stops the build here: give it a sample below, then name it here.
+    let _sampled = |kind: &LongTaskKind| match kind {
+        LongTaskKind::Task | LongTaskKind::Frame => {}
+    };
+    let long = |kind| LongTask {
+        kind,
+        start: 1250.0,
+        duration: 120.0,
+    };
+    Ok(serde_json::json!({
+        "firstPaint": serde_json::to_value(FirstPaintMarks {
+            navigation_start: 1000.0,
+            script_start: 1040.0,
+            document_requested: 1050.0,
+            document_received: 1090.0,
+            document_inserted: 1100.0,
+            first_frame: 1120.0,
+        })?,
+        "reload": serde_json::to_value(ReloadMarks {
+            received: 2000.0,
+            inserted: 2030.0,
+            anchored: 2040.0,
+        })?,
+        "longTask": serde_json::to_value(long(LongTaskKind::Task))?,
+        "longFrame": serde_json::to_value(long(LongTaskKind::Frame))?,
+    }))
 }
 
 #[tauri::command]

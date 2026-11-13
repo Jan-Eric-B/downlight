@@ -1,0 +1,26 @@
+{
+  "documentShown": {
+    "event": "document-shown",
+    "payload": null
+  },
+  "gone": {
+    "event": "document-changed",
+    "payload": "gone"
+  },
+  "menuCommand": {
+    "event": "menu-command",
+    "payload": "open"
+  },
+  "notice": {
+    "event": "notice",
+    "payload": "Can't watch the document's file"
+  },
+  "reload": {
+    "event": "document-changed",
+    "payload": "reload"
+  },
+  "scrollToHeading": {
+    "event": "scroll-to-heading",
+    "payload": "install"
+  }
+}

@@ -1,5 +1,4 @@
 import { clearMocks, mockWindows } from "@tauri-apps/api/mocks";
-import { emit } from "@tauri-apps/api/event";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import find from "../../core/tests/fixtures/find.html?raw";
 import notes from "../../core/tests/fixtures/notes.html?raw";
@@ -9,9 +8,11 @@ import {
   answerAsTheApp,
   giveAnotherDocument,
   layOut,
-  mockTheApp,
+  fakeTheApp,
+  nextInTurn,
   nextShown,
   settle,
+  tell,
 } from "./test-support";
 import { afterNextFrame } from "./reading-position";
 import { startDocumentView } from "./view";
@@ -29,18 +30,16 @@ let stop: AbortController;
 beforeEach(async () => {
   mockWindows("document-0");
   documents = [find];
-  mockTheApp(
-    (command, args) => {
-      if (command !== "render_document") return undefined;
-      const next = documents.length > 1 ? documents.shift() : documents[0];
+  fakeTheApp({
+    render_document: (args) => {
+      const next = nextInTurn(documents);
       return answerAsTheApp(args, () =>
         next instanceof Error
           ? Promise.reject(next)
           : Promise.resolve(next ?? null),
       );
     },
-    { shouldMockEvents: true },
-  );
+  });
   stop = new AbortController();
   startFind(stop.signal);
   startCommands(stop.signal);
@@ -433,7 +432,7 @@ test("a reload while the bar is open is counted again", async () => {
   expect(status()).toBe("No results");
 
   const shown = nextShown();
-  await emit("document-changed", "reload");
+  await tell("document-changed", "reload");
   await shown;
   expect(status()).toBe("1 of 2");
 });
@@ -448,10 +447,10 @@ test("a reload overtaken by a reload that can't read the file is counted again",
   vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(() => {
     if (overtaken) return;
     overtaken = true;
-    void emit("document-changed", "reload");
+    void tell("document-changed", "reload");
   });
 
-  await emit("document-changed", "reload");
+  await tell("document-changed", "reload");
   await vi.waitFor(() => {
     expect(status()).toBe("1 of 2");
   });

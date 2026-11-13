@@ -1,10 +1,6 @@
-import { invoke } from "@tauri-apps/api/core";
+import { askApp } from "./app";
 import { showNotice } from "./notice";
 import { DOCUMENT_VIEW_SELECTOR, scrollToHeading } from "./view";
-
-/** What the app's `follow_link` leaves for the page to do (`Followed` in `app/src/links.rs`). */
-type Followed =
-  { kind: "scrollTo"; heading: string | null } | { kind: "nothing" };
 
 /** The document's link under `target`, the element an event happened on, if there is one. */
 function linkAt(target: EventTarget | null): HTMLAnchorElement | null {
@@ -18,10 +14,7 @@ function linkAt(target: EventTarget | null): HTMLAnchorElement | null {
  */
 async function follow(target: string, newWindow: boolean): Promise<void> {
   try {
-    const followed = await invoke<Followed>("follow_link", {
-      target,
-      newWindow,
-    });
+    const followed = await askApp("follow_link", { target, newWindow });
     if (followed.kind === "scrollTo") await scrollToHeading(followed.heading);
   } catch (error) {
     showNotice(String(error));

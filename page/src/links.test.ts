@@ -1,15 +1,17 @@
-import { clearMocks, mockIPC, mockWindows } from "@tauri-apps/api/mocks";
+import { clearMocks, mockWindows } from "@tauri-apps/api/mocks";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import github from "../../core/tests/fixtures/github.html?raw";
 import readme from "../../core/tests/fixtures/readme.html?raw";
+import type { ArgsOf, Followed } from "./app";
 import { startLinks } from "./links";
-import { settle } from "./test-support";
+import { fakeTheApp, settle, spyOnHeadingScrolls } from "./test-support";
 
 /** Each `follow_link` call's arguments, in turn. */
-let follows: unknown[] = [];
+let follows: ArgsOf<"follow_link">[] = [];
 
 /** What `follow_link` answers. */
-let answer: () => Promise<unknown> = () => Promise.resolve({ kind: "nothing" });
+let answer: () => Promise<Followed> = () =>
+  Promise.resolve({ kind: "nothing" });
 
 let stopLinks: AbortController;
 
@@ -17,10 +19,11 @@ beforeEach(() => {
   mockWindows("document-0");
   follows = [];
   answer = () => Promise.resolve({ kind: "nothing" });
-  mockIPC((command, args) => {
-    if (command !== "follow_link") return undefined;
-    follows.push(args);
-    return answer();
+  fakeTheApp({
+    follow_link: (args) => {
+      follows.push(args);
+      return answer();
+    },
   });
   stopLinks = new AbortController();
 });
@@ -57,14 +60,6 @@ function link(view: HTMLElement, href: string): HTMLAnchorElement {
   return found;
 }
 
-/** The ids of the elements the page scrolled to the top of the view, in turn. */
-function spyOnScrolls(): () => string[] {
-  const scrolls = vi
-    .spyOn(Element.prototype, "scrollIntoView")
-    .mockImplementation(() => {});
-  return () => scrolls.mock.contexts.map((element) => (element as Element).id);
-}
-
 function bubble(): HTMLElement | null {
   return document.querySelector<HTMLElement>(".link-target");
 }
@@ -96,7 +91,7 @@ test("ctrl+click asks for a new window", async () => {
 test("heading outcome scrolls to the element with that id in the document", async () => {
   answer = () => Promise.resolve({ kind: "scrollTo", heading: "options" });
   const view = showDocument(readme);
-  const scrolledTo = spyOnScrolls();
+  const scrolledTo = spyOnHeadingScrolls();
 
   click(link(view, "#options"));
   await vi.waitFor(() => {
@@ -108,7 +103,7 @@ test("heading outcome scrolls to the element with that id in the document", asyn
 test("heading outcome scrolls to a footnote", async () => {
   answer = () => Promise.resolve({ kind: "scrollTo", heading: "fn-paper" });
   const view = showDocument(github);
-  const scrolledTo = spyOnScrolls();
+  const scrolledTo = spyOnHeadingScrolls();
 
   click(link(view, "#fn-paper"));
   await vi.waitFor(() => {
@@ -138,7 +133,7 @@ test("heading outcome looks for the heading in the document only", async () => {
   outside.id = "outside";
   document.body.append(outside);
   const view = showDocument('<p><a href="#outside">Out</a></p>');
-  const scrolledTo = spyOnScrolls();
+  const scrolledTo = spyOnHeadingScrolls();
 
   click(link(view, "#outside"));
   await settle();

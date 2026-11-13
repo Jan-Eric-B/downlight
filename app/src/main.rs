@@ -5,6 +5,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod command_line;
+#[cfg(test)]
+mod contract;
 mod documents;
 mod image;
 mod links;

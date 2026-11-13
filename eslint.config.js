@@ -19,6 +19,34 @@ export default defineConfig(
     extends: [tseslint.configs.disableTypeChecked],
   },
   {
+    // Only the page's app module speaks to the app, and the tests' fake app answers in its types
+    // (ticket 27).
+    files: ["page/src/**/*.ts"],
+    ignores: [
+      "page/src/app.ts",
+      "page/src/app.test.ts",
+      "page/src/test-support.ts",
+    ],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: [
+                "@tauri-apps/api/core",
+                "@tauri-apps/api/event",
+                "@tauri-apps/api/webviewWindow",
+              ],
+              message:
+                "Ask the app and listen to it through page/src/app.ts, and fake it with test-support.ts.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     // The repo's scripts run in Node.
     files: ["scripts/**/*.js"],
     languageOptions: {

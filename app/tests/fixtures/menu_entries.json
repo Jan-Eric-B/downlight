@@ -1,0 +1,19 @@
+{
+  "command": {
+    "id": "open",
+    "kind": "command",
+    "label": "Open...",
+    "shortcut": "Ctrl+O"
+  },
+  "commandWithoutShortcut": {
+    "id": "open",
+    "kind": "command",
+    "label": "Open..."
+  },
+  "copy": {
+    "kind": "copy"
+  },
+  "separator": {
+    "kind": "separator"
+  }
+}
