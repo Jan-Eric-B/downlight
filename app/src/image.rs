@@ -56,3 +56,24 @@ fn response_to(url_path: &str) -> Response<Cow<'static, [u8]>> {
     headers.insert(X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
     response
 }
+
+// The policy names the origin WebView2 gives the scheme, which is Windows'.
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn content_security_policy_lets_the_page_load_images_from_the_image_scheme() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let img_src = config["app"]["security"]["csp"]["img-src"]
+            .as_str()
+            .unwrap();
+        assert!(
+            img_src
+                .split_ascii_whitespace()
+                .any(|source| source == origin()),
+            "{img_src}"
+        );
+    }
+}
