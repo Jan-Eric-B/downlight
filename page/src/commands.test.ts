@@ -3,6 +3,7 @@ import { emit } from "@tauri-apps/api/event";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { startCommands } from "./commands";
 import { startFind } from "./find";
+import { settle } from "./test-support";
 
 let commands: string[] = [];
 let stop: AbortController;
@@ -36,11 +37,6 @@ function appCommands(): string[] {
   return commands.filter((command) => !command.startsWith("plugin:"));
 }
 
-/** Lets the page's pending IPC calls, such as starting to listen, finish. */
-function settle(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 0));
-}
-
 /** Presses a key in the document, as the reader would, and returns the event. */
 function press(init: KeyboardEventInit): KeyboardEvent {
   const event = new KeyboardEvent("keydown", {
@@ -67,6 +63,31 @@ describe("Ctrl+W closes the window", () => {
   test("on a Cyrillic layout, by the key in W's place", () => {
     press({ ctrlKey: true, key: "ц", code: "KeyW" });
     expect(appCommands()).toEqual(["close_window"]);
+  });
+
+  // Held down, the repeats would close the next Downlight window that takes the focus.
+  test("once while held down", () => {
+    press({ ctrlKey: true, key: "w", code: "KeyW" });
+    const repeat = press({
+      ctrlKey: true,
+      key: "w",
+      code: "KeyW",
+      repeat: true,
+    });
+    expect(appCommands()).toEqual(["close_window"]);
+    expect(repeat.defaultPrevented).toBe(true);
+  });
+
+  test("and shows why it couldn't", async () => {
+    answer = (command) => {
+      if (command === "close_window") throw new Error("Can't close the window");
+    };
+    press({ ctrlKey: true, key: "w", code: "KeyW" });
+    await vi.waitFor(() => {
+      expect(document.querySelector(".notice")?.textContent).toContain(
+        "Can't close the window",
+      );
+    });
   });
 });
 
@@ -161,6 +182,29 @@ describe("Reload", () => {
     expect(appCommands()).toEqual(["reload_document"]);
   });
 
+  test("F5 held down reloads once", () => {
+    press({ key: "F5", code: "F5" });
+    const repeat = press({ key: "F5", code: "F5", repeat: true });
+    press({ key: "F5", code: "F5", repeat: true });
+    expect(appCommands()).toEqual(["reload_document"]);
+    // The webview never gets the repeats either, so it doesn't reload the page itself.
+    expect(repeat.defaultPrevented).toBe(true);
+  });
+
+  test("a reload the app can't start shows why", async () => {
+    answer = (command) => {
+      if (command === "reload_document") {
+        throw new Error("Can't reload: window not found");
+      }
+    };
+    press({ key: "F5", code: "F5" });
+    await vi.waitFor(() => {
+      expect(document.querySelector(".notice")?.textContent).toContain(
+        "Can't reload: window not found",
+      );
+    });
+  });
+
   // WebView2 would reload the page itself, leaving the window without its document.
   test.each([
     ["Ctrl+F5", { ctrlKey: true, key: "F5", code: "F5" }],
@@ -177,6 +221,18 @@ describe("Reload", () => {
     expect(appCommands()).toEqual([]);
     expect(event.defaultPrevented).toBe(false);
   });
+});
+
+// Holding F3 steps on through Find's matches, as in a browser.
+test.each([
+  ["F3", { key: "F3", code: "F3" }],
+  ["Shift+F3", { shiftKey: true, key: "F3", code: "F3" }],
+])("%s held down keeps running", (_keys, keys) => {
+  startFind(stop.signal);
+  const repeat = press({ ...keys, repeat: true });
+  expect(repeat.defaultPrevented).toBe(true);
+  // With the bar closed, a step opens Find.
+  expect(document.querySelector<HTMLElement>(".find-bar")?.hidden).toBe(false);
 });
 
 describe("the right-click menu", () => {

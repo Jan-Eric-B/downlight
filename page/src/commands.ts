@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, type InvokeArgs } from "@tauri-apps/api/core";
 import { listenToApp } from "./events";
 import { findNext, findPrevious, openFind } from "./find";
 import { showNotice } from "./notice";
@@ -19,7 +19,20 @@ interface Command {
   key?: string;
   /** Whether `key` is pressed with Shift. */
   shift?: boolean;
+  /**
+   * Whether the command runs again on each repeat while its shortcut is held down. Off unless a
+   * command asks for it: a held Ctrl+W would go on to close the next window that takes the focus,
+   * and a held F5 would start a render per repeat.
+   */
+  repeatsWhileHeld?: boolean;
   run(): void;
+}
+
+/** Asks the app for `command`, and shows the reader why if the app couldn't do it. */
+function invokeShowingWhy(command: string, args?: InvokeArgs): void {
+  invoke(command, args).catch((error: unknown) => {
+    showNotice(String(error));
+  });
 }
 
 const commands = {
@@ -27,16 +40,24 @@ const commands = {
     ctrlLetter: "r",
     key: "F5",
     // The app tells the page to reload, and the page shows why if the file can't be read.
-    run: () => void invoke("reload_document"),
+    run: () => {
+      invokeShowingWhy("reload_document");
+    },
   },
   find: { ctrlLetter: "f", run: openFind },
-  findNext: { key: "F3", run: findNext },
-  findPrevious: { key: "F3", shift: true, run: findPrevious },
+  findNext: { key: "F3", repeatsWhileHeld: true, run: findNext },
+  findPrevious: {
+    key: "F3",
+    shift: true,
+    repeatsWhileHeld: true,
+    run: findPrevious,
+  },
   open: { ctrlLetter: "o", run: () => void open() },
   close: {
     ctrlLetter: "w",
-    // Closing the window can't fail in a way the reader could act on: the window stays open.
-    run: () => void invoke("close_window"),
+    run: () => {
+      invokeShowingWhy("close_window");
+    },
   },
 } satisfies Record<string, Command>;
 
@@ -137,11 +158,13 @@ export function startCommands(signal?: AbortSignal): void {
         event.preventDefault();
         return;
       }
-      const command = Object.values(commands).find((candidate: Command) =>
-        pressesShortcutOf(event, candidate),
+      const command: Command | undefined = Object.values(commands).find(
+        (candidate: Command) => pressesShortcutOf(event, candidate),
       );
       if (!command) return;
+      // A repeat is still taken from the webview, so a held F5 never reloads the page itself.
       event.preventDefault();
+      if (event.repeat && !command.repeatsWhileHeld) return;
       command.run();
     },
     { signal },
@@ -152,11 +175,7 @@ export function startCommands(signal?: AbortSignal): void {
     (event) => {
       // The app shows a native menu in place of the webview's own.
       event.preventDefault();
-      invoke("show_document_menu", { entries: menuEntries() }).catch(
-        (error: unknown) => {
-          showNotice(String(error));
-        },
-      );
+      invokeShowingWhy("show_document_menu", { entries: menuEntries() });
     },
     { signal },
   );
