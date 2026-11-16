@@ -25,7 +25,7 @@ tauri-plugin-single-instance = "2.5.5"
 workspace = true
 
 [target."cfg(windows)".dependencies]
-# WebView2's own interfaces, for leaving its reload keys to the page (ticket 10). The versions wry
+# WebView2's own interfaces, for leaving every key to the page (tickets 10 and 29). The versions wry
 # uses, so they add nothing to the tree.
 webview2-com = "0.39.1"
 windows-core = "0.62.2"

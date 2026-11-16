@@ -9,6 +9,7 @@ use tauri::{Manager, Runtime, WebviewWindow, WebviewWindowBuilder};
 use webview2_com::AcceleratorKeyPressedEventHandler;
 use webview2_com::Microsoft::Web::WebView2::Win32::{
     ICoreWebView2AcceleratorKeyPressedEventArgs, ICoreWebView2AcceleratorKeyPressedEventArgs2,
+    ICoreWebView2Controller, ICoreWebView2Settings3,
 };
 use windows_core::{HRESULT, Interface as _};
 use windows_sys::Win32::Foundation::{
@@ -18,9 +19,7 @@ use windows_sys::Win32::System::Com::{
     COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoInitializeEx, CoUninitialize,
 };
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, GetProcessTimes};
-use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-    GetKeyState, VK_BROWSER_REFRESH, VK_CONTROL, VK_F3, VK_F5,
-};
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_F12, VK_SHIFT};
 use windows_sys::Win32::UI::Shell::{
     ILCreateFromPathW, ILFree, SHOpenFolderAndSelectItems, ShellExecuteW,
 };
@@ -224,35 +223,44 @@ fn with_com<T>(work: impl FnOnce() -> io::Result<T>) -> io::Result<T> {
     result
 }
 
-/// Leaves WebView2's reload and find keys to the page. The page reloads the document on F5 and
-/// Ctrl+R and swallows WebView2's other reloads (Ctrl+Shift+R, Ctrl+F5, Shift+F5 and a keyboard's
-/// Refresh key, ticket 10), and opens its own find bar on Ctrl+F and steps through the matches on
-/// F3 and Shift+F3 (ticket 14). Without this, WebView2 loads the page anew on Ctrl+Shift+R even
-/// when the page cancels the key, and the window loses its reading position; and WebView2 handles
-/// its browser keys before the page sees them, so Ctrl+F, F3 and Ctrl+G could show its own find
-/// bar. WebView2's other keys, such as zoom, keep working, which turning off all its browser keys
-/// would stop.
+/// Leaves every key to the page, whose command table says what each one does (ticket 29):
+/// WebView2 handles none of its browser keys, such as its reloads, find bar, zoom, print dialog,
+/// downloads, caret browsing and Back and Forward, and still passes them on to the page. Text
+/// editing and movement keys (Ctrl+C, Ctrl+A, the arrows) aren't browser keys and keep working.
+/// Dev builds keep the DevTools keys, as DevTools are on in debug builds only.
 ///
-/// Without the handler only those keys misbehave, and the window works otherwise, so a failure to
-/// reach the webview or to add the handler is left at that.
-pub fn leave_reload_and_find_keys_to_the_page(window: &WebviewWindow) {
+/// The setting turns the browser keys off as a whole. Tauri reaches the webview only after its page
+/// has started loading, though, and Microsoft documents that a setting changed after navigation
+/// started applies from the next one, so the handler also turns each browser key off as it is
+/// pressed, which holds at once and is where dev builds take the DevTools keys back.
+///
+/// A window whose browser keys stay on works otherwise, so a failure to reach the webview, to
+/// change the setting or to add the handler is left at that.
+pub fn leave_keys_to_the_page(window: &WebviewWindow) {
     let _ = window.with_webview(|webview| {
+        let controller = webview.controller();
+        let _ = turn_off_browser_keys(&controller);
         let handler = AcceleratorKeyPressedEventHandler::create(Box::new(|_, args| {
-            args.map_or(Ok(()), |args| leave_to_the_page_if_reload_or_find(&args))
+            args.map_or(Ok(()), |args| turn_off_browser_key(&args))
         }));
         let mut token = 0;
         // SAFETY: the handler and the token are valid for the call, and the controller keeps its
         // own reference to the handler. The token isn't needed: the handler lives as long as the
         // webview.
-        let _ = unsafe {
-            webview
-                .controller()
-                .add_AcceleratorKeyPressed(&handler, &mut token)
-        };
+        let _ = unsafe { controller.add_AcceleratorKeyPressed(&handler, &mut token) };
     });
 }
 
-fn leave_to_the_page_if_reload_or_find(
+fn turn_off_browser_keys(controller: &ICoreWebView2Controller) -> windows_core::Result<()> {
+    // SAFETY: plain getters and a setter on live interfaces, on the window's thread, where Tauri
+    // runs `with_webview`'s closure.
+    unsafe {
+        let settings: ICoreWebView2Settings3 = controller.CoreWebView2()?.Settings()?.cast()?;
+        settings.SetAreBrowserAcceleratorKeysEnabled(false)
+    }
+}
+
+fn turn_off_browser_key(
     args: &ICoreWebView2AcceleratorKeyPressedEventArgs,
 ) -> windows_core::Result<()> {
     let mut key = 0;
@@ -260,26 +268,17 @@ fn leave_to_the_page_if_reload_or_find(
     unsafe { args.VirtualKey(&mut key)? };
     // SAFETY: GetKeyState only reads the calling thread's keyboard state. The event comes on the
     // window's thread while it handles the key, so that state is the key's own.
-    let ctrl_held = unsafe { GetKeyState(i32::from(VK_CONTROL)) } < 0;
-    if is_reload_or_find_key(key, ctrl_held) {
-        // WebView2 still passes the key on to the page.
-        let args: ICoreWebView2AcceleratorKeyPressedEventArgs2 = args.cast()?;
-        // SAFETY: a plain property setter on a live interface.
-        unsafe { args.SetIsBrowserAcceleratorKeyEnabled(false)? };
-    }
-    Ok(())
+    let held = |modifier: u16| unsafe { GetKeyState(i32::from(modifier)) } < 0;
+    let enabled = cfg!(debug_assertions) && is_dev_tools_key(key, held(VK_CONTROL), held(VK_SHIFT));
+    let args: ICoreWebView2AcceleratorKeyPressedEventArgs2 = args.cast()?;
+    // SAFETY: a plain property setter on a live interface.
+    unsafe { args.SetIsBrowserAcceleratorKeyEnabled(enabled) }
 }
 
-/// Whether the virtual key `key`, with Ctrl held or not, is one of WebView2's reload or find keys,
-/// with any other modifiers: F5, the Refresh key and Ctrl+R reload; Ctrl+F, F3 and Ctrl+G find
-/// (WebView2's Find on Page and Find Next, Shift for the previous match).
-fn is_reload_or_find_key(key: u32, ctrl_held: bool) -> bool {
-    let reload = key == u32::from(VK_F5)
-        || key == u32::from(VK_BROWSER_REFRESH)
-        || (key == u32::from(b'R') && ctrl_held);
-    let find = key == u32::from(VK_F3)
-        || ((key == u32::from(b'F') || key == u32::from(b'G')) && ctrl_held);
-    reload || find
+/// Whether the virtual key `key`, with Ctrl and Shift held or not, opens WebView2's DevTools: F12,
+/// or Ctrl+Shift+I.
+fn is_dev_tools_key(key: u32, ctrl_held: bool, shift_held: bool) -> bool {
+    key == u32::from(VK_F12) || (key == u32::from(b'I') && ctrl_held && shift_held)
 }
 
 /// When Windows created this process, so first paint counts the loader's work before `main` too.
@@ -314,6 +313,8 @@ mod tests {
     use windows_sys::Win32::Foundation::{
         E_FAIL, ERROR_ACCESS_DENIED, ERROR_BAD_NET_NAME, ERROR_BAD_NETPATH,
     };
+
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_F5;
 
     use super::*;
 
@@ -355,32 +356,30 @@ mod tests {
     }
 
     #[test]
-    fn reload_and_find_keys_are_left_to_the_page() {
-        for (key, ctrl_held) in [
-            (VK_F5, false),
-            (VK_F5, true),
-            (VK_BROWSER_REFRESH, false),
-            (u16::from(b'R'), true),
-            (u16::from(b'F'), true),
-            (VK_F3, false),
-            (VK_F3, true),
-            (u16::from(b'G'), true),
-        ] {
-            assert!(is_reload_or_find_key(u32::from(key), ctrl_held), "{key}");
+    fn dev_tools_keys_are_f12_and_ctrl_shift_i() {
+        let i = u16::from(b'I');
+        for (key, ctrl_held, shift_held) in [(VK_F12, false, false), (i, true, true)] {
+            assert!(
+                is_dev_tools_key(u32::from(key), ctrl_held, shift_held),
+                "{key}"
+            );
         }
     }
 
     #[test]
-    fn other_keys_stay_with_webview2() {
-        for (key, ctrl_held) in [
-            (u16::from(b'R'), false),
-            (u16::from(b'F'), false),
-            (u16::from(b'G'), false),
-            // Zoom, until ticket 16 takes it over.
-            (u16::from(b'0'), true),
-            (u16::from(b'P'), true),
+    fn other_keys_are_not_dev_tools_keys() {
+        let (i, r) = (u16::from(b'I'), u16::from(b'R'));
+        for (key, ctrl_held, shift_held) in [
+            (i, false, false),
+            (i, true, false),
+            (i, false, true),
+            (r, true, true),
+            (VK_F5, false, false),
         ] {
-            assert!(!is_reload_or_find_key(u32::from(key), ctrl_held), "{key}");
+            assert!(
+                !is_dev_tools_key(u32::from(key), ctrl_held, shift_held),
+                "{key}"
+            );
         }
     }
 

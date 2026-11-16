@@ -15,15 +15,12 @@ import { open } from "./open";
 interface Command {
   /** The command's name, as the right-click menu and its button's tooltip show it. */
   label: string;
-  /** The letter pressed with Ctrl, in lower case. */
-  ctrlLetter?: string;
   /**
-   * A named key, such as `F5`, pressed without Ctrl, Alt or Meta, and with Shift only if `shift`
-   * says so. The menu shows it before Ctrl+letter.
+   * The keys that run it. The page owns every key: the app turns WebView2's own browser keys off
+   * (`leave_keys_to_the_page` in `app/src/platform/windows.rs`, ticket 29), so this table is the
+   * one place that says what a key does. The menu and the button's tooltip show the first.
    */
-  key?: string;
-  /** Whether `key` is pressed with Shift. */
-  shift?: boolean;
+  shortcuts?: Shortcut[];
   /**
    * Whether the command runs again on each repeat while its shortcut is held down. Off unless a
    * command asks for it: a held Ctrl+W would go on to close the next window that takes the focus,
@@ -33,34 +30,48 @@ interface Command {
   run(): void;
 }
 
+/**
+ * A key pressed with exactly the modifiers named, and no others. `key` is a letter in lower case,
+ * which follows the keyboard's layout (`pressesKey`), or a named key as `KeyboardEvent.key` gives
+ * it, such as `F5` or `ArrowLeft`.
+ */
+interface Shortcut {
+  key: string;
+  ctrl?: boolean;
+  alt?: boolean;
+  shift?: boolean;
+}
+
 const commands = {
   reload: {
     label: "Reload",
-    ctrlLetter: "r",
-    key: "F5",
+    shortcuts: [{ key: "F5" }, { ctrl: true, key: "r" }],
     // The app tells the page to reload, and the page shows why if the file can't be read.
     run: () => {
       showingWhy(askApp("reload_document"));
     },
   },
-  find: { label: "Find", ctrlLetter: "f", run: openFind },
+  find: {
+    label: "Find",
+    shortcuts: [{ ctrl: true, key: "f" }],
+    run: openFind,
+  },
   findNext: {
     label: "Find next",
-    key: "F3",
+    shortcuts: [{ key: "F3" }],
     repeatsWhileHeld: true,
     run: findNext,
   },
   findPrevious: {
     label: "Find previous",
-    key: "F3",
-    shift: true,
+    shortcuts: [{ shift: true, key: "F3" }],
     repeatsWhileHeld: true,
     run: findPrevious,
   },
-  open: { label: "Open...", ctrlLetter: "o", run: open },
+  open: { label: "Open...", shortcuts: [{ ctrl: true, key: "o" }], run: open },
   close: {
     label: "Close",
-    ctrlLetter: "w",
+    shortcuts: [{ ctrl: true, key: "w" }],
     run: () => {
       showingWhy(askApp("close_window"));
     },
@@ -128,53 +139,45 @@ export function commandButton(id: CommandId, glyph: string): HTMLButtonElement {
   return button;
 }
 
+/** The command's first shortcut as Windows writes it, such as `Ctrl+O` or `Shift+F3`. */
 function shortcutOf(command: Command): string | undefined {
-  if (command.key) return command.shift ? `Shift+${command.key}` : command.key;
-  return command.ctrlLetter && `Ctrl+${command.ctrlLetter.toUpperCase()}`;
+  const shortcut = command.shortcuts?.[0];
+  if (!shortcut) return undefined;
+  const names: string[] = [];
+  if (shortcut.ctrl) names.push("Ctrl");
+  if (shortcut.alt) names.push("Alt");
+  if (shortcut.shift) names.push("Shift");
+  names.push(
+    isLetter(shortcut.key) ? shortcut.key.toUpperCase() : shortcut.key,
+  );
+  return names.join("+");
 }
 
 function pressesShortcutOf(event: KeyboardEvent, command: Command): boolean {
-  if (
-    command.ctrlLetter !== undefined &&
-    pressesCtrlLetter(event, command.ctrlLetter)
-  ) {
-    return true;
-  }
-  if (event.ctrlKey || event.altKey || event.metaKey) return false;
-  return (
-    command.key !== undefined &&
-    event.key === command.key &&
-    event.shiftKey === (command.shift ?? false)
+  return (command.shortcuts ?? []).some(
+    (shortcut) =>
+      event.ctrlKey === (shortcut.ctrl ?? false) &&
+      event.altKey === (shortcut.alt ?? false) &&
+      event.shiftKey === (shortcut.shift ?? false) &&
+      !event.metaKey &&
+      pressesKey(event, shortcut.key),
   );
 }
 
 /**
- * The webview's own reloads (Ctrl+F5, Shift+F5, Ctrl+Shift+R), which would load the page anew
- * and lose the reading position. On Windows the app already turns them off in WebView2
- * (`leave_reload_and_find_keys_to_the_page` in `app/src/platform/windows.rs`), so this check
- * matters only if the app couldn't add that handler (it carries on without it), and on other
- * systems until their ports.
+ * Whether the key pressed is `key`. A letter, on a layout that types Latin letters, goes by the
+ * letter the key types, so it follows AZERTY and the like; on other layouts, such as Cyrillic, by
+ * the key's place, as other Windows apps do. A named key goes by its name.
  */
-function isWebviewReload(event: KeyboardEvent): boolean {
-  if (event.altKey || event.metaKey) return false;
-  const f5 = event.key === "F5" && (event.ctrlKey || event.shiftKey);
-  const ctrlShiftR = event.ctrlKey && event.shiftKey && event.code === "KeyR";
-  return f5 || ctrlShiftR;
+function pressesKey(event: KeyboardEvent, key: string): boolean {
+  if (!isLetter(key)) return event.key === key;
+  return /^[a-z]$/i.test(event.key)
+    ? event.key.toLowerCase() === key
+    : event.code === `Key${key.toUpperCase()}`;
 }
 
-/**
- * Whether the key pressed is Ctrl and `letter`. On a layout that types Latin letters it goes by
- * the letter the key types, so it follows AZERTY and the like; on other layouts, such as
- * Cyrillic, by the key's place, as other Windows apps do.
- */
-function pressesCtrlLetter(event: KeyboardEvent, letter: string): boolean {
-  if (!event.ctrlKey || event.altKey || event.shiftKey || event.metaKey) {
-    return false;
-  }
-  const isLatinLetter = /^[a-z]$/i.test(event.key);
-  return isLatinLetter
-    ? event.key.toLowerCase() === letter
-    : event.code === `Key${letter.toUpperCase()}`;
+function isLetter(key: string): boolean {
+  return /^[a-z]$/.test(key);
 }
 
 function isCommandId(id: string): id is CommandId {
@@ -190,15 +193,12 @@ export function startCommands(signal?: AbortSignal): void {
   addEventListener(
     "keydown",
     (event) => {
-      if (isWebviewReload(event)) {
-        event.preventDefault();
-        return;
-      }
       const command: Command | undefined = Object.values(commands).find(
         (candidate: Command) => pressesShortcutOf(event, candidate),
       );
       if (!command) return;
-      // A repeat is still taken from the webview, so a held F5 never reloads the page itself.
+      // A repeat is taken from the webview too, for webviews whose browser keys are still on: the
+      // other systems' until their ports, and a window whose keys the app couldn't turn off.
       event.preventDefault();
       if (event.repeat && !command.repeatsWhileHeld) return;
       command.run();

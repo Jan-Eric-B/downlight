@@ -194,15 +194,16 @@ describe("Reload", () => {
     });
   });
 
-  // WebView2 would reload the page itself, leaving the window without its document.
+  // WebView2's own reloads on these keys are off with all its browser keys (ticket 29), and the
+  // page gives them no command.
   test.each([
     ["Ctrl+F5", { ctrlKey: true, key: "F5", code: "F5" }],
     ["Shift+F5", { shiftKey: true, key: "F5", code: "F5" }],
     ["Ctrl+Shift+R", { ctrlKey: true, shiftKey: true, key: "R", code: "KeyR" }],
-  ])("%s is swallowed", (_keys, keys) => {
+  ])("%s does nothing", (_keys, keys) => {
     const event = press(keys);
     expect(askedOfTheApp()).toEqual([]);
-    expect(event.defaultPrevented).toBe(true);
+    expect(event.defaultPrevented).toBe(false);
   });
 
   test("F5 with Alt held does nothing", () => {

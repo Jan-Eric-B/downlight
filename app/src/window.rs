@@ -239,7 +239,7 @@ fn open_window(app: &AppHandle, label: &str, title: &str) -> tauri::Result<()> {
         builder
     };
     let window = builder.build()?;
-    platform::leave_reload_and_find_keys_to_the_page(&window);
+    platform::leave_keys_to_the_page(&window);
     if look.title_bar {
         title_bar::add_maximize_button(&window);
     }
