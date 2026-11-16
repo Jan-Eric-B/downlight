@@ -8,6 +8,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { pageFlags, type ArgsOf, type MenuEntry, type NamedFile } from "./app";
 import { startCommands } from "./commands";
 import { startLinks } from "./links";
+import { showNotice } from "./notice";
 import { startTitleBar } from "./title-bar";
 import {
   askedOfTheApp,
@@ -22,6 +23,7 @@ import {
   menuEntrySamples,
   messageSample,
   nextInTurn,
+  openFolderFailureSample,
   openPageAt,
   openPageWith,
   pageUrlSample,
@@ -478,6 +480,29 @@ test("the app's failure to reveal a missing file opens its folder from the notic
   await vi.waitFor(() => {
     expect(foldersOpened).toEqual([failure.file.folder]);
   });
+});
+
+// `open_named_folder.json`
+
+test("the app's failure to open a folder gone since shows why, naming it in bold", async () => {
+  const offering = followLinkFailureSample("notFound");
+  const failure = openFolderFailureSample();
+  if (typeof failure === "string")
+    throw new Error("The sample notFound names no file.");
+  fakeTheApp({ open_named_folder: () => failingWith(failure) });
+  showNotice(offering);
+
+  folderLinkIn(document.querySelector(".notice"))?.click();
+  const { before, file, after } = failure;
+  await vi.waitFor(() => {
+    expect(
+      document.querySelector(".notice")?.lastElementChild?.textContent,
+    ).toBe(`${before}${file.name} in ${file.folder ?? ""}${after}`);
+  });
+  expect(
+    document.querySelector(".notice")?.lastElementChild?.querySelector("strong")
+      ?.textContent,
+  ).toBe(file.name);
 });
 
 /**

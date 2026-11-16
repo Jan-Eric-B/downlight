@@ -130,7 +130,7 @@ fn html_of(render: RenderTask) -> String {
 fn html_and_start_of(render: RenderTask) -> (String, SystemTime) {
     match block_on(render) {
         Ok(Ok((document, stages))) => (document.as_str().to_owned(), stages.started()),
-        Ok(Err(error)) => panic!("expected a rendered document, got {error}"),
+        Ok(Err(error)) => panic!("expected a rendered document, got {}", Notice::from(error)),
         Err(error) => panic!("the read and render stopped: {error}"),
     }
 }

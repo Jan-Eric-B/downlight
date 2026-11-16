@@ -2,7 +2,6 @@
 //! window's "Open file") and dropping a file. Either shows the document in that window, or brings
 //! the window that already shows it to the front.
 
-use std::fmt;
 use std::path::{Path, PathBuf};
 
 use downlight_core::{MARKDOWN_EXTENSIONS, is_markdown};
@@ -18,7 +17,7 @@ use crate::notice::{NamedFile, Notice};
 /// The dialog belongs to the window, so the window waits for it; it runs on a blocking thread so
 /// that the main thread and every other window keep answering.
 #[tauri::command]
-pub async fn open_document(window: WebviewWindow) -> Result<(), OpenError> {
+pub async fn open_document(window: WebviewWindow) -> Result<(), Notice> {
     let app = window.app_handle().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let Some(document) = rfd::FileDialog::new()
@@ -34,7 +33,8 @@ pub async fn open_document(window: WebviewWindow) -> Result<(), OpenError> {
             .map_err(|source| OpenError::Show { document, source })
     })
     .await
-    .map_err(|source| OpenError::DialogStopped { source })?
+    .map_err(|source| OpenError::DialogStopped { source })??;
+    Ok(())
 }
 
 /// Shows the first Markdown file dropped onto a window in that window. A drop without one, or a
@@ -67,7 +67,7 @@ fn show_dropped(documents: &Documents, window: &str, paths: &[PathBuf]) {
     };
     // The notice is the only way to tell the reader about the drop, so a notice that can't be
     // sent leaves nobody to tell.
-    let _ = documents.send(window, Message::Notice(failure.notice()));
+    let _ = documents.send(window, Message::Notice(failure.into()));
 }
 
 /// The first Markdown file of a drop; a folder named like one doesn't count.
@@ -92,10 +92,10 @@ pub enum OpenError {
     DialogStopped { source: tauri::Error },
 }
 
-impl OpenError {
-    fn notice(&self) -> Notice {
-        match self {
-            Self::NotMarkdown => {
+impl From<OpenError> for Notice {
+    fn from(error: OpenError) -> Self {
+        match error {
+            OpenError::NotMarkdown => {
                 let extensions = MARKDOWN_EXTENSIONS.map(|extension| format!(".{extension}"));
                 format!(
                     "Downlight opens Markdown files ({}).",
@@ -103,26 +103,15 @@ impl OpenError {
                 )
                 .into()
             }
-            Self::Show { document, source } => Notice::naming(
+            OpenError::Show { document, source } => Self::naming(
                 "Can't show ",
-                NamedFile::at(document),
+                NamedFile::at(&document),
                 format!(": {source}"),
             ),
-            Self::DialogStopped { source } => format!("The open dialog stopped: {source}").into(),
+            OpenError::DialogStopped { source } => {
+                format!("The open dialog stopped: {source}").into()
+            }
         }
-    }
-}
-
-impl fmt::Display for OpenError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.notice().fmt(f)
-    }
-}
-
-// Tauri sends a command's error to the page serialized; the page shows it as a notice.
-impl serde::Serialize for OpenError {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        self.notice().serialize(serializer)
     }
 }
 
@@ -134,7 +123,7 @@ mod tests {
     #[test]
     fn drop_without_markdown_names_the_extensions_downlight_opens() {
         assert_eq!(
-            OpenError::NotMarkdown.to_string(),
+            Notice::from(OpenError::NotMarkdown).to_string(),
             "Downlight opens Markdown files (.md, .markdown, .mdown, .mkd, .mkdn, .mdwn)."
         );
     }
@@ -165,7 +154,7 @@ mod tests {
         assert_eq!(documents.document_path(&window), None);
         assert_eq!(
             recorder.sent(),
-            [(window, Message::Notice(OpenError::NotMarkdown.notice()))]
+            [(window, Message::Notice(OpenError::NotMarkdown.into()))]
         );
     }
 

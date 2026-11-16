@@ -43,6 +43,38 @@ export type NamedFile = {
 export type Notice =
   string | { before: string; file: NamedFile; after: string };
 
+function isNamedFile(value: unknown): value is NamedFile {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "name" in value &&
+    typeof value.name === "string" &&
+    "folder" in value &&
+    (value.folder === null || typeof value.folder === "string") &&
+    "folderOpens" in value &&
+    typeof value.folderOpens === "boolean"
+  );
+}
+
+/**
+ * Whether a command's rejection is a notice in the app's shape, rather than something else Tauri
+ * rejected with when the app couldn't be asked. It comes untyped, so the shape is checked, not
+ * assumed.
+ */
+export function isNotice(value: unknown): value is Notice {
+  if (typeof value === "string") return true;
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "before" in value &&
+    typeof value.before === "string" &&
+    "file" in value &&
+    isNamedFile(value.file) &&
+    "after" in value &&
+    typeof value.after === "string"
+  );
+}
+
 /**
  * The app's answer when the page asks for its document (`DocumentToShow` in
  * `app/src/documents.rs`), or null while the window shows no document: the showing the window is

@@ -27,10 +27,10 @@ pub async fn follow_link(
     showing: Showing,
     target: String,
     new_window: bool,
-) -> Result<Followed, FollowError> {
+) -> Result<Followed, Notice> {
     let app = window.app_handle().clone();
     let label = window.label().to_owned();
-    tauri::async_runtime::spawn_blocking(move || {
+    let followed = tauri::async_runtime::spawn_blocking(move || {
         follow(
             &app.state::<Documents>(),
             &label,
@@ -40,7 +40,8 @@ pub async fn follow_link(
         )
     })
     .await
-    .map_err(|source| FollowError::Stopped { source })?
+    .map_err(|source| FollowError::Stopped { source })??;
+    Ok(followed)
 }
 
 /// What the page does after a link was followed.
@@ -69,9 +70,9 @@ pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
         "scrollToHeading": serde_json::to_value(Followed::ScrollTo { heading })?,
         "scrollToTop": serde_json::to_value(Followed::ScrollTo { heading: None })?,
         "nothing": serde_json::to_value(Followed::Nothing)?,
-        "notFound": serde_json::to_value(FollowError::NotFound(NamedFile::sample(true)))?,
+        "notFound": serde_json::to_value(Notice::from(FollowError::NotFound(NamedFile::sample(true))))?,
         "notFoundInGoneFolder":
-            serde_json::to_value(FollowError::NotFound(NamedFile::sample(false)))?,
+            serde_json::to_value(Notice::from(FollowError::NotFound(NamedFile::sample(false))))?,
     }))
 }
 
@@ -184,45 +185,26 @@ impl From<LinkError> for FollowError {
     }
 }
 
-impl FollowError {
-    fn notice(&self) -> Notice {
+impl From<FollowError> for Notice {
+    fn from(error: FollowError) -> Self {
         let why = |source: &dyn fmt::Display| format!(": {source}");
-        match self {
-            Self::NotFound(file) => Notice::naming("Can't find ", file.clone(), "."),
-            Self::Unreachable { path, source } => {
-                Notice::naming("Can't reach ", NamedFile::at(path), why(source))
+        match error {
+            FollowError::NotFound(file) => Self::naming("Can't find ", file, "."),
+            FollowError::Unreachable { path, source } => {
+                Self::naming("Can't reach ", NamedFile::at(&path), why(&source))
             }
-            Self::Reveal { path, source } => {
-                Notice::naming("Can't show ", NamedFile::at(path), reveal_failed(source))
+            FollowError::Reveal { path, source } => Self::reveal_failed(&path, &source),
+            FollowError::OpenFolder { path, source } => {
+                Self::naming("Can't open the folder ", NamedFile::at(&path), why(&source))
             }
-            Self::OpenFolder { path, source } => {
-                Notice::naming("Can't open the folder ", NamedFile::at(path), why(source))
+            FollowError::OpenUrl { url, source } => format!("Can't open {url}: {source}").into(),
+            FollowError::Show { path, source } => {
+                Self::naming("Can't show ", NamedFile::at(&path), why(&source))
             }
-            Self::OpenUrl { url, source } => format!("Can't open {url}: {source}").into(),
-            Self::Show { path, source } => {
-                Notice::naming("Can't show ", NamedFile::at(path), why(source))
+            FollowError::Stopped { source } => {
+                format!("Following the link stopped: {source}").into()
             }
-            Self::Stopped { source } => format!("Following the link stopped: {source}").into(),
         }
-    }
-}
-
-/// What follows the file in the notice of a reveal that failed, the same for a link's reveal and
-/// the title bar's.
-pub fn reveal_failed(source: &io::Error) -> String {
-    format!(" in Explorer: {source}")
-}
-
-impl fmt::Display for FollowError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.notice().fmt(f)
-    }
-}
-
-// Tauri sends a command's error to the page serialized; the page shows it as a notice.
-impl serde::Serialize for FollowError {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        self.notice().serialize(serializer)
     }
 }
 
@@ -254,8 +236,9 @@ mod tests {
         );
     }
 
-    /// The link target `missing.md` in a folder of its own, which is there unless `folder_gone`.
-    fn missing_link_target(folder_gone: bool) -> (PathBuf, FollowError) {
+    /// The notice for the link target `missing.md` in a folder of its own, which is there unless
+    /// `folder_gone`.
+    fn missing_link_target(folder_gone: bool) -> (PathBuf, Notice) {
         let folder = std::env::temp_dir().join(format!(
             "downlight-links-{}-{folder_gone}",
             std::process::id()
@@ -264,9 +247,9 @@ mod tests {
         if folder_gone {
             std::fs::remove_dir_all(&folder).unwrap();
         }
-        let error = FollowError::from(LinkError::NotFound {
+        let error = Notice::from(FollowError::from(LinkError::NotFound {
             path: folder.join("missing.md"),
-        });
+        }));
         let _ = std::fs::remove_dir_all(&folder);
         (folder, error)
     }
@@ -307,10 +290,10 @@ mod tests {
 
     #[test]
     fn unreachable_file_message_names_the_file_and_why() {
-        let error = FollowError::from(LinkError::Unreachable {
+        let error = Notice::from(FollowError::from(LinkError::Unreachable {
             path: PathBuf::from(r"\\server\share\a.md"),
             source: io::Error::other("The network path was not found."),
-        });
+        }));
         assert_eq!(
             error.to_string(),
             r"Can't reach a.md in \\server\share\: The network path was not found."
@@ -417,7 +400,7 @@ mod tests {
         recorder.fail_window("document-1");
         let followed = follow(&documents, &window, showing, "readme.md", true);
         assert_eq!(
-            followed.err().map(|error| error.to_string()),
+            followed.err().map(|error| Notice::from(error).to_string()),
             Some(format!(
                 "Can't show readme.md in {}: its window didn't open: the window can't be changed",
                 fixtures().display()

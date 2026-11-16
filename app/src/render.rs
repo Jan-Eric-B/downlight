@@ -1,7 +1,6 @@
 //! Reading a document's file and rendering it on a blocking thread. The documents module starts
 //! these and hands what they give to the window's page; this module knows nothing of windows.
 
-use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -72,32 +71,19 @@ pub enum DocumentError {
     },
 }
 
-impl DocumentError {
-    fn notice(&self) -> Notice {
-        match self {
-            Self::Read { file, source } => {
-                Notice::naming("Can't read ", file.clone(), format!(": {source}"))
+impl From<DocumentError> for Notice {
+    fn from(error: DocumentError) -> Self {
+        match error {
+            DocumentError::Read { file, source } => {
+                Self::naming("Can't read ", file, format!(": {source}"))
             }
-            Self::Folder { path } => {
-                Notice::naming("", NamedFile::at(path), " is a folder, not a document")
+            DocumentError::Folder { path } => {
+                Self::naming("", NamedFile::at(&path), " is a folder, not a document")
             }
-            Self::ReadAndRenderStopped { source } => {
+            DocumentError::ReadAndRenderStopped { source } => {
                 format!("Reading and rendering the document stopped: {source}").into()
             }
         }
-    }
-}
-
-impl fmt::Display for DocumentError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.notice().fmt(f)
-    }
-}
-
-// The page gets the error inside its answer, serialized, and shows it as a notice.
-impl serde::Serialize for DocumentError {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        self.notice().serialize(serializer)
     }
 }
 
@@ -112,7 +98,7 @@ mod tests {
             panic!("a folder rendered as a document");
         };
         assert_eq!(
-            error.to_string(),
+            Notice::from(error).to_string(),
             format!("{} is a folder, not a document", NamedFile::at(folder))
         );
     }
@@ -132,7 +118,7 @@ mod tests {
         let Err(error) = read else {
             panic!("a missing file rendered as a document");
         };
-        (folder, serde_json::to_value(&error).unwrap())
+        (folder, serde_json::to_value(Notice::from(error)).unwrap())
     }
 
     #[test]

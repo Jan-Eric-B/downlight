@@ -1,4 +1,4 @@
-import { askApp, type NamedFile, type Notice } from "./app";
+import { askApp, isNotice, type NamedFile, type Notice } from "./app";
 
 /** How long a notice stays after its last message, long enough to read one sentence. */
 const SHOWN_MS = 4000;
@@ -160,10 +160,7 @@ function folderOf(folder: string, opens: boolean): HTMLElement {
  * app couldn't be asked.
  */
 function whyItFailed(error: unknown): Notice {
-  if (typeof error === "string") return error;
-  if (typeof error === "object" && error !== null && "file" in error)
-    return error as Notice;
-  return String(error);
+  return isNotice(error) ? error : String(error);
 }
 
 /** Shows the reader why, in a notice, if the app couldn't do what it was `asked`. */

@@ -2,7 +2,7 @@ import { clearMocks } from "@tauri-apps/api/mocks";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Notice } from "./app";
 import { showNotice } from "./notice";
-import { fakeTheApp } from "./test-support";
+import { failingWith, fakeTheApp } from "./test-support";
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
@@ -137,17 +137,39 @@ test("a click on the folder, or Enter on it, asks the app to open the folder the
   });
 });
 
-test("a folder the app can't open shows why", async () => {
+test("a folder the app can't open shows why, naming the folder in bold", async () => {
+  fakeTheApp({
+    open_named_folder: () =>
+      failingWith({
+        before: "Can't find ",
+        file: { name: "docs", folder: "C:\\Users\\me", folderOpens: true },
+        after: ".",
+      }),
+  });
+  showNotice(missingFile(true));
+
+  folderLink()?.click();
+  await vi.waitFor(() => {
+    expect(shownLines().at(-1)).toBe("Can't find docs in C:\\Users\\me.");
+  });
+  expect(notice()?.lastElementChild?.querySelector("strong")?.textContent).toBe(
+    "docs",
+  );
+});
+
+test("a failure in no notice's shape, as Tauri's own, shows as text", async () => {
   fakeTheApp({
     open_named_folder: () => {
-      throw new Error("Can't find docs in C:\\Users\\me.");
+      throw new Error("Command open_named_folder not allowed.");
     },
   });
   showNotice(missingFile(true));
 
   folderLink()?.click();
   await vi.waitFor(() => {
-    expect(shownLines().at(-1)).toContain("Can't find docs in C:\\Users\\me.");
+    expect(shownLines().at(-1)).toBe(
+      "Error: Command open_named_folder not allowed.",
+    );
   });
 });
 

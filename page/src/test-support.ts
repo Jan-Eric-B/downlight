@@ -6,6 +6,7 @@ import { vi } from "vitest";
 import followLinkSamples from "../../app/tests/fixtures/follow_link.json?raw";
 import menuEntrySamplesJson from "../../app/tests/fixtures/menu_entries.json?raw";
 import messageSamples from "../../app/tests/fixtures/messages.json?raw";
+import openNamedFolderSamples from "../../app/tests/fixtures/open_named_folder.json?raw";
 import pageUrlSamples from "../../app/tests/fixtures/page_url.json?raw";
 import renderDocumentSamples from "../../app/tests/fixtures/render_document.json?raw";
 import timingReportSamples from "../../app/tests/fixtures/timing_reports.json?raw";
@@ -164,6 +165,11 @@ export function followLinkFailureSample(
 /** The sample of `reveal_document`'s failure for a missing file. */
 export function revealFailureSample(): Notice {
   return sampleIn(titleBarSamples, "revealNotFound") as Notice;
+}
+
+/** The sample of `open_named_folder`'s failure for a folder gone since its notice offered it. */
+export function openFolderFailureSample(): Notice {
+  return sampleIn(openNamedFolderSamples, "notFound") as Notice;
 }
 
 /** A sample of the app's messages, by name. */

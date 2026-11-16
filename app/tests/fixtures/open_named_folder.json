@@ -1,0 +1,11 @@
+{
+  "notFound": {
+    "after": ".",
+    "before": "Can't find ",
+    "file": {
+      "folder": "C:\\docs",
+      "folderOpens": true,
+      "name": "a.md"
+    }
+  }
+}

@@ -20,7 +20,7 @@ use std::error::Error;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::{documents, links, menu, message, timing, title_bar, window};
+use crate::{documents, links, menu, message, notice, timing, title_bar, window};
 
 type TestResult<T = ()> = Result<T, Box<dyn Error>>;
 
@@ -30,11 +30,13 @@ const HOW_TO_UPDATE: &str =
     "If the change is intended, run `npm run fixtures` and review the diff.";
 
 /// Each sample file, with what writes it: the answers of the commands that answer with more than
-/// nothing, the messages, the arguments of `show_document_menu`, the timing reports and
-/// `place_maximize_button`, and the flags a window tells its page in the page's URL.
-const SAMPLE_FILES: [(&str, Samples); 7] = [
+/// nothing, the failure of `open_named_folder` for a folder gone since, the messages, the
+/// arguments of `show_document_menu`, the timing reports and `place_maximize_button`, and the
+/// flags a window tells its page in the page's URL.
+const SAMPLE_FILES: [(&str, Samples); 8] = [
     ("render_document.json", documents::contract_samples),
     ("follow_link.json", links::contract_samples),
+    ("open_named_folder.json", notice::contract_samples),
     ("messages.json", message::contract_samples),
     ("menu_entries.json", menu::contract_samples),
     ("timing_reports.json", timing::contract_samples),

@@ -3,14 +3,13 @@
 //! Windows' snap layouts flyout, and the window menu and the reveal behind the logo and the file
 //! name (ticket 04).
 
+use std::io;
 use std::path::{Path, PathBuf};
-use std::{fmt, io};
 
 use serde::Deserialize;
 use tauri::{Manager as _, State, WebviewWindow, WindowEvent};
 
 use crate::documents::Documents;
-use crate::links::reveal_failed;
 use crate::message::Message;
 use crate::notice::{NamedFile, Notice};
 use crate::platform;
@@ -57,7 +56,8 @@ pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
             width: 69,
             height: 48,
         })?,
-        "revealNotFound": serde_json::to_value(RevealError::NotFound(NamedFile::sample(true)))?,
+        "revealNotFound":
+            serde_json::to_value(Notice::from(RevealError::NotFound(NamedFile::sample(true))))?,
     }))
 }
 
@@ -115,13 +115,14 @@ pub fn show_window_menu(window: WebviewWindow) -> tauri::Result<()> {
 pub async fn reveal_document(
     window: WebviewWindow,
     documents: State<'_, Documents>,
-) -> Result<(), RevealError> {
+) -> Result<(), Notice> {
     let Some(document) = documents.document_path(window.label()) else {
         return Ok(());
     };
     tauri::async_runtime::spawn_blocking(move || reveal(&document))
         .await
-        .map_err(|source| RevealError::Stopped { source })?
+        .map_err(|source| RevealError::Stopped { source })??;
+    Ok(())
 }
 
 /// Shows the file at `path` selected in its folder. The file is looked at first: Windows' reveal
@@ -165,34 +166,17 @@ pub enum RevealError {
     },
 }
 
-impl RevealError {
-    fn notice(&self) -> Notice {
-        match self {
-            Self::NotFound(file) => Notice::naming(
-                "Can't find ",
-                file.clone(),
-                ", so it can't be shown in its folder.",
-            ),
-            Self::Reveal { path, source } => {
-                Notice::naming("Can't show ", NamedFile::at(path), reveal_failed(source))
+impl From<RevealError> for Notice {
+    fn from(error: RevealError) -> Self {
+        match error {
+            RevealError::NotFound(file) => {
+                Self::naming("Can't find ", file, ", so it can't be shown in its folder.")
             }
-            Self::Stopped { source } => {
+            RevealError::Reveal { path, source } => Self::reveal_failed(&path, &source),
+            RevealError::Stopped { source } => {
                 format!("Showing the file in its folder stopped: {source}").into()
             }
         }
-    }
-}
-
-impl fmt::Display for RevealError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.notice().fmt(f)
-    }
-}
-
-// Tauri sends a command's error to the page serialized; the page shows it as a notice.
-impl serde::Serialize for RevealError {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        self.notice().serialize(serializer)
     }
 }
 
@@ -238,7 +222,7 @@ mod tests {
             "{error:?}"
         );
         assert_eq!(
-            serde_json::to_value(&error).unwrap(),
+            serde_json::to_value(error.map(Notice::from)).unwrap(),
             serde_json::json!({
                 "before": "Can't find ",
                 "file": {
@@ -255,7 +239,7 @@ mod tests {
     fn missing_document_whose_folder_is_gone_too_names_a_folder_that_does_not_open() {
         let (_, error) = reveal_missing(true);
         assert_eq!(
-            serde_json::to_value(&error).unwrap()["file"]["folderOpens"],
+            serde_json::to_value(error.map(Notice::from)).unwrap()["file"]["folderOpens"],
             false
         );
     }
@@ -285,7 +269,7 @@ mod tests {
             source: io::Error::other("Explorer didn't start."),
         };
         assert_eq!(
-            error.to_string(),
+            Notice::from(error).to_string(),
             r"Can't show a.md in C:\docs in Explorer: Explorer didn't start."
         );
     }

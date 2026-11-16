@@ -761,8 +761,8 @@ pub async fn render_document(
             timing.report(window.label(), handover.place.reported_as(), &stages);
             Content::Document(document)
         }
-        Ok(Err(error)) => Content::Error(error),
-        Err(source) => Content::Error(DocumentError::ReadAndRenderStopped { source }),
+        Ok(Err(error)) => Content::Error(error.into()),
+        Err(source) => Content::Error(DocumentError::ReadAndRenderStopped { source }.into()),
     };
     Ok(Some(DocumentToShow {
         showing: handover.showing,
@@ -794,7 +794,7 @@ pub struct DocumentToShow {
 #[serde(rename_all = "camelCase")]
 enum Content {
     Document(RenderedDocument),
-    Error(DocumentError),
+    Error(Notice),
 }
 
 /// A sample of each answer [`render_document`] gives, by name, which the page's tests read
@@ -843,10 +843,13 @@ pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
     // A missing file whose folder is there, so the notice opens the folder (window design ticket
     // 11).
     let unread = || {
-        Content::Error(DocumentError::Read {
-            file: NamedFile::sample(true),
-            source: io::ErrorKind::NotFound.into(),
-        })
+        Content::Error(
+            DocumentError::Read {
+                file: NamedFile::sample(true),
+                source: io::ErrorKind::NotFound.into(),
+            }
+            .into(),
+        )
     };
     let at_top = || Place::Show { heading: None };
     Ok(serde_json::json!({
