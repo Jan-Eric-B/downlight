@@ -18,3 +18,5 @@ Spec: [Window design](../spec.md)
 ## Comments
 
 **2026-11-16, from v1 ticket 15.** Edit is the `edit` entry of the command table (`page/src/commands.ts`, Ctrl+E), which runs `edit` in `page/src/edit.ts`, so the button is `commandButton("edit", glyph)`. The entry has no `available` yet: in a window without a document the app rejects `edit_document` with "There is no document to edit.", which shows as a notice. This ticket's "Edit is disabled without a document" adds `available` to the entry, which then also greys Edit out in the right-click menu.
+
+**2026-11-16, from the design review of v1 tickets 12 to 15.** Give the command table state on its buttons here, before 06 and 07 need it: an optional `pressed?()` on `Command` beside `available`, and one `refreshCommands()` that sets `disabled` and `aria-pressed` on every command button, run on `whenDocumentShown`, on a settings change (ticket 12) and on `window-state`. Edit without a document is then `available`, kept current, rather than read only when the right-click menu opens; Full width and Keep on top become one table entry and a glyph each.

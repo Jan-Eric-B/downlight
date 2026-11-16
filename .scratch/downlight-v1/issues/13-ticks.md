@@ -49,3 +49,5 @@ Built 2026-11-16. `npm run check` passes. Ticks are the page's alone: a new modu
 - Save them where the line is saved: `replaceContent` in `page/src/view.ts` calls `history.leave(left, before.line)` with the `ReaderState` read just before the swap. Add the ticks to `ReaderState`, read them there, and have `leave` keep them on the showing's `Kept`.
 - Restore them on a return: the answer's place is `return` (`Place::Return`, reason `return` for the `whenDocumentShown` listeners), and `atReturn` lands through `history.returnTo(showing)`. Give the ticks back there, or in `replaceContent` once the new content is in, before the landing.
 - `history.showAnew` starts a showing afresh on a show (Ctrl+O, a drop, a link, and a document given again, which is a new showing): no ticks, as the spec says for another document. A reload keeps its showing and never calls `leave`, so the reload rule (same number of task items) stays the reload's own.
+
+**2026-11-16, decided by the repo owner.** Both choices in Results stay: a tick is kept only where the reader's mark differs from the file, and Back and Forward drop the ticks when the number of task items changed, as a reload does.

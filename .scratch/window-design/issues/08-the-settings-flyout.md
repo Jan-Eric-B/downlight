@@ -4,7 +4,7 @@
 
 Spec: [Window design](../spec.md)
 
-**Blocked by:** 05 (Open and Edit buttons, and the separators), v1 [15](../../downlight-v1/issues/15-edit-and-choose-editor.md) (Edit and Choose editor)
+**Blocked by:** 05 (Open and Edit buttons, and the separators), v1 [15](../../downlight-v1/issues/15-edit-and-choose-editor.md) (Edit and Choose editor), 12 (Settings reach every page)
 
 **Status:** ready-for-agent
 
@@ -29,3 +29,5 @@ Spec: [Window design](../spec.md)
 - "A broken value loads the default" is not what the file does now: any value of the wrong type fails the whole file, which is kept as `settings.json.bad`, and every value takes its default. Giving each field its own fallback (for example a `deserialize_with` that turns an error into the default) is this ticket's; a file that isn't JSON at all should still go to `.bad`.
 - Edit with: "Choose..." is the `chooseEditor` command (`page/src/edit.ts`, the app's `choose_editor`), which already refuses Downlight and anything but an `.exe`. "Default" needs a new command that clears the editor (`update(|settings| settings.editor = None)`). The text file program's file comes from `platform::text_file_program()`, which is None when the system names none, as for some packaged programs (Windows 11's Notepad may be one); a friendly name for "Default (name)" needs `AssocQueryStringW` with `ASSOCSTR_FRIENDLYAPPNAME` in the Windows module.
 - When Choose editor... leaves the right-click menu, remove `"chooseEditor"` from `menu` in `commands.ts` and keep the command, which the flyout runs.
+
+**2026-11-16, from the design review of v1 tickets 12 to 15.** Ticket 12 (Settings reach every page) is now a blocker: it replaces the per-field accessors suggested above with one snapshot (`SettingsStore::get`, `update` returning the new snapshot) and sends it to every window, and `backdrop.ts` already listens for changes there.
