@@ -1,4 +1,5 @@
 import { askApp, listenToApp, type MenuEntry } from "./app";
+import { chooseEditor, edit } from "./edit";
 import { findNext, findPrevious, openFind } from "./find";
 import { showingWhy } from "./notice";
 import { open } from "./open";
@@ -102,6 +103,8 @@ const commands = {
     run: findPrevious,
   },
   open: { label: "Open...", shortcuts: [{ ctrl: true, key: "o" }], run: open },
+  edit: { label: "Edit", shortcuts: [{ ctrl: true, key: "e" }], run: edit },
+  chooseEditor: { label: "Choose editor...", run: chooseEditor },
   close: {
     label: "Close",
     shortcuts: [{ ctrl: true, key: "w" }],
@@ -136,6 +139,8 @@ const menu: MenuLine[] = [
   "reload",
   "find",
   "separator",
+  "edit",
+  "chooseEditor",
   "open",
   "separator",
   "copy",

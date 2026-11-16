@@ -6,14 +6,14 @@ Spec: [Downlight v1](../spec.md)
 
 **Blocked by:** 09 (Opening from inside a window)
 
-**Status:** ready-for-agent
+**Status:** ready-for-human
 
-- [ ] A settings file in the app's config folder holds the chosen editor. It is created on the first save, and later tickets add their values to it.
-- [ ] Ctrl+E opens the document in the chosen editor if one is set and still exists; otherwise in the program the system uses for `.txt` files, started through the shell's handler API so that the packaged Notepad on Windows 11 works; otherwise in Notepad.
-- [ ] Edit never opens Downlight.
-- [ ] "Choose editor..." opens a file dialog for a program, and the choice is remembered across restarts.
-- [ ] Edit and Choose editor... are in the right-click menu.
-- [ ] The editor launch lives in the Windows module of the per-OS code.
+- [x] A settings file in the app's config folder holds the chosen editor. It is created on the first save, and later tickets add their values to it.
+- [x] Ctrl+E opens the document in the chosen editor if one is set and still exists; otherwise in the program the system uses for `.txt` files, started through the shell's handler API so that the packaged Notepad on Windows 11 works; otherwise in Notepad.
+- [x] Edit never opens Downlight.
+- [x] "Choose editor..." opens a file dialog for a program, and the choice is remembered across restarts.
+- [x] Edit and Choose editor... are in the right-click menu.
+- [x] The editor launch lives in the Windows module of the per-OS code.
 - [ ] Checked by hand: the packaged Notepad as the `.txt` default, Notepad++ or VS Code as the `.txt` default, a chosen editor, and a chosen editor that was uninstalled afterwards (Edit falls back).
 
 ## Plan
@@ -81,6 +81,23 @@ Spec: [Downlight v1](../spec.md)
 
 - A settings file that doesn't parse is kept as `settings.json.bad` (replacing an older one), so a hand-edited file with a typo isn't lost, and the message says where it went.
 - The tickets are built one at a time, so each shared piece in "Fits with other tickets" is added by the first ticket that needs it.
+
+## Results
+
+Built 2026-11-16. `npm run check` passes; the contract samples didn't change (both commands answer null and reject with a `Notice`, and the menu sample already has a command without a shortcut). Not yet checked by hand in the real app: the plan's Verification list is the hand check, so the status is `ready-for-human`.
+
+**Beyond the plan:**
+
+- Dependencies: `serde_json` moved from the app's dev-dependencies to its dependencies (`cargo add`, then `cargo remove --dev`), for the settings file. MIT OR Apache-2.0 and already in the tree through Tauri, so `Cargo.lock` didn't change. The windows-sys feature `Win32_System_Registry` was added (`SHELLEXECUTEINFOW` is gated on it); `Win32_UI_Shell` and `Win32_System_Com` were there already. No Tauri plugin and no capability change: rfd gives the dialog, and both commands are the app's own, so no `cargo clean -p tauri --release` is needed.
+- `SettingsStore::load` takes the config folder as an `Option`: Tauri's `app_config_dir()` failing gives defaults with no message at the start, and the first change then fails with `SettingsError::NoConfigFolder`, kept for the session (test `without_a_config_folder_a_change_holds_and_says_it_was_not_saved`). The plan's `Settings` load error goes to the message box on a spawned thread, as planned.
+- A settings file whose `.bad` copy can't be made says so, and that the next change replaces it (`SettingsError::Parse`'s `kept` is the `.bad` path or the rename's error).
+- The save writes `settings.json.tmp` and renames it over the file, under the store's lock, so two changes reach the file in order; a failed rename removes the `.tmp`.
+- `edit` (the blocking part of `edit_document`) takes the OS's launch as a parameter, so the whole Edit is tested without a program starting: `edit_opens_the_window_s_document_in_the_chosen_editor`, `editor_that_does_not_start_falls_back_to_the_next`, `edit_that_starts_no_editor_names_the_document_and_why` and `edit_without_a_document_says_so`. Also `missing_program_is_not_downlight`, `choosing_another_program_is_allowed_in_any_case`, `choice_that_is_refused_leaves_the_editor_as_it_was`, `choice_that_cannot_be_saved_is_the_editor_until_downlight_closes`, and `notepad_is_windows_own` in the Windows module.
+- `ShellExecuteExW` also gets `SEE_MASK_FLAG_LOG_USAGE`, which Microsoft's docs ask for on a launch the user started. Notepad starts by its full path under `%SystemRoot%\System32`, so no `notepad.exe` beside Downlight or on the path starts in its place.
+- Page: `page/src/edit.ts` holds `edit` and `chooseEditor` (with the in-flight guard, as `open.ts` has for Open); `commands.ts` has the `edit` (Ctrl+E) and `chooseEditor` (no shortcut) entries. The menu is Back, Forward, Reload, Find, separator, Edit, Choose editor..., Open, separator, Copy (the spec's order). Ctrl+E held down edits once. Page tests: "Ctrl+E opens the document in the editor" (QWERTY, Cyrillic, held down, a failed edit shows a notice) and "Choose editor..." (from the menu, no second dialog, a refused choice shows why).
+- Changed test: "the right-click menu replaces the webview's menu with ..." now lists Edit and Choose editor..., and its `command` helper takes an optional shortcut, since the ticket adds both entries.
+- `GLOSSARY.md` has "Text file program", the code's name for the `.txt` program. "Settings" was there already (window design).
+- A file from a newer version loads, but the next save from this version drops the values it doesn't know. Fine while settings only grow; a downgrade then loses newer choices.
 
 ## Comments
 

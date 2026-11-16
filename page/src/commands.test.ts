@@ -158,6 +158,79 @@ describe("Ctrl+O opens a document", () => {
   });
 });
 
+describe("Ctrl+E opens the document in the editor", () => {
+  test("on a QWERTY layout", () => {
+    const event = press({ ctrlKey: true, key: "e", code: "KeyE" });
+    expect(askedOfTheApp()).toEqual(["edit_document"]);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  test("on a Cyrillic layout, by the key in E's place", () => {
+    press({ ctrlKey: true, key: "у", code: "KeyE" });
+    expect(askedOfTheApp()).toEqual(["edit_document"]);
+  });
+
+  // Held down, each repeat would start the editor again.
+  test("once while held down", () => {
+    press({ ctrlKey: true, key: "e", code: "KeyE" });
+    press({ ctrlKey: true, key: "e", code: "KeyE", repeat: true });
+    expect(askedOfTheApp()).toEqual(["edit_document"]);
+  });
+
+  test("and a failed edit shows a notice", async () => {
+    app.edit_document = () => {
+      throw new Error("There is no document to edit.");
+    };
+    press({ ctrlKey: true, key: "e", code: "KeyE" });
+    await vi.waitFor(() => {
+      expect(document.querySelector(".notice")?.textContent).toContain(
+        "There is no document to edit.",
+      );
+    });
+  });
+});
+
+describe("Choose editor...", () => {
+  test("runs from the menu", async () => {
+    await settle();
+    await tell("menu-command", "chooseEditor");
+    expect(askedOfTheApp()).toEqual(["choose_editor"]);
+  });
+
+  test("a second Choose editor before the dialog closes opens no second dialog", async () => {
+    let closeDialog = () => {};
+    app.choose_editor = () =>
+      new Promise((resolve) => {
+        closeDialog = () => {
+          resolve(null);
+        };
+      });
+    await settle();
+    await tell("menu-command", "chooseEditor");
+    await tell("menu-command", "chooseEditor");
+    expect(askedOfTheApp()).toEqual(["choose_editor"]);
+    closeDialog();
+    await settle();
+    await tell("menu-command", "chooseEditor");
+    expect(askedOfTheApp()).toEqual(["choose_editor", "choose_editor"]);
+    closeDialog();
+    await settle();
+  });
+
+  test("shows why a choice wasn't kept", async () => {
+    app.choose_editor = () => {
+      throw new Error("Downlight can't be the editor");
+    };
+    await settle();
+    await tell("menu-command", "chooseEditor");
+    await vi.waitFor(() => {
+      expect(document.querySelector(".notice")?.textContent).toContain(
+        "Downlight can't be the editor",
+      );
+    });
+  });
+});
+
 // A reload asks the document view for the window's document directly, with the showing the view
 // shows, so the app answers it with a reload (ticket 26).
 describe("Reload", () => {
@@ -333,7 +406,7 @@ test("a key that names no shortcut never minimizes or maximizes the window", () 
 });
 
 describe("the right-click menu", () => {
-  test("replaces the webview's menu with Back, Forward, Reload, Find, Open and Copy", () => {
+  test("replaces the webview's menu with Back, Forward, Reload, Find, Edit, Choose editor..., Open and Copy", () => {
     let entries: MenuEntry[] = [];
     app.show_document_menu = (args) => {
       entries = args.entries;
@@ -346,7 +419,7 @@ describe("the right-click menu", () => {
     document.body.dispatchEvent(event);
     expect(event.defaultPrevented).toBe(true);
     // With nowhere to go back or forward to, Back and Forward are unavailable.
-    const command = (id: string, label: string, shortcut: string) => ({
+    const command = (id: string, label: string, shortcut?: string) => ({
       kind: "command",
       id,
       label,
@@ -359,6 +432,9 @@ describe("the right-click menu", () => {
       command("reload", "Reload", "F5"),
       command("find", "Find", "Ctrl+F"),
       { kind: "separator" },
+      command("edit", "Edit", "Ctrl+E"),
+      // Without a shortcut, the menu shows none beside it.
+      command("chooseEditor", "Choose editor..."),
       command("open", "Open...", "Ctrl+O"),
       { kind: "separator" },
       { kind: "copy" },

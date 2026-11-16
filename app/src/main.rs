@@ -8,6 +8,7 @@ mod command_line;
 #[cfg(test)]
 mod contract;
 mod documents;
+mod edit;
 mod image;
 mod links;
 mod menu;
@@ -16,6 +17,7 @@ mod notice;
 mod open;
 mod platform;
 mod render;
+mod settings;
 mod timing;
 mod title_bar;
 mod watch;
@@ -27,6 +29,7 @@ use std::process::ExitCode;
 use tauri::Manager as _;
 
 use documents::Documents;
+use settings::SettingsStore;
 
 const APP_NAME: &str = "Downlight";
 
@@ -69,6 +72,8 @@ fn main() -> ExitCode {
             title_bar::show_window_menu,
             title_bar::reveal_document,
             notice::open_named_folder,
+            edit::edit_document,
+            edit::choose_editor,
         ])
         .on_menu_event(menu::forward_choice)
         .on_window_event(|window, event| {
@@ -77,6 +82,15 @@ fn main() -> ExitCode {
             title_bar::tell_window_state(window, event);
         })
         .setup(|app| {
+            // Before any window opens, as later settings shape new windows. Without a config
+            // folder the settings hold until Downlight closes, and the first change says so.
+            let (settings, problem) =
+                SettingsStore::load(app.path().app_config_dir().ok().as_deref());
+            app.manage(settings);
+            if let Some(problem) = problem {
+                // Off the main thread, so the windows open while the box is up.
+                std::thread::spawn(move || platform::show_error(&problem.to_string()));
+            }
             // Without the current folder a relative path stays relative, and reading it reports
             // the problem to the reader.
             let folder = std::env::current_dir().unwrap_or_default();

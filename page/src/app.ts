@@ -243,6 +243,16 @@ export type Commands = {
    * in the file manager. The app opens only a folder a notice named, and only while it is there.
    */
   open_named_folder: { args: { folder: string }; answer: null };
+  /**
+   * Edit: the window's document opened in the reader's editor (ticket 15). Rejects with why, such
+   * as a window without a document or no editor that started.
+   */
+  edit_document: { args: undefined; answer: null };
+  /**
+   * Choose editor...: a file dialog for a program, kept in the settings as the reader's editor.
+   * Choosing nothing changes nothing; a choice that can't be the editor rejects with why.
+   */
+  choose_editor: { args: undefined; answer: null };
 };
 
 export type Command = keyof Commands;

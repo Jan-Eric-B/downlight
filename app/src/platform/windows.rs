@@ -21,13 +21,17 @@ use windows_sys::Win32::System::Com::{
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, GetProcessTimes};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_F12, VK_SHIFT};
 use windows_sys::Win32::UI::Shell::{
-    ILCreateFromPathW, ILFree, SHOpenFolderAndSelectItems, ShellExecuteW,
+    ASSOCF_INIT_IGNOREUNKNOWN, ASSOCF_NOTRUNCATE, ASSOCSTR_EXECUTABLE, AssocQueryStringW,
+    ILCreateFromPathW, ILFree, SEE_MASK_CLASSNAME, SEE_MASK_FLAG_LOG_USAGE, SEE_MASK_FLAG_NO_UI,
+    SEE_MASK_NOASYNC, SHELLEXECUTEINFOW, SHOpenFolderAndSelectItems, ShellExecuteExW,
+    ShellExecuteW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     MB_ICONERROR, MB_OK, MB_SETFOREGROUND, MessageBoxW, SW_SHOWNORMAL,
 };
 
 use crate::APP_NAME;
+use crate::edit::Editor;
 
 mod title_bar;
 
@@ -202,6 +206,107 @@ fn shell_execute(verb: &str, file: &OsStr) -> io::Result<()> {
             Ok(())
         } else {
             Err(io::Error::last_os_error())
+        }
+    })
+}
+
+/// The extension whose program is the text file program.
+const TEXT_FILE: &str = ".txt";
+
+/// The text file program's file, or None when the system names none: no program opens `.txt`
+/// files, or the one that does names no file, as some packaged programs don't. Only asks the
+/// shell; nothing starts.
+pub fn text_file_program() -> Option<PathBuf> {
+    let (extension, verb) = (wide(TEXT_FILE), wide("open"));
+    // Fails rather than naming the "Unknown" program that asks the reader to pick one.
+    let flags = ASSOCF_INIT_IGNOREUNKNOWN | ASSOCF_NOTRUNCATE;
+    let query = |buffer: *mut u16, length: &mut u32| {
+        // SAFETY: both strings are NUL-terminated UTF-16 buffers that outlive the call; `buffer`
+        // is null, which asks only for the length, or holds `length` characters.
+        unsafe {
+            AssocQueryStringW(
+                flags,
+                ASSOCSTR_EXECUTABLE,
+                extension.as_ptr(),
+                verb.as_ptr(),
+                buffer,
+                length,
+            )
+        }
+    };
+    with_com(|| {
+        let mut length = 0;
+        // S_FALSE (1): no buffer was given, and `length` is the one needed.
+        if query(std::ptr::null_mut(), &mut length) != 1 || length == 0 {
+            return Ok(None);
+        }
+        let mut buffer = vec![0; usize::try_from(length).unwrap_or(0)];
+        if query(buffer.as_mut_ptr(), &mut length) < 0 {
+            return Ok(None);
+        }
+        let end = buffer
+            .iter()
+            .position(|&unit| unit == 0)
+            .unwrap_or(buffer.len());
+        let program = PathBuf::from(OsString::from_wide(&buffer[..end]));
+        Ok(program.is_file().then_some(program))
+    })
+    .ok()
+    .flatten()
+}
+
+/// Opens `document` in `editor`. The text file program starts through the shell, which follows
+/// the reader's choice of program for `.txt` files and starts a packaged one, such as Windows 11's
+/// Notepad, as no command line can.
+pub fn launch_editor(editor: &Editor, document: &Path) -> io::Result<()> {
+    match editor {
+        Editor::Chosen(program) => start(program, document),
+        Editor::TextFileProgram => open_as_text_file(document),
+        Editor::Notepad => start(&notepad(), document),
+    }
+}
+
+/// Starts `program` with `document` as its one argument, and doesn't wait for it.
+fn start(program: &Path, document: &Path) -> io::Result<()> {
+    std::process::Command::new(program)
+        .arg(document)
+        .spawn()
+        .map(drop)
+}
+
+/// Windows' own Notepad, by its full path, so no `notepad.exe` beside Downlight or on the path
+/// starts in its place.
+fn notepad() -> PathBuf {
+    let windows = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
+    Path::new(&windows).join("System32").join("notepad.exe")
+}
+
+/// Opens `document` with the program for `.txt` files, whatever its own extension.
+fn open_as_text_file(document: &Path) -> io::Result<()> {
+    let (class, file) = (wide(TEXT_FILE), wide(document));
+    with_com(|| {
+        let mut info = SHELLEXECUTEINFOW {
+            // The struct's size is a small constant, so the cast keeps it.
+            cbSize: size_of::<SHELLEXECUTEINFOW>() as u32,
+            // NOASYNC: the calling thread has no message loop to finish the launch with. NO_UI: a
+            // missing program fails without a dialog, so Edit falls back to Notepad.
+            fMask: SEE_MASK_CLASSNAME
+                | SEE_MASK_NOASYNC
+                | SEE_MASK_FLAG_NO_UI
+                | SEE_MASK_FLAG_LOG_USAGE,
+            lpFile: file.as_ptr(),
+            lpClass: class.as_ptr(),
+            nShow: SW_SHOWNORMAL,
+            ..Default::default()
+        };
+        // SAFETY: `info` is a live SHELLEXECUTEINFOW with its size set, whose strings are
+        // NUL-terminated UTF-16 buffers that outlive the call; the null verb is the default one,
+        // and the other null members are allowed (no owner, parameters or folder).
+        let launched = unsafe { ShellExecuteExW(&mut info) };
+        if launched == 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(())
         }
     })
 }
@@ -381,6 +486,19 @@ mod tests {
                 "{key}"
             );
         }
+    }
+
+    #[test]
+    fn text_file_program_is_an_existing_file_or_none() {
+        if let Some(program) = text_file_program() {
+            assert!(program.is_file(), "{}", program.display());
+        }
+    }
+
+    #[test]
+    fn notepad_is_windows_own() {
+        assert!(notepad().ends_with(r"System32\notepad.exe"));
+        assert!(notepad().is_absolute());
     }
 
     #[test]

@@ -7,9 +7,34 @@ mod windows;
 #[cfg(windows)]
 pub use windows::{
     add_maximize_button, custom_scheme_origin, draws_own_title_bar, fold_case, has_backdrop,
-    is_missing, leave_keys_to_the_page, open_folder, open_url, place_maximize_button,
-    process_start, reveal_file, show_error, show_window_menu, with_backdrop,
+    is_missing, launch_editor, leave_keys_to_the_page, open_folder, open_url,
+    place_maximize_button, process_start, reveal_file, show_error, show_window_menu,
+    text_file_program, with_backdrop,
 };
+
+/// Other systems name no text file program until their ports find theirs.
+#[cfg(not(windows))]
+pub fn text_file_program() -> Option<std::path::PathBuf> {
+    None
+}
+
+/// Other systems start a chosen editor as it is; their text file program and their Notepad come
+/// with their ports.
+#[cfg(not(windows))]
+pub fn launch_editor(
+    editor: &crate::edit::Editor,
+    document: &std::path::Path,
+) -> std::io::Result<()> {
+    match editor {
+        crate::edit::Editor::Chosen(program) => std::process::Command::new(program)
+            .arg(document)
+            .spawn()
+            .map(drop),
+        crate::edit::Editor::TextFileProgram | crate::edit::Editor::Notepad => {
+            Err(std::io::ErrorKind::Unsupported.into())
+        }
+    }
+}
 
 /// Other systems keep their native frame and title bar until their ports decide their own
 /// (ADR 0005).

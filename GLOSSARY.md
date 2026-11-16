@@ -12,6 +12,10 @@ _Avoid_: Page, note
 The program that Edit opens a document in. It is never Downlight itself.
 _Avoid_: Handler, default app
 
+**Text file program**:
+The program the system opens plain text (`.txt`) files with. Edit opens the document in it when the reader chose no editor, or the chosen one is gone; Edit skips it when it is Downlight.
+_Avoid_: Handler, default editor
+
 **Find**:
 Looking for text in the shown document, and only there.
 _Avoid_: Search

@@ -14,3 +14,7 @@ Spec: [Window design](../spec.md)
 - [ ] Edit is disabled in a window without a document.
 - [ ] The buttons are reachable with Tab and have accessible names.
 - [ ] Page tests: each button runs its command; the tooltip carries the shortcut; Edit is disabled without a document.
+
+## Comments
+
+**2026-11-16, from v1 ticket 15.** Edit is the `edit` entry of the command table (`page/src/commands.ts`, Ctrl+E), which runs `edit` in `page/src/edit.ts`, so the button is `commandButton("edit", glyph)`. The entry has no `available` yet: in a window without a document the app rejects `edit_document` with "There is no document to edit.", which shows as a notice. This ticket's "Edit is disabled without a document" adds `available` to the entry, which then also greys Edit out in the right-click menu.
