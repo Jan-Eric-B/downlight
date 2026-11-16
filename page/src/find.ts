@@ -2,6 +2,7 @@ import {
   atOrAfterReadingPosition,
   openSectionsAround,
   scrollToMiddle,
+  type ScrolledView,
 } from "./reading-position";
 import { whenDocumentShown } from "./view";
 
@@ -243,10 +244,10 @@ function matchesIn(index: TextIndex, query: string): IndexedMatch[] {
  * so a binary search finds it with few lookups.
  */
 function firstAfterReadingPosition(
-  view: HTMLElement,
+  shown: ScrolledView,
   matches: readonly FindMatch[],
 ): number {
-  const isAtOrAfter = atOrAfterReadingPosition(view);
+  const isAtOrAfter = atOrAfterReadingPosition(shown);
   let low = 0;
   let high = matches.length;
   while (low < high) {
@@ -263,8 +264,11 @@ class Find {
   readonly bar: HTMLElement;
   readonly box: HTMLInputElement;
   private readonly status: HTMLElement;
-  /** The view, once Find has heard of it: before that there is no document to find in. */
-  private view: HTMLElement | undefined;
+  /**
+   * The view and its scroller, once Find has heard of them: before that there is no document to
+   * find in.
+   */
+  private shown: ScrolledView | undefined;
   /** The index of the shown document, built when Find first needs it. */
   private index: TextIndex | undefined;
   /** The index being built, while it is. */
@@ -326,8 +330,8 @@ class Find {
    * reading position. It doesn't move: a new document starts at its top or heading, and a reload
    * has just put the view back at the reading position.
    */
-  documentShown(view: HTMLElement): void {
-    this.view = view;
+  documentShown(shown: ScrolledView): void {
+    this.shown = shown;
     this.index = undefined;
     this.builder = undefined;
     this.waiting = undefined;
@@ -343,8 +347,8 @@ class Find {
    * that waited for the index runs once it is built.
    */
   private startIndexing(): void {
-    if (!this.view || this.index || this.builder) return;
-    const builder = new IndexBuilder(this.view);
+    if (!this.shown || this.index || this.builder) return;
+    const builder = new IndexBuilder(this.shown.view);
     this.builder = builder;
     const slice = () => {
       // Another document's index has replaced this one.
@@ -371,7 +375,7 @@ class Find {
    */
   recount(from: CurrentFrom, go: boolean): void {
     const query = searchable(this.box.value, false);
-    if (!this.view || query === "") {
+    if (!this.shown || query === "") {
       this.waiting = undefined;
       this.show([], undefined);
       return;
@@ -394,7 +398,7 @@ class Find {
         const next = matches.findIndex((match) => match.at >= lastAt);
         current = next === -1 ? 0 : next;
       } else {
-        current = firstAfterReadingPosition(this.view, matches);
+        current = firstAfterReadingPosition(this.shown, matches);
       }
     }
     this.show(matches, current);
@@ -470,10 +474,11 @@ class Find {
   private async goToCurrent(): Promise<void> {
     const match =
       this.current === undefined ? undefined : this.matches[this.current];
-    if (!match) return;
+    // A match comes from a shown view's index, so there is a scroller whenever there is a match.
+    if (!match || !this.shown) return;
     const move = ++this.moves;
     openSectionsAround(match.startContainer);
-    await scrollToMiddle(match, () => move === this.moves);
+    await scrollToMiddle(this.shown.scroller, match, () => move === this.moves);
   }
 }
 
@@ -549,8 +554,8 @@ export function startFind(signal?: AbortSignal): void {
     { signal },
   );
 
-  const stopListening = whenDocumentShown((view) => {
-    started.documentShown(view);
+  const stopListening = whenDocumentShown((shown) => {
+    started.documentShown(shown);
   });
   signal?.addEventListener("abort", () => {
     stopListening();

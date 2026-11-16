@@ -71,6 +71,31 @@ fn title_of_a_file_at_a_drive_root_names_the_drive() {
 }
 
 #[test]
+fn page_url_tells_the_page_about_timing_backdrop_and_title_bar() {
+    let plain = WindowLook {
+        backdrop: false,
+        title_bar: false,
+    };
+    let backdrop = WindowLook {
+        backdrop: true,
+        ..plain
+    };
+    let title_bar = WindowLook {
+        title_bar: true,
+        ..plain
+    };
+    let both = WindowLook {
+        backdrop: true,
+        title_bar: true,
+    };
+    assert_eq!(page_url(false, plain), "index.html");
+    assert_eq!(page_url(true, plain), "index.html?timing");
+    assert_eq!(page_url(false, backdrop), "index.html?backdrop");
+    assert_eq!(page_url(false, title_bar), "index.html?titleBar");
+    assert_eq!(page_url(true, both), "index.html?timing&backdrop&titleBar");
+}
+
+#[test]
 fn only_the_page_itself_may_load_in_a_window() {
     for (page, url) in [
         ("http://tauri.localhost", "http://tauri.localhost/"),

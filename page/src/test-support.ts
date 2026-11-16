@@ -6,11 +6,14 @@ import { vi } from "vitest";
 import followLinkSamples from "../../app/tests/fixtures/follow_link.json?raw";
 import menuEntrySamplesJson from "../../app/tests/fixtures/menu_entries.json?raw";
 import messageSamples from "../../app/tests/fixtures/messages.json?raw";
+import pageUrlSamples from "../../app/tests/fixtures/page_url.json?raw";
 import renderDocumentSamples from "../../app/tests/fixtures/render_document.json?raw";
 import timingReportSamples from "../../app/tests/fixtures/timing_reports.json?raw";
+import titleBarSamples from "../../app/tests/fixtures/title_bar.json?raw";
 import type {
   AnswerOf,
   ArgsOf,
+  ButtonRect,
   Command,
   DocumentToShow,
   FirstPaintMarks,
@@ -19,10 +22,11 @@ import type {
   MenuEntry,
   Message,
   Messages,
+  PageFlags,
   Place,
   ReloadMarks,
 } from "./app";
-import { whenDocumentShown } from "./view";
+import { SCROLLER_SELECTOR, whenDocumentShown } from "./view";
 
 /** A document shown at a heading, as the app hands it over for a link like `a.md#install`. */
 export interface AtHeading {
@@ -170,6 +174,37 @@ export function timingReportSample<N extends keyof TimingReports>(
   return sampleIn(timingReportSamples, name) as TimingReports[N];
 }
 
+/** The page's URL as the app opens it, with every flag on (`allOn`) or none (`allOff`). */
+export function pageUrlSample(name: "allOn" | "allOff"): string {
+  return sampleIn(pageUrlSamples, name) as string;
+}
+
+/**
+ * Opens the page at `url`, relative to the page's origin, as the app does, so the page reads its
+ * flags from it. The tests open it at `/` again after each test.
+ */
+export function openPageAt(url: string): void {
+  history.replaceState(null, "", `/${url}`);
+}
+
+/**
+ * Opens the page with the flags named on, as `page_url` in `app/src/window.rs` writes them: the
+ * flags' names are the page's own (`PageFlags`), which the contract sample keeps the app's.
+ */
+export function openPageWith(...flags: (keyof PageFlags)[]): void {
+  openPageAt(flags.length === 0 ? "" : `?${flags.join("&")}`);
+}
+
+/** The title bar's arguments the app takes, by the name of their sample. */
+type TitleBarArguments = { maximizeButton: ButtonRect };
+
+/** A sample of an argument the app takes from the title bar, by name. */
+export function titleBarSample<N extends keyof TitleBarArguments>(
+  name: N,
+): TitleBarArguments[N] {
+  return sampleIn(titleBarSamples, name) as TitleBarArguments[N];
+}
+
 /**
  * Gives the fake app's window another document, as Ctrl+O, a drop or a link does, and tells the
  * page, which then asks for it.
@@ -245,6 +280,23 @@ export function goneBar(): HTMLElement | null {
   return document.querySelector<HTMLElement>(".file-gone");
 }
 
+/**
+ * How often the page has scrolled the document to its top since the spy started: its scroller,
+ * which happy-dom doesn't lay out, to 0, 0.
+ */
+export function spyOnScrollsToTop(): () => number {
+  const scrolls = vi
+    .spyOn(Element.prototype, "scrollTo")
+    .mockImplementation(() => {});
+  return () =>
+    scrolls.mock.calls.filter(
+      (args, index) =>
+        args[0] === 0 &&
+        args[1] === 0 &&
+        (scrolls.mock.contexts[index] as Element).matches(SCROLLER_SELECTOR),
+    ).length;
+}
+
 /** The ids of the elements the page scrolled to the top of the view, in turn. */
 export function spyOnHeadingScrolls(): () => string[] {
   const scrolls = vi
@@ -269,17 +321,60 @@ export function linesOf(element: Element): [number, number] | undefined {
 }
 
 /**
+ * Stands in for happy-dom's `ResizeObserver`, which never reports, until the test's globals are
+ * unstubbed. Returns a function that lays the title bar out, as the webview does when the window's
+ * size, its DPI or the zoom changes: every observer reports.
+ */
+export function fakeTitleBarLayout(): () => void {
+  const observers: ResizeObserverCallback[] = [];
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      constructor(report: ResizeObserverCallback) {
+        observers.push(report);
+      }
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    },
+  );
+  return () => {
+    for (const report of observers) report([], {} as ResizeObserver);
+  };
+}
+
+/** The title bar's button that a screen reader names `label`. */
+export function titleBarButton(label: string): HTMLButtonElement {
+  const found = document.querySelector<HTMLButtonElement>(
+    `.title-bar button[aria-label="${label}"]`,
+  );
+  if (!found) throw new Error(`The title bar has no ${label} button.`);
+  return found;
+}
+
+/** The height of the title bar the page draws (window design ticket 01), in px. */
+export const TITLE_BAR_HEIGHT = 32;
+
+/**
  * Lays the document out, which happy-dom doesn't: each line of the file is 20 px high, and
- * `topLine` is at the top of the view (1.5 is halfway down the first line). A range sits where
- * the element holding its start does.
+ * `topLine` is at the top of the view (1.5 is halfway down the first line). As in the window, the
+ * document's scroller runs from below the title bar to the window's bottom, so the view's top is
+ * not the window's. A range sits where the element holding its start does.
  */
 export function layOut(topLine: number): void {
+  const scroller = new DOMRect(
+    0,
+    TITLE_BAR_HEIGHT,
+    800,
+    innerHeight - TITLE_BAR_HEIGHT,
+  );
   const rectOf = (element: Element | null) => {
+    if (element?.matches(SCROLLER_SELECTOR)) return scroller;
     const [start, end] = (element && linesOf(element)) ?? [
       topLine,
       topLine - 1,
     ];
-    const top = (start - topLine) * 20;
+    const top = TITLE_BAR_HEIGHT + (start - topLine) * 20;
     return new DOMRect(0, top, 800, (end - start + 1) * 20);
   };
   vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(

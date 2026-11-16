@@ -65,22 +65,9 @@ impl Timing {
         Self { process_start_ms }
     }
 
-    /// The page and what it is told in its query: `timing` turns on its timing reports, and
-    /// `backdrop` says the window is transparent over the system's backdrop (Mica on Windows), so
-    /// the page draws no background of its own.
-    pub fn page_url(&self, backdrop: bool) -> String {
-        let flags = [
-            ("timing", self.process_start_ms.is_some()),
-            ("backdrop", backdrop),
-        ]
-        .into_iter()
-        .filter_map(|(flag, on)| on.then_some(flag))
-        .collect::<Vec<_>>();
-        if flags.is_empty() {
-            "index.html".to_owned()
-        } else {
-            format!("index.html?{}", flags.join("&"))
-        }
+    /// Whether the switch is on, so a window's page sends its timing reports.
+    pub fn is_on(&self) -> bool {
+        self.process_start_ms.is_some()
     }
 
     /// Notes that a window starts opening, which is where a further window in a running process
@@ -338,20 +325,6 @@ mod tests {
             process_start_ms: None,
         };
         assert_eq!(timing.line("document-0", &Stages::start("reload")), None);
-    }
-
-    #[test]
-    fn page_url_tells_the_page_about_timing_and_backdrop() {
-        let off = Timing {
-            process_start_ms: None,
-        };
-        let on = Timing {
-            process_start_ms: Some(0.0),
-        };
-        assert_eq!(off.page_url(false), "index.html");
-        assert_eq!(on.page_url(false), "index.html?timing");
-        assert_eq!(off.page_url(true), "index.html?backdrop");
-        assert_eq!(on.page_url(true), "index.html?timing&backdrop");
     }
 
     #[test]

@@ -6,10 +6,30 @@ mod windows;
 
 #[cfg(windows)]
 pub use windows::{
-    custom_scheme_origin, fold_case, has_backdrop, is_missing,
-    leave_reload_and_find_keys_to_the_page, open_folder, open_url, process_start, reveal_file,
-    show_error, with_backdrop,
+    add_maximize_button, custom_scheme_origin, draws_own_title_bar, fold_case, has_backdrop,
+    is_missing, leave_reload_and_find_keys_to_the_page, open_folder, open_url,
+    place_maximize_button, process_start, reveal_file, show_error, with_backdrop,
 };
+
+/// Other systems keep their native frame and title bar until their ports decide their own
+/// (ADR 0005).
+#[cfg(not(windows))]
+pub const fn draws_own_title_bar() -> bool {
+    false
+}
+
+/// Other systems' maximize buttons are their own until their ports; nothing sits behind the
+/// page's.
+#[cfg(not(windows))]
+pub fn add_maximize_button(
+    _window: &tauri::WebviewWindow,
+    _on_state: impl Fn(crate::title_bar::MaximizeButtonState) + Send + 'static,
+) {
+}
+
+/// Other systems have no window behind the page's maximize button to place.
+#[cfg(not(windows))]
+pub fn place_maximize_button(_window: &tauri::WebviewWindow, _rect: crate::title_bar::ButtonRect) {}
 
 /// Other systems count what Rust counts as not found until their ports.
 #[cfg(not(windows))]

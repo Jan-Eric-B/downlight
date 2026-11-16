@@ -8,6 +8,7 @@ import {
   readingPosition,
   returnToReadingPosition,
   scrollToTop,
+  type ScrolledView,
 } from "./reading-position";
 import {
   epochMs,
@@ -20,6 +21,12 @@ import {
 export const DOCUMENT_VIEW_SELECTOR = "article.markdown-body";
 
 /**
+ * Selects the element the document scrolls in, below the title bar, so the scroll bar starts below
+ * the bar too (window design ticket 01). `scripts/measure.js` scrolls it by the same selector.
+ */
+export const SCROLLER_SELECTOR = ".view-scroller";
+
+/**
  * Scrolls the shown document to the element whose id is `heading`, or else to the anchor with
  * that name, as a browser does for a URL's fragment; null is the top. A heading in a closed
  * section opens it, as Find does. Only the document is searched, never the page's own elements. A
@@ -27,7 +34,7 @@ export const DOCUMENT_VIEW_SELECTOR = "article.markdown-body";
  */
 export async function scrollToHeading(heading: string | null): Promise<void> {
   if (heading === null) {
-    scrollTo(0, 0);
+    scrollDocumentToTop();
     return;
   }
   const view = document.querySelector(DOCUMENT_VIEW_SELECTOR);
@@ -47,24 +54,34 @@ export async function scrollToHeading(heading: string | null): Promise<void> {
 }
 
 /**
+ * Scrolls the document to its top. The view makes its scroller when it starts, before anything
+ * can ask for a scroll, so a missing one is a page bug, and it fails rather than doing nothing.
+ */
+function scrollDocumentToTop(): void {
+  const scroller = document.querySelector(SCROLLER_SELECTOR);
+  if (!scroller) throw new Error("The document view hasn't started.");
+  scroller.scrollTo(0, 0);
+}
+
+/**
  * Why the view's content was replaced, as the `whenDocumentShown` listeners hear it: `shown` when
  * the window shows its document or another one, the empty state or why it can't show one, and
  * `reload` when it shows the document's new render at the reading position.
  */
 export type ShownReason = "shown" | "reload";
 
-type ShownListener = (view: HTMLElement, reason: ShownReason) => void;
+type ShownListener = (shown: ScrolledView, reason: ShownReason) => void;
 
 const shownListeners = new Set<ShownListener>();
 
 /**
- * Runs `listener` with the view, and why its content changed, each time the view's content has
- * been replaced: when the window shows its document or another one, after a reload once the view
- * is back at the reading position, and when the window shows no document or why it can't show
- * one. A request that replaced the content but was then overtaken leaves the call to the request
- * that overtook it, which makes it even if it fails, so a replaced view is always heard of, once
- * the last request ends. This is the one hook for that, so Find recounts here (ticket 14). Returns
- * a function that removes the listener.
+ * Runs `listener` with the view and its scroller, and why the view's content changed, each time
+ * the view's content has been replaced: when the window shows its document or another one, after
+ * a reload once the view is back at the reading position, and when the window shows no document
+ * or why it can't show one. A request that replaced the content but was then overtaken leaves the
+ * call to the request that overtook it, which makes it even if it fails, so a replaced view is
+ * always heard of, once the last request ends. This is the one hook for that, so Find recounts
+ * here (ticket 14). Returns a function that removes the listener.
  */
 export function whenDocumentShown(listener: ShownListener): () => void {
   shownListeners.add(listener);
@@ -107,7 +124,7 @@ type Landing = (
 /** Lands at the heading a link named, as `scrollToHeading` finds it, or at the top for null. */
 function atHeading(heading: string | null): Landing {
   return async (_view, _before, isLatest) => {
-    scrollTo(0, 0);
+    scrollDocumentToTop();
     if (heading === null) return true;
     await scrollToHeading(heading);
     return isLatest();
@@ -211,6 +228,34 @@ function createGoneBar(): HTMLElement {
   return bar;
 }
 
+/** The element the document scrolls in, which `SCROLLER_SELECTOR` selects. */
+function createScroller(): HTMLElement {
+  const scroller = document.createElement("div");
+  scroller.className = SCROLLER_SELECTOR.slice(1);
+  scroller.tabIndex = -1;
+  return scroller;
+}
+
+/**
+ * Keeps the keys that scroll (arrows, Page Up and Down, Space) on the document. The page's root
+ * no longer scrolls, so they scroll `scroller` only while it or something in it has the focus: it
+ * takes the focus now, and again whenever the focus falls back to the page's body, as when Esc
+ * closes Find.
+ */
+function keepTheKeysOn(scroller: HTMLElement): void {
+  const takeTheKeys = () => {
+    scroller.focus({ preventScroll: true });
+  };
+  takeTheKeys();
+  document.addEventListener("focusout", () => {
+    // After the focus has moved on, so a focus that moves to another element isn't taken back.
+    setTimeout(() => {
+      const focused = document.activeElement;
+      if (focused === null || focused === document.body) takeTheKeys();
+    }, 0);
+  });
+}
+
 /**
  * Shows the window's document, or the empty state while it has none, and asks for it again
  * whenever the app says the window shows another document or the document's file changed. The
@@ -226,7 +271,11 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
   view.className = "markdown-body";
   const empty = createEmptyState();
   empty.hidden = true;
-  document.body.append(goneBar, view, empty);
+  const scroller = createScroller();
+  scroller.append(goneBar, view, empty);
+  document.body.append(scroller);
+  keepTheKeysOn(scroller);
+  const shown: ScrolledView = { view, scroller };
 
   let latestRequest = 0;
   /**
@@ -311,7 +360,7 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
       if (!isLatest()) return;
     }
     // Read just before the swap, so a scroll while the new render was parsed counts.
-    const before: ReaderState = { line: readingPosition(view) };
+    const before: ReaderState = { line: readingPosition(shown) };
     replaceContent(outcome, content);
     const inserted = epochMs();
     if (outcome.reason === "shown") {
@@ -333,7 +382,7 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
     if (unannounced === undefined) return;
     const reason = unannounced;
     unannounced = undefined;
-    for (const listener of shownListeners) listener(view, reason);
+    for (const listener of shownListeners) listener(shown, reason);
   };
 
   /**

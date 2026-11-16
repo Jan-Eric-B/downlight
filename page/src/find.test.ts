@@ -13,6 +13,7 @@ import {
   nextShown,
   settle,
   tell,
+  TITLE_BAR_HEIGHT,
 } from "./test-support";
 import { afterNextFrame } from "./reading-position";
 import { startDocumentView } from "./view";
@@ -332,15 +333,19 @@ test("the current match's block is scrolled into view", () => {
   expect(scrolled().at(-1)).toEqual([holder, { block: "center" }]);
 });
 
-/** The page's `scrollBy` calls, which happy-dom doesn't lay out. */
+/** The page's `scrollBy` calls on the document's scroller, which happy-dom doesn't lay out. */
 function spyOnScrollBy() {
-  return vi.spyOn(window, "scrollBy").mockImplementation(() => {});
+  return vi.spyOn(Element.prototype, "scrollBy").mockImplementation(() => {});
 }
 
-/** Where `scrollBy` puts a block on `line`, with `topLine` at the top, in the middle of the view. */
+/**
+ * How far `scrollBy` scrolls to put a block on `line`, with `topLine` at the top, in the middle
+ * of the view, which runs from below the title bar to the window's bottom.
+ */
 function toMiddle(line: number, topLine: number): number {
-  const top = (line - topLine) * 20;
-  return (top + top + 20 - innerHeight) / 2;
+  const blockMiddle = TITLE_BAR_HEIGHT + (line - topLine) * 20 + 10;
+  const viewMiddle = (TITLE_BAR_HEIGHT + innerHeight) / 2;
+  return blockMiddle - viewMiddle;
 }
 
 test("a current match still outside the view after a frame is scrolled to its middle", async () => {

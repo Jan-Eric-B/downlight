@@ -16,6 +16,7 @@ mod open;
 mod platform;
 mod render;
 mod timing;
+mod title_bar;
 mod watch;
 mod window;
 
@@ -59,11 +60,15 @@ fn main() -> ExitCode {
             timing::report_first_paint,
             timing::report_reload,
             timing::report_long_task,
+            title_bar::minimize_window,
+            title_bar::toggle_maximize_window,
+            title_bar::place_maximize_button,
         ])
         .on_menu_event(menu::forward_choice)
         .on_window_event(|window, event| {
             window::forget_when_destroyed(window, event);
             open::show_when_dropped(window, event);
+            title_bar::tell_window_state(window, event);
         })
         .setup(|app| {
             // Without the current folder a relative path stays relative, and reading it reports

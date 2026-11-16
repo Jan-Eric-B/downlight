@@ -16,6 +16,7 @@ import {
   nextShown,
   settle,
   spyOnHeadingScrolls,
+  spyOnScrollsToTop,
   tell,
   type AtHeading,
   type Read,
@@ -23,6 +24,7 @@ import {
 import { afterNextFrame } from "./reading-position";
 import {
   requestDocument,
+  SCROLLER_SELECTOR,
   startDocumentView,
   whenDocumentShown,
   type ShownReason,
@@ -177,6 +179,38 @@ test("a window whose document can't be read shows once it says why", async () =>
   await vi.waitFor(() => {
     expect(textWhenShown).toContain("Can't read C:\\docs\\gone.md");
   });
+});
+
+/** The element the document scrolls in, below the title bar. */
+function scroller(): HTMLElement | null {
+  return document.querySelector<HTMLElement>(SCROLLER_SELECTOR);
+}
+
+test("the document scrolls in its own element, which holds the view", async () => {
+  documents = [() => Promise.resolve(readme)];
+  await startDocumentView(0);
+
+  expect(scroller()?.contains(document.querySelector("article"))).toBe(true);
+});
+
+test("the document has the keys from the start, so they scroll it", async () => {
+  documents = [() => Promise.resolve(readme)];
+  await startDocumentView(0);
+
+  expect(document.activeElement).toBe(scroller());
+});
+
+test("the keys go back to the document when the focus leaves a part of the page for nowhere", async () => {
+  documents = [() => Promise.resolve(readme)];
+  await startDocumentView(0);
+  // Find's box, which Esc blurs.
+  const box = document.createElement("input");
+  document.body.append(box);
+  box.focus();
+
+  box.blur();
+  await settle();
+  expect(document.activeElement).toBe(scroller());
 });
 
 test("a notice from the app shows for a few seconds", async () => {
@@ -541,12 +575,12 @@ test("document shown without a heading starts at the top", async () => {
   await startDocumentView(0);
   await settle();
   const scrolledTo = spyOnHeadingScrolls();
-  const toTop = vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+  const scrollsToTop = spyOnScrollsToTop();
 
   const shown = nextShown();
   await giveAnotherDocument();
   await shown;
-  expect(toTop).toHaveBeenCalledWith(0, 0);
+  expect(scrollsToTop()).toBe(1);
   expect(scrolledTo()).toEqual([]);
 });
 
@@ -806,18 +840,16 @@ test("a reload under the 'File deleted or moved' bar keeps the block just below 
   await startDocumentView(0);
   await settle();
   await tell("document-changed", "gone");
-  // The page's stylesheet, which the tests don't load, sets this while the bar shows.
-  document.documentElement.style.scrollPaddingTop = "41px";
-  // Line 13.5 is at the top of the window, and "## Options" on line 15 at the bar's lower edge.
+  // The page's stylesheet, which the tests don't load, sets this on the document's scroller while
+  // the bar shows.
+  scroller()?.style.setProperty("scroll-padding-top", "41px");
+  // Line 13.5 is at the top of the scroller, below the title bar, and "## Options" on line 15 at
+  // the "File deleted or moved" bar's lower edge.
   layOut(13.5);
   const scrolledTo = spyOnScrolls();
 
-  try {
-    const shown = nextShown();
-    await tell("document-changed", "reload");
-    await shown;
-    expect(new Set(scrolledTo())).toEqual(new Set([15]));
-  } finally {
-    document.documentElement.style.scrollPaddingTop = "";
-  }
+  const shown = nextShown();
+  await tell("document-changed", "reload");
+  await shown;
+  expect(new Set(scrolledTo())).toEqual(new Set([15]));
 });

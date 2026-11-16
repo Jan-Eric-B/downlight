@@ -1,14 +1,15 @@
 import {
   askApp,
+  pageFlags,
   type FirstPaintMarks,
   type LongTask,
   type ReloadMarks,
 } from "./app";
 
-// The page's half of the timing switch (DOWNLIGHT_TIMING): the app opens the page with
-// `?timing` when the switch is on, and the app writes the reports out.
+// The page's half of the timing switch (DOWNLIGHT_TIMING): the app opens the page with the
+// `timing` flag when the switch is on, and the app writes the reports out.
 
-const isOn = new URLSearchParams(location.search).has("timing");
+const isOn = pageFlags().timing;
 
 // A report that can't reach the app has nowhere else to go; `npm run measure` then stops with
 // "No first paint or shown window", which is where the person measuring sees it.

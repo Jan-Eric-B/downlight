@@ -4,6 +4,8 @@
 
 use tauri::{AppHandle, Emitter as _};
 
+use crate::title_bar::MaximizeButtonState;
+
 /// A message for one window's page. Each goes as the event the page listens for, with a string
 /// payload or none (`Messages` in `page/src/app.ts`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,6 +27,12 @@ pub enum Message {
     Notice(String),
     /// The command, by id, that the reader chose in the window's right-click menu.
     MenuCommand(String),
+    /// The window's size changed, and whether it is maximized now, so the page's title bar shows
+    /// maximize or restore.
+    WindowState { maximized: bool },
+    /// How the page's maximize button is to look: the pointer on it reaches the window behind
+    /// the button on Windows, not the page (`title_bar.rs`).
+    MaximizeButton(MaximizeButtonState),
 }
 
 impl Message {
@@ -37,6 +45,18 @@ impl Message {
             Self::ScrollToHeading(heading) => ("scroll-to-heading", Some(heading)),
             Self::Notice(text) => ("notice", Some(text)),
             Self::MenuCommand(id) => ("menu-command", Some(id)),
+            Self::WindowState { maximized } => (
+                "window-state",
+                Some(if *maximized { "maximized" } else { "restored" }),
+            ),
+            Self::MaximizeButton(state) => (
+                "maximize-button",
+                Some(match state {
+                    MaximizeButtonState::Normal => "normal",
+                    MaximizeButtonState::Hovered => "hovered",
+                    MaximizeButtonState::Pressed => "pressed",
+                }),
+            ),
         }
     }
 }
@@ -52,7 +72,9 @@ pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
         | Message::Gone
         | Message::ScrollToHeading(_)
         | Message::Notice(_)
-        | Message::MenuCommand(_) => {}
+        | Message::MenuCommand(_)
+        | Message::WindowState { .. }
+        | Message::MaximizeButton(_) => {}
     };
     let sample = |message: Message| {
         let (event, payload) = message.event();
@@ -65,6 +87,11 @@ pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
         "scrollToHeading": sample(Message::ScrollToHeading("install".to_owned())),
         "notice": sample(Message::Notice("Can't watch the document's file".to_owned())),
         "menuCommand": sample(Message::MenuCommand("open".to_owned())),
+        "maximized": sample(Message::WindowState { maximized: true }),
+        "restored": sample(Message::WindowState { maximized: false }),
+        "maximizeButtonNormal": sample(Message::MaximizeButton(MaximizeButtonState::Normal)),
+        "maximizeButtonHovered": sample(Message::MaximizeButton(MaximizeButtonState::Hovered)),
+        "maximizeButtonPressed": sample(Message::MaximizeButton(MaximizeButtonState::Pressed)),
     }))
 }
 

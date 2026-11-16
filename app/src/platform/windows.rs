@@ -30,9 +30,19 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 
 use crate::APP_NAME;
 
+mod title_bar;
+
+pub use title_bar::{add_maximize_button, place_maximize_button};
+
 /// Windows 11's first build. Mica needs it; Windows 10 has no Mica, and Tauri drops the effect
 /// there without an error, which would leave a transparent window see-through.
 const FIRST_BUILD_WITH_MICA: u32 = 22000;
+
+/// Whether the page draws the title bar in place of the native frame (ADR 0005). Windows only, so
+/// far; false brings the native title bar back.
+pub const fn draws_own_title_bar() -> bool {
+    true
+}
 
 /// Whether windows get a backdrop, Mica: Windows 11 and later.
 pub fn has_backdrop() -> bool {

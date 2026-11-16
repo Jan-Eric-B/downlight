@@ -7,6 +7,22 @@
     "event": "document-changed",
     "payload": "gone"
   },
+  "maximizeButtonHovered": {
+    "event": "maximize-button",
+    "payload": "hovered"
+  },
+  "maximizeButtonNormal": {
+    "event": "maximize-button",
+    "payload": "normal"
+  },
+  "maximizeButtonPressed": {
+    "event": "maximize-button",
+    "payload": "pressed"
+  },
+  "maximized": {
+    "event": "window-state",
+    "payload": "maximized"
+  },
   "menuCommand": {
     "event": "menu-command",
     "payload": "open"
@@ -18,6 +34,10 @@
   "reload": {
     "event": "document-changed",
     "payload": "reload"
+  },
+  "restored": {
+    "event": "window-state",
+    "payload": "restored"
   },
   "scrollToHeading": {
     "event": "scroll-to-heading",

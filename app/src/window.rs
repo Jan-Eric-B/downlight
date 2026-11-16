@@ -15,7 +15,7 @@ use tauri::{
 
 use crate::documents::{DocumentAt, Documents, Given, Target};
 use crate::timing::Timing;
-use crate::{APP_NAME, command_line, platform};
+use crate::{APP_NAME, command_line, platform, title_bar};
 
 /// What [`show`] did with a document.
 #[derive(Debug, PartialEq, Eq)]
@@ -159,6 +159,52 @@ fn open_or_forget(
     open_window(app, label, title).inspect_err(|_| documents.forget(label))
 }
 
+/// What a window leaves for its page to draw, decided once when it opens.
+#[derive(Debug, Clone, Copy)]
+struct WindowLook {
+    /// The window is transparent over the system's backdrop (Mica on Windows), so the page draws
+    /// no background of its own.
+    backdrop: bool,
+    /// The window has no native frame, so the page draws the title bar and the window's buttons
+    /// (ADR 0005).
+    title_bar: bool,
+}
+
+/// The page and what it is told in its query: `timing` turns on its timing reports, and the
+/// window's look (`backdrop`, `titleBar`) says what the page draws. The page reads them in one
+/// place (`pageFlags` in `page/src/app.ts`), against this function's contract sample.
+fn page_url(timing: bool, look: WindowLook) -> String {
+    let flags = [
+        ("timing", timing),
+        ("backdrop", look.backdrop),
+        ("titleBar", look.title_bar),
+    ]
+    .into_iter()
+    .filter_map(|(flag, on)| on.then_some(flag))
+    .collect::<Vec<_>>();
+    if flags.is_empty() {
+        "index.html".to_owned()
+    } else {
+        format!("index.html?{}", flags.join("&"))
+    }
+}
+
+/// The page's URL with every flag on and with none, which the page's tests read its flags from
+/// (`app/src/contract.rs`). A flag that is renamed on one side only would otherwise pass both
+/// test suites and, for `titleBar`, open a frameless window with no title bar to close it by.
+#[cfg(test)]
+pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
+    // A struct literal names every field, so a new flag stops the build here until it is sampled.
+    let every = |on| WindowLook {
+        backdrop: on,
+        title_bar: on,
+    };
+    Ok(serde_json::json!({
+        "allOn": page_url(true, every(true)),
+        "allOff": page_url(false, every(false)),
+    }))
+}
+
 /// How long a window may stay hidden waiting for its page to ask to be shown. Cold first paint
 /// is about 1 s (ticket 02), so this only fires when the page never asks, and keeps a window
 /// that would otherwise stay invisible, and the process with it, from staying so.
@@ -169,25 +215,34 @@ const LONGEST_HIDDEN: Duration = Duration::from_secs(5);
 fn open_window(app: &AppHandle, label: &str, title: &str) -> tauri::Result<()> {
     let timing = app.state::<Timing>();
     timing.window_opening(label);
-    // Decided once, so the page drops its background exactly when the window is transparent.
-    let backdrop = platform::has_backdrop();
-    let url = WebviewUrl::App(timing.page_url(backdrop).into());
+    // Decided once, so the page drops its background exactly when the window is transparent, and
+    // draws the title bar exactly when the window has no frame.
+    let look = WindowLook {
+        backdrop: platform::has_backdrop(),
+        title_bar: platform::draws_own_title_bar(),
+    };
+    let url = WebviewUrl::App(page_url(timing.is_on(), look).into());
     let page = page_origin(app);
     let builder = WebviewWindowBuilder::new(app, label, url)
+        // Alt+Tab and the taskbar still show the title, though the page's title bar doesn't.
         .title(title)
+        .decorations(!look.title_bar)
         .visible(false)
         // Links never navigate the webview or open one of its own windows: the page follows them
         // through the app (ticket 11). These stop whatever still tries, such as a link the page
         // missed, from loading another site or a file in the window.
         .on_navigation(move |url| is_the_page(url, &page))
         .on_new_window(|_, _| NewWindowResponse::Deny);
-    let builder = if backdrop {
+    let builder = if look.backdrop {
         platform::with_backdrop(builder)
     } else {
         builder
     };
     let window = builder.build()?;
     platform::leave_reload_and_find_keys_to_the_page(&window);
+    if look.title_bar {
+        title_bar::add_maximize_button(&window);
+    }
     std::thread::spawn(move || {
         std::thread::sleep(LONGEST_HIDDEN);
         // The window may have closed meanwhile, and then there is nothing to show.

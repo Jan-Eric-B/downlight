@@ -6,6 +6,15 @@
  */
 
 /**
+ * The document view and the element it scrolls in, below the title bar (window design ticket 01).
+ * view.ts makes both and hands them over, so this module never looks the scroller up.
+ */
+export interface ScrolledView {
+  view: HTMLElement;
+  scroller: HTMLElement;
+}
+
+/**
  * Resolves once the next frame is done: the task queued from `requestAnimationFrame` runs after
  * that frame's style, layout and paint.
  */
@@ -65,12 +74,13 @@ export function scrollToTop(
 }
 
 /**
- * Scrolls the block holding `range` to the middle of the view. After the next frame, if
- * `stillWanted` says the scroll is still wanted then, it scrolls `range` itself to the middle if
- * it is outside the view: the block can be a paragraph taller than the view, so it's the range
- * that the reader has to see.
+ * Scrolls the block holding `range` to the middle of the view that `scroller` shows. After the
+ * next frame, if `stillWanted` says the scroll is still wanted then, it scrolls `range` itself to
+ * the middle if it is outside the view: the block can be a paragraph taller than the view, so it's
+ * the range that the reader has to see.
  */
 export async function scrollToMiddle(
+  scroller: HTMLElement,
   range: StaticRangeInit,
   stillWanted: () => boolean,
 ): Promise<void> {
@@ -85,8 +95,9 @@ export async function scrollToMiddle(
       live.setStart(range.startContainer, range.startOffset);
       live.setEnd(range.endContainer, range.endOffset);
       const { top, bottom } = live.getBoundingClientRect();
-      if (top < 0 || bottom > innerHeight) {
-        scrollBy(0, (top + bottom - innerHeight) / 2);
+      const shown = scroller.getBoundingClientRect();
+      if (top < shown.top || bottom > shown.bottom) {
+        scroller.scrollBy(0, (top + bottom - shown.top - shown.bottom) / 2);
       }
     },
     () => stillWanted() && holder.isConnected,
@@ -105,15 +116,18 @@ function startLine(block: Element): number | undefined {
 }
 
 /**
- * Where what the reader sees starts, below the window's top: the scroll padding, which the page's
- * stylesheet sets to the "File deleted or moved" bar's height while the bar shows. A block
- * scrolled to the top stops there too, so the reading position is read where it is put back.
+ * Where what the reader sees starts, in the window's coordinates: the top of the scroller, below
+ * the title bar, and below the scroller's scroll padding, which the page's stylesheet sets to the
+ * "File deleted or moved" bar's height while the bar shows. A block scrolled to the top stops
+ * there too, so the reading position is read where it is put back.
  */
-function viewTop(): number {
+function viewTop(scroller: HTMLElement): number {
   const padding = Number.parseFloat(
-    getComputedStyle(document.documentElement).scrollPaddingTop,
+    getComputedStyle(scroller).scrollPaddingTop,
   );
-  return Number.isNaN(padding) ? 0 : padding;
+  return (
+    scroller.getBoundingClientRect().top + (Number.isNaN(padding) ? 0 : padding)
+  );
 }
 
 /**
@@ -141,8 +155,8 @@ function firstNotAbove(
  * first block below it when the top falls between two. It can be an element of raw HTML, with no
  * line number. Undefined at the start of the document, above its first block.
  */
-function readingBlock(view: HTMLElement): Element | undefined {
-  const top = viewTop();
+function readingBlock({ view, scroller }: ScrolledView): Element | undefined {
+  const top = viewTop(scroller);
   const first = view.firstElementChild;
   if (!first || first.getBoundingClientRect().top >= top) return undefined;
   let block: Element | undefined;
@@ -162,9 +176,9 @@ function readingBlock(view: HTMLElement): Element | undefined {
  * The reading position, as Reload keeps it: the line number of the block at the top of the view,
  * or of the innermost block with one around it. Undefined at the start of the document.
  */
-export function readingPosition(view: HTMLElement): number | undefined {
-  const block = readingBlock(view)?.closest("[data-sourcepos]");
-  return block && view.contains(block) ? startLine(block) : undefined;
+export function readingPosition(shown: ScrolledView): number | undefined {
+  const block = readingBlock(shown)?.closest("[data-sourcepos]");
+  return block && shown.view.contains(block) ? startLine(block) : undefined;
 }
 
 /**
@@ -210,9 +224,9 @@ export async function returnToReadingPosition(
  * come last but keep their definitions' lines, and raw HTML has none.
  */
 export function atOrAfterReadingPosition(
-  view: HTMLElement,
+  shown: ScrolledView,
 ): (node: Node) => boolean {
-  const block = readingBlock(view);
+  const block = readingBlock(shown);
   if (block === undefined) return () => true;
   return (node) =>
     block.contains(node) ||

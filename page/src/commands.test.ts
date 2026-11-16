@@ -224,6 +224,14 @@ test.each([
   expect(document.querySelector<HTMLElement>(".find-bar")?.hidden).toBe(false);
 });
 
+// Minimize and maximize are commands for the title bar's buttons, with no shortcut of their own.
+test("a key that names no shortcut never minimizes or maximizes the window", () => {
+  for (const init of [{}, { key: "Unidentified" }, { ctrlKey: true }]) {
+    expect(press(init).defaultPrevented).toBe(false);
+  }
+  expect(askedOfTheApp()).toEqual([]);
+});
+
 describe("the right-click menu", () => {
   test("replaces the webview's menu with Reload, Find, Open and Copy", () => {
     let entries: MenuEntry[] = [];

@@ -147,6 +147,12 @@ async function connect() {
 /** What the reader types into the find bar, one character at a time; the last matches nothing. */
 const FIND_QUERIES = ["e", "the", "lamplight", "qxzjv"];
 
+/**
+ * In the page: the element the document scrolls in, below the title bar. The selector is
+ * `SCROLLER_SELECTOR` in `page/src/view.ts`, which this script, run in Node, can't import.
+ */
+const SCROLLER = `document.querySelector(".view-scroller")`;
+
 /** Resolves in the page once the next frame is done, as the page's `afterNextFrame` does. */
 const NEXT_FRAME =
   "new Promise((done) => requestAnimationFrame(() => setTimeout(done, 0)))";
@@ -216,8 +222,9 @@ async function typeInFind() {
  * checking that a reload kept the reading position.
  */
 const TOP_LINE = `(() => {
+  const viewTop = ${SCROLLER}.getBoundingClientRect().top;
   const blocks = [...document.querySelectorAll("article > [data-sourcepos], article > .highlight > pre")];
-  const top = blocks.find((b) => b.getBoundingClientRect().bottom > 0);
+  const top = blocks.find((b) => b.getBoundingClientRect().bottom > viewTop);
   return top && Number.parseInt(top.getAttribute("data-sourcepos"));
 })()`;
 
@@ -228,9 +235,10 @@ const TOP_LINE = `(() => {
 async function saveInTheMiddle(document) {
   const { evaluate, close } = await connect();
   try {
-    await evaluate(
-      "document.scrollingElement.scrollTop = document.scrollingElement.scrollHeight / 2",
-    );
+    await evaluate(`(() => {
+      const view = ${SCROLLER};
+      view.scrollTop = view.scrollHeight / 2;
+    })()`);
     await sleep(1_000);
     const lineBefore = await evaluate(TOP_LINE);
     const at = performance.now();
@@ -277,17 +285,18 @@ async function topLineNow() {
 async function scrollThrough() {
   const { evaluate, close } = await connect();
   try {
-    await evaluate("document.scrollingElement.scrollTop = 1e9");
+    await evaluate(`${SCROLLER}.scrollTop = 1e9`);
     await sleep(1_000);
-    await evaluate(
-      "document.scrollingElement.scrollTop = document.scrollingElement.scrollHeight / 2",
-    );
+    await evaluate(`(() => {
+      const view = ${SCROLLER};
+      view.scrollTop = view.scrollHeight / 2;
+    })()`);
     await sleep(1_000);
     await evaluate(`(async () => {
-      const view = document.scrollingElement;
+      const view = ${SCROLLER};
       view.scrollTop = 0;
       for (let i = 0; i < 150; i++) {
-        view.scrollTop += innerHeight;
+        view.scrollTop += view.clientHeight;
         await new Promise((frame) => requestAnimationFrame(frame));
       }
     })()`);

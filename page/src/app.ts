@@ -1,9 +1,10 @@
 // What the page and the app say to each other (ticket 27), the page's counterpart to
 // `app/src/message.rs`: every command the page asks the app for, with its arguments and answer,
-// and every message the app sends, with its payload. Tauri's IPC is the adapter here; the page's
-// tests answer through the same types (`fakeTheApp` in `test-support.ts`), and read the samples
-// the app's tests write (`app/src/contract.rs`), so the two sides can't drift apart. No other page
-// module calls `invoke` or `listen`.
+// every message the app sends, with its payload, and the flags it opens the page with in its URL.
+// Tauri's IPC is the adapter here; the page's tests answer through the same types (`fakeTheApp`
+// in `test-support.ts`), and read the samples the app's tests write (`app/src/contract.rs`), so
+// the two sides can't drift apart. No other page module calls `invoke` or `listen`, or reads the
+// page's URL.
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { showNotice } from "./notice";
@@ -70,6 +71,44 @@ export type LongTask = {
 };
 
 /**
+ * Where the title bar's maximize button is, in device pixels from the window's top left
+ * (`ButtonRect` in `app/src/title_bar.rs`).
+ */
+export type ButtonRect = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+/**
+ * What the app tells the page in its URL's query when it opens the window (`page_url` in
+ * `app/src/window.rs`), each flag on when the query names it.
+ */
+export type PageFlags = {
+  /** The timing switch is on, so the page sends its timing reports. */
+  timing: boolean;
+  /** The window sits on the system's backdrop, so the page draws no background of its own. */
+  backdrop: boolean;
+  /** The window has no native frame, so the page draws the title bar (ADR 0005). */
+  titleBar: boolean;
+};
+
+/**
+ * The flags the app opened the page with. The page never navigates (the app allows only the
+ * page's own URL), so they hold for the page's life; they are read from the URL at each call so
+ * the tests can open the page with other flags.
+ */
+export function pageFlags(): PageFlags {
+  const query = new URLSearchParams(location.search);
+  return {
+    timing: query.has("timing"),
+    backdrop: query.has("backdrop"),
+    titleBar: query.has("titleBar"),
+  };
+}
+
+/**
  * Every command the app has (`generate_handler!` in `app/src/main.rs`), with the arguments the
  * page passes and the app's answer; a command whose Rust function returns `()` answers null.
  */
@@ -93,6 +132,10 @@ export type Commands = {
   report_first_paint: { args: { marks: FirstPaintMarks }; answer: null };
   report_reload: { args: { marks: ReloadMarks }; answer: null };
   report_long_task: { args: { task: LongTask }; answer: null };
+  minimize_window: { args: undefined; answer: null };
+  toggle_maximize_window: { args: undefined; answer: null };
+  /** The title bar was laid out, and its maximize button is at `button` now. */
+  place_maximize_button: { args: { button: ButtonRect }; answer: null };
 };
 
 export type Command = keyof Commands;
@@ -130,6 +173,13 @@ export type Messages = {
   notice: string;
   /** The id of the command the reader chose in the right-click menu. */
   "menu-command": string;
+  /** The window's size changed, and whether it is maximized now. */
+  "window-state": "maximized" | "restored";
+  /**
+   * How the maximize button is to look while the pointer is on it, which on Windows reaches the
+   * app's window behind the button rather than the page.
+   */
+  "maximize-button": "normal" | "hovered" | "pressed";
 };
 
 export type Message = keyof Messages;

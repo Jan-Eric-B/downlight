@@ -19,6 +19,7 @@
     "measure": "node scripts/measure.js"
   },
   "dependencies": {
+    "@fluentui/svg-icons": "^1.1.345",
     "@tauri-apps/api": "^2.12.4",
     "github-markdown-css": "^5.9.0"
   },

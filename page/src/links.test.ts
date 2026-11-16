@@ -4,7 +4,13 @@ import github from "../../core/tests/fixtures/github.html?raw";
 import readme from "../../core/tests/fixtures/readme.html?raw";
 import type { ArgsOf, Followed } from "./app";
 import { startLinks } from "./links";
-import { fakeTheApp, settle, spyOnHeadingScrolls } from "./test-support";
+import {
+  fakeTheApp,
+  settle,
+  spyOnHeadingScrolls,
+  spyOnScrollsToTop,
+} from "./test-support";
+import { SCROLLER_SELECTOR } from "./view";
 
 /** Each `follow_link` call's arguments, in turn. */
 let follows: ArgsOf<"follow_link">[] = [];
@@ -35,12 +41,18 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
-/** Shows `html` as the document, as the document view does, and starts following its links. */
+/**
+ * Shows `html` as the document, in its scroller, as the document view does, and starts following
+ * its links.
+ */
 function showDocument(html: string): HTMLElement {
   const view = document.createElement("article");
   view.className = "markdown-body";
   view.innerHTML = html;
-  document.body.append(view);
+  const scroller = document.createElement("div");
+  scroller.className = SCROLLER_SELECTOR.slice(1);
+  scroller.append(view);
+  document.body.append(scroller);
   startLinks(stopLinks.signal);
   return view;
 }
@@ -144,11 +156,11 @@ test("heading outcome looks for the heading in the document only", async () => {
 test("heading outcome without a heading scrolls to the top", async () => {
   answer = () => Promise.resolve({ kind: "scrollTo", heading: null });
   const view = showDocument('<p><a href="#">Top</a></p>');
-  const scrolls = vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+  const scrollsToTop = spyOnScrollsToTop();
 
   click(link(view, "#"));
   await vi.waitFor(() => {
-    expect(scrolls).toHaveBeenCalledWith(0, 0);
+    expect(scrollsToTop()).toBe(1);
   });
 });
 

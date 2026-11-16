@@ -68,7 +68,7 @@ This reverses parts of the [v1 spec](../downlight-v1/spec.md): story 71's native
   - the snap layouts flyout, by answering Windows' hit test with `HTMAXBUTTON` over the page's maximize button;
   - the resize border at the top edge;
   - the window menu, from Alt+Space and a click on the logo.
-- Dragging and double-click to maximize use Tauri's drag region. Its buttons and the file name are not part of it.
+- Dragging, double-click to maximize and the window menu on a right-click use WebView2's own drag region (`app-region: drag`), which wry turns on; ticket 01 says why it replaced Tauri's. Its buttons and the file name are not part of it.
 - The window's OS title stays "README.md - docs - Downlight" (v1 story 10). The bar shows only the file name, with the full path as its tooltip. A click on the name reveals the file through the app's existing `reveal_file`.
 - The logo is the icon's SVG inlined into the page. The content security policy's `img-src` doesn't allow `'self'`, and an inline SVG needs no change to it.
 - **Zoom applies to the document only.** With a page-drawn title bar, the webview's zoom would scale the bar and its buttons too, so v1 ticket 16 zooms the document view (CSS `zoom` on the view) and not the webview. The find bar, notices and title bar keep their size.

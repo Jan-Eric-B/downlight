@@ -3,10 +3,10 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import notes from "../../core/tests/fixtures/notes.html?raw";
 import readme from "../../core/tests/fixtures/readme.html?raw";
 import type { ArgsOf } from "./app";
-import type { Read, tell as Tell } from "./test-support";
+import { openPageWith, type Read, type tell as Tell } from "./test-support";
 
 // The timing switch is read once, when `timing.ts` loads, so each test loads the page's modules
-// afresh after turning the switch on, as the app does by opening the page with `?timing`.
+// afresh after turning the switch on, as the app does by opening the page with the `timing` flag.
 
 /** The first paint reports the page sent. */
 let firstPaints: ArgsOf<"report_first_paint">[] = [];
@@ -43,7 +43,7 @@ function settle(): Promise<void> {
 }
 
 beforeEach(() => {
-  history.replaceState(null, "", "/?timing");
+  openPageWith("timing");
   vi.resetModules();
   mockWindows("document-0");
   firstPaints = [];
@@ -53,7 +53,7 @@ beforeEach(() => {
 afterEach(() => {
   clearMocks();
   document.body.replaceChildren();
-  history.replaceState(null, "", "/");
+  openPageWith();
 });
 
 test("first paint is reported once the window shows its document", async () => {

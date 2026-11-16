@@ -1,27 +1,36 @@
 // The page's side of the contract samples (ticket 27), the counterpart to `app/src/contract.rs`:
 // each answer and message as the app's tests wrote them (`app/tests/fixtures/`) goes through the
-// page here, and what the page sends the app is checked against the app's samples of what it
-// takes, so that a change to a shape on either side fails a test.
+// page here, what the page sends the app is checked against the app's samples of what it takes,
+// and the page reads its flags from the app's sampled URLs, so that a change to a shape on either
+// side fails a test.
 import { clearMocks, mockWindows } from "@tauri-apps/api/mocks";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import type { ArgsOf, MenuEntry } from "./app";
+import { pageFlags, type ArgsOf, type MenuEntry } from "./app";
 import { startCommands } from "./commands";
 import { startLinks } from "./links";
+import { startTitleBar } from "./title-bar";
 import {
   askedOfTheApp,
   emptyWindow,
   fakeTheApp,
+  fakeTitleBarLayout,
   followLinkSample,
   goneBar,
   heading,
   menuEntrySamples,
   messageSample,
   nextInTurn,
+  openPageAt,
+  openPageWith,
+  pageUrlSample,
   renderDocumentSample,
   settle,
   spyOnHeadingScrolls,
+  spyOnScrollsToTop,
   tellAsSampled,
   timingReportSample,
+  titleBarButton,
+  titleBarSample,
 } from "./test-support";
 import {
   requestDocument,
@@ -51,7 +60,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   clearMocks();
   document.body.replaceChildren();
-  history.replaceState(null, "", "/");
+  openPageWith();
 });
 
 /** Answers `render_document` with the samples named, in turn; the last one repeats. */
@@ -214,6 +223,36 @@ test("the app's message that the reader chose a menu command runs it", async () 
   expect(askedOfTheApp()).toEqual(["open_document"]);
 });
 
+/** Starts the title bar, as the page does in a window without a native frame. */
+async function startTheTitleBar(): Promise<HTMLButtonElement> {
+  fakeTitleBarLayout();
+  openPageWith("titleBar");
+  fakeTheApp();
+  startTitleBar(stopPage.signal);
+  await settle();
+  return titleBarButton("Maximize");
+}
+
+test("the app's window states turn maximize into restore and back", async () => {
+  const maximize = await startTheTitleBar();
+
+  await tellAsSampled(messageSample("maximized"));
+  expect(maximize.getAttribute("aria-label")).toBe("Restore");
+  await tellAsSampled(messageSample("restored"));
+  expect(maximize.getAttribute("aria-label")).toBe("Maximize");
+});
+
+test.each([
+  ["maximizeButtonHovered", "hovered"],
+  ["maximizeButtonPressed", "pressed"],
+  ["maximizeButtonNormal", "normal"],
+])("the app's %s message shows the maximize button so", async (name, look) => {
+  const maximize = await startTheTitleBar();
+
+  await tellAsSampled(messageSample(name));
+  expect(maximize.dataset.state).toBe(look);
+});
+
 // `follow_link.json`
 
 /**
@@ -250,25 +289,25 @@ test("the app's scroll to a heading scrolls there", async () => {
 
 test("the app's scroll to the top scrolls to the top", async () => {
   const link = await showLinkFollowedAs("scrollToTop");
-  const scrolls = vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+  const scrollsToTop = spyOnScrollsToTop();
 
   link.click();
   await vi.waitFor(() => {
-    expect(scrolls).toHaveBeenCalledWith(0, 0);
+    expect(scrollsToTop()).toBe(1);
   });
 });
 
 test("the app's nothing left to do leaves the view where it is", async () => {
   const link = await showLinkFollowedAs("nothing");
   const scrolledTo = spyOnHeadingScrolls();
-  const scrolls = vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+  const scrollsToTop = spyOnScrollsToTop();
 
   link.click();
   await settle();
   await settle();
   expect(follows).toHaveLength(1);
   expect(scrolledTo()).toEqual([]);
-  expect(scrolls).not.toHaveBeenCalled();
+  expect(scrollsToTop()).toBe(0);
 });
 
 /**
@@ -312,8 +351,57 @@ test("the page's menu entries are the kinds the app takes, each with the keys it
   for (const entry of sent) expect(sampled).toContain(shapeOf(entry));
 });
 
+// `title_bar.json`
+
+test("the page tells the app where its maximize button is in the keys the app takes", async () => {
+  const placed: ArgsOf<"place_maximize_button">[] = [];
+  const layOutTitleBar = fakeTitleBarLayout();
+  openPageWith("titleBar");
+  fakeTheApp({
+    place_maximize_button: (args) => {
+      placed.push(args);
+      return null;
+    },
+  });
+  startTitleBar(stopPage.signal);
+
+  layOutTitleBar();
+  await settle();
+  const [sent] = placed;
+  if (!sent) throw new Error("The page didn't place its maximize button.");
+  expect(keysSent(sent.button)).toEqual(
+    keysSent(titleBarSample("maximizeButton")),
+  );
+});
+
+// `page_url.json`
+
+/** The flags the page reads as on. */
+function flagsOn(): string[] {
+  return Object.entries(pageFlags())
+    .filter(([, on]) => on)
+    .map(([flag]) => flag)
+    .sort();
+}
+
+test("the page reads every flag in the app's URL with all flags on, and no other", () => {
+  const url = pageUrlSample("allOn");
+  openPageAt(url);
+
+  const named = [...new URL(url, location.origin).searchParams.keys()];
+  expect(flagsOn()).toEqual(named.sort());
+  // A flag the page reads but the app never sends would read as off here.
+  expect(flagsOn()).toEqual(Object.keys(pageFlags()).sort());
+});
+
+test("the page reads no flag in the app's URL with all flags off", () => {
+  openPageAt(pageUrlSample("allOff"));
+
+  expect(flagsOn()).toEqual([]);
+});
+
 // `timing_reports.json`. The timing switch is read when `timing.ts` loads, so these tests load the
-// page's modules afresh with it on, as the app does by opening the page with `?timing`.
+// page's modules afresh with it on, as the app does by opening the page with the `timing` flag.
 
 /** The timing reports the page sent the app, by command, in turn. */
 interface TimingReports {
@@ -327,7 +415,7 @@ interface TimingReports {
  * answers `render_document` with the samples named, in turn, and keeps the reports it is sent.
  */
 async function loadTimedPage(...answerNames: string[]) {
-  history.replaceState(null, "", "/?timing");
+  openPageWith("timing");
   vi.resetModules();
   const reports: TimingReports = { firstPaint: [], reload: [], longTask: [] };
   const answers = answerNames.map(renderDocumentSample);

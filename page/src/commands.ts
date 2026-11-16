@@ -4,11 +4,15 @@ import { showNotice } from "./notice";
 import { open } from "./open";
 
 /**
- * The reader's commands: each one's keyboard shortcut and what it does. A new command is added
- * to the `commands` table below, and to the `menu` list beside it if it belongs in the right-click
- * menu, and nowhere else in the page or the app.
+ * The reader's commands: each one's name, keyboard shortcut and what it does. A new command is
+ * added to the `commands` table below, to the `menu` list beside it if it belongs in the
+ * right-click menu, and to the title bar with `commandButton` if it has a button there, and
+ * nowhere else in the page or the app. The menu entry, the button's tooltip and the shortcut then
+ * all come from the one entry (window design spec).
  */
 interface Command {
+  /** The command's name, as the right-click menu and its button's tooltip show it. */
+  label: string;
   /** The letter pressed with Ctrl, in lower case. */
   ctrlLetter?: string;
   /**
@@ -36,6 +40,7 @@ function showingWhy(asked: Promise<unknown>): void {
 
 const commands = {
   reload: {
+    label: "Reload",
     ctrlLetter: "r",
     key: "F5",
     // The app tells the page to reload, and the page shows why if the file can't be read.
@@ -43,37 +48,54 @@ const commands = {
       showingWhy(askApp("reload_document"));
     },
   },
-  find: { ctrlLetter: "f", run: openFind },
-  findNext: { key: "F3", repeatsWhileHeld: true, run: findNext },
+  find: { label: "Find", ctrlLetter: "f", run: openFind },
+  findNext: {
+    label: "Find next",
+    key: "F3",
+    repeatsWhileHeld: true,
+    run: findNext,
+  },
   findPrevious: {
+    label: "Find previous",
     key: "F3",
     shift: true,
     repeatsWhileHeld: true,
     run: findPrevious,
   },
-  open: { ctrlLetter: "o", run: () => void open() },
+  open: { label: "Open...", ctrlLetter: "o", run: () => void open() },
   close: {
+    label: "Close",
     ctrlLetter: "w",
     run: () => {
       showingWhy(askApp("close_window"));
+    },
+  },
+  minimize: {
+    label: "Minimize",
+    run: () => {
+      showingWhy(askApp("minimize_window"));
+    },
+  },
+  // Restores a maximized window; the title bar relabels its button while the window is maximized.
+  maximize: {
+    label: "Maximize",
+    run: () => {
+      showingWhy(askApp("toggle_maximize_window"));
     },
   },
 } satisfies Record<string, Command>;
 
 type CommandId = keyof typeof commands;
 
-/**
- * A line of the right-click menu: a command with its text in the menu, a separator, or the
- * system's Copy. The text sits on the line, so a command can't reach the menu without one.
- */
-type MenuLine = { command: CommandId; label: string } | "separator" | "copy";
+/** A line of the right-click menu: a command, a separator, or the system's Copy. */
+type MenuLine = CommandId | "separator" | "copy";
 
 /** The right-click menu, top to bottom. */
 const menu: MenuLine[] = [
-  { command: "reload", label: "Reload" },
-  { command: "find", label: "Find" },
+  "reload",
+  "find",
   "separator",
-  { command: "open", label: "Open..." },
+  "open",
   "separator",
   "copy",
 ];
@@ -82,13 +104,33 @@ const menu: MenuLine[] = [
 function menuEntries(): MenuEntry[] {
   return menu.map((line): MenuEntry => {
     if (line === "separator" || line === "copy") return { kind: line };
+    const command: Command = commands[line];
     return {
       kind: "command",
-      id: line.command,
-      label: line.label,
-      shortcut: shortcutOf(commands[line.command]),
+      id: line,
+      label: command.label,
+      shortcut: shortcutOf(command),
     };
   });
+}
+
+/**
+ * A button that runs the command `id`, showing `glyph`, one of the page's own bundled SVGs. A
+ * screen reader names it by the command's label, and its tooltip adds the shortcut, as in
+ * "Close (Ctrl+W)", so the button teaches the key.
+ */
+export function commandButton(id: CommandId, glyph: string): HTMLButtonElement {
+  const command: Command = commands[id];
+  const shortcut = shortcutOf(command);
+  const button = document.createElement("button");
+  button.type = "button";
+  button.setAttribute("aria-label", command.label);
+  button.title = shortcut ? `${command.label} (${shortcut})` : command.label;
+  button.innerHTML = glyph;
+  button.addEventListener("click", () => {
+    command.run();
+  });
+  return button;
 }
 
 function shortcutOf(command: Command): string | undefined {
