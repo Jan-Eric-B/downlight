@@ -1,0 +1,13 @@
+/* The accent color's scale: seven shades from Light 3 to Dark 3, amber's by default (spec: Accent
+   color). Everything the page colors with the accent takes one of these shades, and the icon draws
+   with them too (accent.test.ts). Windows' accent color comes in the same seven shades, so choosing
+   it swaps these values and nothing else. */
+:root {
+  --accent-light-3: #ffefdc;
+  --accent-light-2: #ffdbaf;
+  --accent-light-1: #fec173;
+  --accent-base: #fba613;
+  --accent-dark-1: #c27f05;
+  --accent-dark-2: #8f5d04;
+  --accent-dark-3: #623f06;
+}

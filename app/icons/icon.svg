@@ -1,7 +1,22 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
-  <!-- Placeholder: a light shining down onto a page. Source for `npx tauri icon`. -->
-  <rect x="64" y="64" width="896" height="896" rx="192" fill="#1f6feb"/>
-  <path d="M352 224h320l-64 160H416z" fill="#ffffff"/>
-  <path d="M416 384h192l144 288H272z" fill="#ffffff" opacity="0.35"/>
-  <rect x="272" y="704" width="480" height="64" rx="32" fill="#ffffff"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 48 48">
+  <!-- Downlight's amber icon. Its colors are the accent scale's shades (page/src/accent.css), and
+       page/src/accent.test.ts fails on any other.
+       It is the source of app/icons/icon.ico. To regenerate it, run
+       `npx tauri icon app/icons/icon.svg -o target/icons` and copy only target/icons/icon.ico into
+       app/icons/. Without -o the command also writes macOS, iOS, Android, Microsoft Store and PNG
+       icons into app/icons/, which the repo doesn't track. -->
+  <defs>
+    <!-- Prefixed, since ticket 04 inlines this SVG in the page, where ids share one namespace. -->
+    <linearGradient id="downlight-logo-beam" x1="0" y1="0" x2="1" y2="0.7">
+      <stop offset="0" stop-color="#FEC173"/>
+      <stop offset="1" stop-color="#FBA613"/>
+    </linearGradient>
+  </defs>
+  <path d="M11,4 H30 L40,14 V41 A3,3 0 0 1 37,44 H11 A3,3 0 0 1 8,41 V7 A3,3 0 0 1 11,4 Z" fill="#FFEFDC"/>
+  <path d="M30,4 V11 A3,3 0 0 0 33,14 H40 Z" fill="#FEC173"/>
+  <path d="M14,4 H27 V20 L20.5,26 L14,20 Z" fill="url(#downlight-logo-beam)"/>
+  <g fill="#C27F05">
+    <rect x="13" y="31" width="22" height="2.5" rx="1.25"/>
+    <rect x="13" y="37" width="15" height="2.5" rx="1.25"/>
+  </g>
 </svg>
