@@ -6,7 +6,7 @@ Spec: [Downlight v1](../spec.md)
 
 **Blocked by:** 04 (Documents look like GitHub on Mica), 08 (One process, a window per document)
 
-**Status:** ready-for-agent
+**Status:** ready-for-human
 
 - [x] The core's link resolution takes the document's path and a link target and returns one action: show a document in this window (optionally at a heading), scroll to a heading, reveal a file in the file manager, open a folder, hand a URL to the system, or nothing.
 - [x] A link to a Markdown file (one of the six extensions) shows that document in the same window, at its heading if the link has one.
