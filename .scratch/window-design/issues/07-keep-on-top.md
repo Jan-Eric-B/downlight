@@ -13,3 +13,7 @@ Spec: [Window design](../spec.md)
 - [ ] It is not saved: a new window, or the same document opened again after closing, starts without it.
 - [ ] Page tests: the command asks the app to switch it, and the button shows the state the app answers with.
 - [ ] Checked by hand: above other apps, above another Downlight window, and while maximized.
+
+## Comments
+
+**2026-11-16, decided after the review of tickets 03 and 04.** The switched-on button looks as ticket 06's comment says: its glyph in `--accent-emphasis`, no fill, dimmed with the bar in an inactive window. Whichever of 06 and 07 comes first adds the toggle state to `commandButton` once (see ticket 06's comment).

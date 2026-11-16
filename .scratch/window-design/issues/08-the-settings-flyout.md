@@ -18,3 +18,7 @@ Spec: [Window design](../spec.md)
 - [ ] Page tests: opening and closing (Esc, outside, gear), the focus, and the change the page sends for each control.
 - [ ] App tests: theme and backdrop kept across a restart, defaults when missing, and a broken value loads the default.
 - [ ] Checked by hand: every theme with every backdrop, light and dark Windows, transparency effects off, high contrast.
+
+## Comments
+
+**2026-11-16, from the review of tickets 03 and 04.** The theme has to reach WebView2's preferred color scheme, not only CSS's `color-scheme`: github-markdown-css switches light and dark on `@media (prefers-color-scheme)`, while the page's own colors and the accent roles in `page/src/accent.css` use `light-dark()`, which follows `color-scheme`. Setting only `color-scheme` on `:root` would recolor the page's parts but leave GitHub's colors in the other theme.

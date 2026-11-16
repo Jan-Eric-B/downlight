@@ -22,3 +22,5 @@ Spec: [Window design](../spec.md)
 
 - Set Windows' seven shades inline on `document.documentElement` only. Custom properties inherit as computed values, so roles declared on `:root` from the shades (ticket 03) won't change if the shades are set on an element lower down. For example an `accent.ts` with `applyAccent(scale | null)`, where `null` removes the inline shades and amber from `accent.css` shows again.
 - Have a test check that the accent message's contract sample keys match the shade names `accent.css` defines, and make `accent.test.ts`'s `SHADES` list come from that one production list, so the names aren't defined in four places (the CSS, the message type, the sample and the test).
+
+**2026-11-16, from the review of tickets 03 and 04.** Shades (`--accent-light-1`) and roles (`--accent-link`) share the `--accent-` prefix, so setting or removing the inline shades must go by the one shade list, never by a prefix match, or it would touch the roles too.
