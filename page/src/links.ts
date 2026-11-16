@@ -1,6 +1,6 @@
 import { askApp } from "./app";
 import { showingWhy } from "./notice";
-import { DOCUMENT_VIEW_SELECTOR, scrollToHeading, showingInView } from "./view";
+import { DOCUMENT_VIEW_SELECTOR, showingInView, visitHeading } from "./view";
 
 /** The document's link under `target`, the element an event happened on, if there is one. */
 function linkAt(target: EventTarget | null): HTMLAnchorElement | null {
@@ -21,8 +21,7 @@ function follow(target: string, newWindow: boolean): void {
   showingWhy(
     askApp("follow_link", { showing, target, newWindow }).then(
       async (followed) => {
-        if (followed.kind === "scrollTo")
-          await scrollToHeading(followed.heading);
+        if (followed.kind === "scrollTo") await visitHeading(followed.heading);
       },
     ),
   );

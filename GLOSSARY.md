@@ -28,6 +28,10 @@ _Avoid_: Check, complete, done
 Showing the document again after its file changed, at the same reading position.
 _Avoid_: Refresh
 
+**History**:
+The documents a window showed and the headings a link scrolled it to, in the order the reader visited them, which Back and Forward step through, each step returning to the reading position the view had there. It belongs to its window, isn't saved and is gone when the window closes. Going somewhere new after Back drops what Forward would have gone to.
+_Avoid_: Navigation, back stack
+
 **Notice**:
 A short message a window shows the reader for a few seconds, such as why a dropped file didn't open or why the document's file isn't watched. One that comes before the window's page is ready is held until the page first asks for its document.
 _Avoid_: Toast, alert, popup

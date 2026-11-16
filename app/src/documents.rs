@@ -9,6 +9,9 @@
 //! another document, bringing a window to the front, and undoing the show when part of it fails.
 //! What a window's page is told goes through [`Pages`], and what is done to a window itself
 //! through [`Windows`], so all of this is tested without a webview.
+//!
+//! Each window also keeps its history (ticket 12): the documents it showed before and after the
+//! one it shows, which Back and Forward give it back ([`history`]).
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -25,8 +28,11 @@ use crate::timing::Timing;
 use crate::watch::{Change, Watch};
 use crate::{APP_NAME, platform};
 
+pub mod history;
 #[cfg(test)]
 pub mod recorder;
+
+use history::{History, Steps, WindowRecord};
 
 /// Which window shows which document, by window label. The app's managed state.
 pub struct Documents {
@@ -127,8 +133,8 @@ struct WindowTable {
     labels_issued: usize,
     /// How many times a window has been given a document, for each to get its own [`Showing`].
     showings_issued: u64,
-    /// Every open window, with the document it shows now; None while it shows none.
-    shown: HashMap<String, Option<ShownDocument>>,
+    /// Every open window, with the document it shows now and its history.
+    windows: HashMap<String, WindowRecord>,
 }
 
 /// One time a window was given a document, unique while the process runs: a window given the
@@ -171,24 +177,43 @@ struct ShownDocument {
     /// A notice about this document, held for the page's first request. Held on the document's
     /// entry, it goes when the window is given another document.
     held_notice: Option<Notice>,
-    /// The heading the window shows the document at, from a link like `guide.md#install` (ticket
-    /// 11). Handed over with every show rather than taken by the first, so that of two links
-    /// followed in quick succession, the page's latest request still gets it; never with a
-    /// reload, which keeps the reading position.
-    heading: Option<String>,
+    /// How the window came to show the document, which says where its page shows it. Handed over
+    /// with every show rather than taken by the first, so that of two links followed in quick
+    /// succession, the page's latest request still gets the heading; never with a reload, which
+    /// keeps the reading position.
+    arrival: Arrival,
+}
+
+/// How a window came to show its document.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Arrival {
+    /// A launch, the dialog, a drop or a link gave it, at this heading from a link like
+    /// `guide.md#install` (ticket 11), or at its top without one.
+    Given { heading: Option<String> },
+    /// Back or Forward gave it back (ticket 12), so the page returns to where it was in it.
+    Stepped,
 }
 
 impl ShownDocument {
     fn given(document: DocumentAt<'_>, key: PathBuf, showing: Showing) -> Self {
+        let arrival = Arrival::Given {
+            heading: document.heading.map(str::to_owned),
+        };
+        Self::arrived(document.path.to_owned(), key, showing, arrival)
+    }
+
+    /// The document at `path`, with `key`, shown as `showing` after `arrival`. Its render starts
+    /// now.
+    fn arrived(path: PathBuf, key: PathBuf, showing: Showing, arrival: Arrival) -> Self {
         Self {
             showing,
-            path: document.path.to_owned(),
+            render_ahead: Some(render::start(&path)),
+            path,
             key,
-            render_ahead: Some(render::start(document.path)),
             watch: None,
             page_asked: false,
             held_notice: None,
-            heading: document.heading.map(str::to_owned),
+            arrival,
         }
     }
 
@@ -252,17 +277,17 @@ pub enum Given {
     AlreadyElsewhere(String),
 }
 
-/// What [`Documents::claim`] recorded under the table's lock, for [`Documents::give`] to carry out
-/// after it.
+/// What [`Documents::claim`], or a step's claim, recorded under the table's lock, for
+/// [`Documents::carry_out`] to carry out after it.
 enum Claimed {
     /// A new window with this label is to open.
     NewWindow(String),
-    /// `window` shows the document now as `showing`, in place of `left` (None while it showed
-    /// none), and is to be retitled and its page told; `left` is put back if that fails.
+    /// `window` shows the document now as `showing`, and is to be retitled and its page told;
+    /// `left`, what the window was before, is put back if that fails.
     Changed {
         window: String,
         showing: Showing,
-        left: Box<Option<ShownDocument>>,
+        left: Box<WindowRecord>,
     },
     /// The document is open already in this window, the one the request came from.
     AlreadyHere(String),
@@ -288,6 +313,8 @@ struct Handover {
     place: Place,
     /// A notice about the document held until the page first asked for it.
     notice: Option<Notice>,
+    /// Whether the window has a document to go back to, and one to go forward to.
+    steps: Steps,
 }
 
 /// The file of the document a window shows, as the page's title bar shows it (window design
@@ -347,15 +374,20 @@ enum Place {
     Show { heading: Option<String> },
     /// The page's view shows this showing already: show the new render at the reading position.
     Reload,
+    /// The page's view shows another showing, and Back or Forward gave the window this one back
+    /// (ticket 12): show the document where the page's view was when it left this showing, which
+    /// only the page knows.
+    Return,
 }
 
 impl Place {
     /// What the timing switch reports the render as: by the place the page gets rather than by
     /// why the render started, so a reload by hand, which reads the file on the page's request,
-    /// is reported as a reload too (ticket 26). `npm run measure` reads both.
+    /// is reported as a reload too (ticket 26). `npm run measure` reads both. A return reads and
+    /// renders the document as a show does.
     fn reported_as(&self) -> &'static str {
         match self {
-            Self::Show { .. } => "read-and-render",
+            Self::Show { .. } | Self::Return => "read-and-render",
             Self::Reload => "reload",
         }
     }
@@ -380,7 +412,9 @@ impl Documents {
         let window = {
             let mut table = self.lock();
             let window = table.next_label();
-            table.shown.insert(window.clone(), None);
+            table
+                .windows
+                .insert(window.clone(), WindowRecord::default());
             window
         };
         self.open(&window, None)?;
@@ -405,15 +439,27 @@ impl Documents {
     ///
     /// Fails when the target window has closed, or a part of the show fails. A show that fails is
     /// undone: a new window that can't open is forgotten, so its document opens anew, and a window
-    /// whose title or page can't be changed keeps the document it showed, so the table and the
-    /// window agree (ticket 22's open item 6).
+    /// whose title or page can't be changed keeps the document it showed, and its history, so the
+    /// table and the window agree (ticket 22's open item 6).
+    ///
+    /// A window given another document keeps the one it showed as its last step back, and has
+    /// nothing to go forward to any more (ticket 12). Given a document it showed before, it shows
+    /// it anew, as another showing, at its top or heading: only Back and Forward return to where
+    /// it was.
     pub fn give(&self, document: DocumentAt<'_>, target: Target<'_>) -> Result<Given, ShowError> {
         let key = document_key(document.path);
-        match self.claim(document, key.clone(), target) {
+        let claimed = self.claim(document, key.clone(), target);
+        self.carry_out(claimed, document.path, key)
+    }
+
+    /// Carries out what a claim recorded for the document at `path`, with `key`, as
+    /// [`Documents::give`] describes, for a show and a step alike.
+    fn carry_out(&self, claimed: Claimed, path: &Path, key: PathBuf) -> Result<Given, ShowError> {
+        match claimed {
             Claimed::NewWindow(window) => {
-                self.open(&window, Some(document.path))
+                self.open(&window, Some(path))
                     .map_err(ShowError::NotOpened)?;
-                self.watch(&window, document.path, key);
+                self.watch(&window, path, key);
                 Ok(Given::NewWindow(window))
             }
             Claimed::Changed {
@@ -421,9 +467,9 @@ impl Documents {
                 showing,
                 left,
             } => {
-                self.change(&window, document.path, showing, *left)
+                self.change(&window, path, showing, *left)
                     .map_err(ShowError::NotTaken)?;
-                self.watch(&window, document.path, key);
+                self.watch(&window, path, key);
                 Ok(Given::Changed(window))
             }
             Claimed::AlreadyHere(window) => {
@@ -463,7 +509,7 @@ impl Documents {
             let heading = document.heading.map(str::to_owned);
             let scroll_to = match table.shown_mut(&window, &key) {
                 Some(shown) if !shown.page_asked && heading.is_some() => {
-                    shown.heading = heading;
+                    shown.arrival = Arrival::Given { heading };
                     None
                 }
                 _ => heading,
@@ -476,15 +522,19 @@ impl Documents {
             Target::NewWindow | Target::NewWindowFrom(_) => {
                 let window = table.next_label();
                 let shown = ShownDocument::given(document, key, table.next_showing());
-                table.shown.insert(window.clone(), Some(shown));
+                let record = WindowRecord {
+                    shown: Some(shown),
+                    history: History::default(),
+                };
+                table.windows.insert(window.clone(), record);
                 Claimed::NewWindow(window)
             }
             Target::Window(window) => {
                 let showing = table.next_showing();
-                let Some(entry) = table.shown.get_mut(window) else {
+                let Some(record) = table.windows.get_mut(window) else {
                     return Claimed::WindowGone;
                 };
-                let left = entry.replace(ShownDocument::given(document, key, showing));
+                let left = record.given(ShownDocument::given(document, key, showing));
                 Claimed::Changed {
                     window: window.to_owned(),
                     showing,
@@ -506,16 +556,16 @@ impl Documents {
             .inspect_err(|_| self.forget(window))
     }
 
-    /// Titles `window` after `document`, which it was just given as `showing` in place of `left`,
-    /// and tells its page to ask for it. The title goes first, so that a page told can't show the
-    /// new document under the old title. If either fails, the window keeps `left` and its title,
-    /// so the table, the title and the page agree again.
+    /// Titles `window` after `document`, which it was just given as `showing`, and tells its page
+    /// to ask for it. The title goes first, so that a page told can't show the new document under
+    /// the old title. If either fails, the window is `left` again, what it was before, with its
+    /// title, so the table, the title and the page agree again.
     fn change(
         &self,
         window: &str,
         document: &Path,
         showing: Showing,
-        left: Option<ShownDocument>,
+        left: WindowRecord,
     ) -> Result<(), WindowError> {
         let windows = &self.inner.windows;
         let changed = windows
@@ -524,22 +574,27 @@ impl Documents {
         if changed.is_err() {
             // The error that failed the change is the one the reader is told; a title that can't
             // be put back either stays as wrong as the failure left it.
-            let left_path = left.as_ref().map(|left| left.path.as_path());
+            let left_path = left.shown.as_ref().map(|left| left.path.as_path());
             let _ = windows.set_title(window, &title_of(left_path));
             self.put_back(window, showing, left);
         }
         changed
     }
 
-    /// Gives `window` back `left`, the document it showed before it was given one as `showing`,
-    /// unless it has been given another since, or closed.
-    fn put_back(&self, window: &str, showing: Showing, left: Option<ShownDocument>) {
+    /// Makes `window` `left` again, what it was before it was given a document as `showing`: the
+    /// document it showed and its history. Unless it has been given another since, or closed.
+    fn put_back(&self, window: &str, showing: Showing, left: WindowRecord) {
         // Dropped after the lock, since dropping a watch stops it.
         let _dropped = {
             let mut table = self.lock();
-            match table.shown.get_mut(window) {
-                Some(entry) if entry.as_ref().is_some_and(|shown| shown.showing == showing) => {
-                    std::mem::replace(entry, left)
+            match table.windows.get_mut(window) {
+                Some(record)
+                    if record
+                        .shown
+                        .as_ref()
+                        .is_some_and(|shown| shown.showing == showing) =>
+                {
+                    std::mem::replace(record, left)
                 }
                 _ => left,
             }
@@ -557,18 +612,24 @@ impl Documents {
     /// `page_shows` (None while it shows no document), or gives None while the window shows none:
     /// the render started when the window was given the document or its file changed, if the page
     /// hasn't taken it yet, and a new read of its file otherwise, as for F5. The page shows the
-    /// document when its view shows another showing, and reloads it when its view shows this one.
-    /// A notice held until the page asked goes with the answer rather than as a message, since
-    /// the page's listener for notices may not be registered yet (ticket 26).
+    /// document when its view shows another showing, returns to where it was in it when Back or
+    /// Forward gave it back, and reloads it when its view shows this one. A notice held until the
+    /// page asked goes with the answer rather than as a message, since the page's listener for
+    /// notices may not be registered yet (ticket 26).
     fn handover(&self, window: &str, page_shows: Option<Showing>) -> Option<Handover> {
         let mut table = self.lock();
-        let shown = table.shown.get_mut(window)?.as_mut()?;
+        let record = table.windows.get_mut(window)?;
+        let steps = record.history.steps();
+        let shown = record.shown.as_mut()?;
         shown.page_asked = true;
         let place = if page_shows == Some(shown.showing) {
             Place::Reload
         } else {
-            Place::Show {
-                heading: shown.heading.clone(),
+            match &shown.arrival {
+                Arrival::Given { heading } => Place::Show {
+                    heading: heading.clone(),
+                },
+                Arrival::Stepped => Place::Return,
             }
         };
         Some(Handover {
@@ -580,6 +641,7 @@ impl Documents {
             file: DocumentFile::of(&shown.path),
             place,
             notice: shown.held_notice.take(),
+            steps,
         })
     }
 
@@ -588,8 +650,9 @@ impl Documents {
     /// take it from here, never from the page.
     pub fn document_path(&self, window: &str) -> Option<PathBuf> {
         self.lock()
-            .shown
+            .windows
             .get(window)?
+            .shown
             .as_ref()
             .map(|shown| shown.path.clone())
     }
@@ -600,8 +663,9 @@ impl Documents {
     /// window has left would resolve against the new document's folder.
     pub fn document_path_shown_as(&self, window: &str, showing: Showing) -> Option<PathBuf> {
         self.lock()
-            .shown
+            .windows
             .get(window)?
+            .shown
             .as_ref()
             .filter(|shown| shown.showing == showing)
             .map(|shown| shown.path.clone())
@@ -616,9 +680,10 @@ impl Documents {
     }
 
     /// Forgets a window that closed or never opened, so its document opens anew. A render started
-    /// for it, and the watch on its document, go with it.
+    /// for it, the watch on its document and its history go with it.
     pub fn forget(&self, window: &str) {
-        self.lock().shown.remove(window);
+        // Dropped after the lock, since dropping a watch stops it.
+        let _forgotten = self.lock().windows.remove(window);
     }
 
     /// Starts watching `document`'s file, which `window` was just given with `key`, on a blocking
@@ -770,14 +835,17 @@ pub async fn render_document(
         place: handover.place,
         content,
         notice: handover.notice,
+        steps: handover.steps,
     }))
 }
 
 /// What the page gets when it asks for its document: the showing the window is at, the
-/// document's file, what to do with the render (show it at a heading or the top, or reload it at
-/// the reading position), the rendered document or why it can't be read, and a notice held until
-/// the page first asked, or null. A read that fails is part of the answer, since only the answer
-/// says whether the page keeps its last render, on a reload, or shows why, on a show (ticket 23).
+/// document's file, what to do with the render (show it at a heading or the top, return to where
+/// the page was in it, or reload it at the reading position), the rendered document or why it
+/// can't be read, a notice held until the page first asked, or null, and whether the window has
+/// a document to go back or forward to. A read that fails is part of the answer, since only the
+/// answer says whether the page keeps its last render, on a reload, or shows why, on a show
+/// (ticket 23).
 #[derive(serde::Serialize)]
 pub struct DocumentToShow {
     showing: Showing,
@@ -787,6 +855,7 @@ pub struct DocumentToShow {
     #[serde(flatten)]
     content: Content,
     notice: Option<Notice>,
+    steps: Steps,
 }
 
 /// The rendered document, which goes as its HTML, or why it can't be read.
@@ -799,21 +868,23 @@ enum Content {
 
 /// A sample of each answer [`render_document`] gives, by name, which the page's tests read
 /// (`app/src/contract.rs`, ticket 27): the rendered document goes as its HTML, the heading only
-/// with a show, a read that fails as why, the document's file with each, and a held notice with
-/// the first (ticket 26).
+/// with a show, a read that fails as why, the document's file with each, a held notice with the
+/// first (ticket 26), and whether there is somewhere to go back or forward to with each, which is
+/// nowhere but after a return (ticket 12).
 #[cfg(test)]
 pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
     // A new place or content stops the build here: give it a sample below, then name it here.
     let _sampled = |answer: &Option<DocumentToShow>| match answer {
         None
         | Some(DocumentToShow {
-            place: Place::Show { .. } | Place::Reload,
+            place: Place::Show { .. } | Place::Reload | Place::Return,
             content: Content::Document(_) | Content::Error(_),
             notice: None | Some(_),
             ..
         }) => {}
     };
     let answer_with = |place: Place, content: Content, notice: Option<Notice>| {
+        let returned = place == Place::Return;
         serde_json::to_value(Some(DocumentToShow {
             showing: Showing::sample(),
             // Written out rather than `DocumentFile::of`, so the samples are the same on every
@@ -825,6 +896,10 @@ pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
             place,
             content,
             notice,
+            steps: Steps {
+                back: returned,
+                forward: returned,
+            },
         }))
     };
     let answer = |place: Place, content: Content| answer_with(place, content, None);
@@ -857,7 +932,9 @@ pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
         "showAtTop": answer(at_top(), rendered())?,
         "showWithHeldNotice": answer_with(at_top(), rendered(), Some(held_notice))?,
         "reload": answer(Place::Reload, rendered())?,
+        "return": answer(Place::Return, rendered())?,
         "unreadShow": answer(at_top(), unread())?,
+        "unreadReturn": answer(Place::Return, unread())?,
         "unreadReload": answer(Place::Reload, unread())?,
         "noDocument": serde_json::to_value(None::<DocumentToShow>)?,
     }))
@@ -882,15 +959,16 @@ fn document_key(document: &Path) -> PathBuf {
 impl WindowTable {
     /// What `window` shows, while it shows the document with `key`.
     fn shown_mut(&mut self, window: &str, key: &Path) -> Option<&mut ShownDocument> {
-        self.shown
+        self.windows
             .get_mut(window)
-            .and_then(Option::as_mut)
+            .and_then(|record| record.shown.as_mut())
             .filter(|shown| shown.key == key)
     }
 
     fn window_showing(&self, key: &Path) -> Option<String> {
-        self.shown.iter().find_map(|(label, shown)| {
-            shown
+        self.windows.iter().find_map(|(label, record)| {
+            record
+                .shown
                 .as_ref()
                 .is_some_and(|shown| shown.key == key)
                 .then(|| label.clone())

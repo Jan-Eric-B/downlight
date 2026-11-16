@@ -46,6 +46,20 @@ export type Read = () => Promise<string | AtHeading | null>;
 /** The showing the fake app's window is at (`Showing` in `app/src/documents.rs`). */
 let currentShowing = 0;
 
+/** The showings the fake app has issued, each one new. */
+let showingsIssued = 1;
+
+/**
+ * The fake app window's history (`History` in `app/src/documents/history.rs`): the showings to go
+ * back and forward to, nearest last, and whether Back or Forward gave the window the showing it is
+ * at, so that its page returns to where it was.
+ */
+let windowHistory: { back: number[]; forward: number[]; stepped: boolean } = {
+  back: [],
+  forward: [],
+  stepped: false,
+};
+
 /**
  * How the fake app answers each command a test gives it, in the module's types, so a test can't
  * answer a command the app doesn't have, or answer it in another shape. A command a test leaves
@@ -90,11 +104,13 @@ function answer<C extends Command>(
 
 /**
  * Stands in for the app behind Tauri's IPC: answers the page's commands as `app` says and passes
- * on the messages a test sends (`tell`). Its window is back at its first showing, and it has been
- * asked nothing yet, so that no test inherits another's.
+ * on the messages a test sends (`tell`). Its window is back at its first showing, with no history,
+ * and it has been asked nothing yet, so that no test inherits another's.
  */
 export function fakeTheApp(app: FakeApp = {}): void {
   currentShowing = 0;
+  showingsIssued = 1;
+  windowHistory = { back: [], forward: [], stepped: false };
   asked = [];
   mockIPC((command, args) => answer(app, command as Command, args), {
     shouldMockEvents: true,
@@ -240,9 +256,44 @@ export function titleBarSample<N extends keyof TitleBarArguments>(
  */
 export async function giveAnotherDocument(): Promise<number> {
   const left = currentShowing;
-  currentShowing += 1;
+  windowHistory.back.push(left);
+  windowHistory.forward = [];
+  windowHistory.stepped = false;
+  currentShowing = showingsIssued++;
   await tell("ask-for-document", null);
   return left;
+}
+
+/**
+ * Answers `step_history` as the app does (`Documents::step`): gives the fake app's window the
+ * showing it went back or forward to and tells the page, which then asks for it, or does nothing
+ * when there is nowhere to go. Resolves once the page has been told.
+ */
+export async function stepAsTheApp({
+  step,
+}: ArgsOf<"step_history">): Promise<null> {
+  const [to, from] =
+    step === "back"
+      ? [windowHistory.back, windowHistory.forward]
+      : [windowHistory.forward, windowHistory.back];
+  const next = to.pop();
+  if (next === undefined) return null;
+  from.push(currentShowing);
+  currentShowing = next;
+  windowHistory.stepped = true;
+  await tell("ask-for-document", null);
+  return null;
+}
+
+/**
+ * Answers `forget_forward` as the app does (`Documents::forget_forward`): the fake app's window,
+ * while it is at `showing`, has nowhere to go forward to any more.
+ */
+export function forgetForwardAsTheApp({
+  showing,
+}: ArgsOf<"forget_forward">): null {
+  if (showing === currentShowing) windowHistory.forward = [];
+  return null;
 }
 
 /**
@@ -271,8 +322,9 @@ const SHOWN_FILE: DocumentFile = { name: "a.md", path: "C:\\docs\\a.md" };
 
 /**
  * Answers `render_document` as the app does (`Documents::handover`): a page whose view shows the
- * current showing reloads its document, and any other page shows it, at its heading or the top.
- * Decided when the page asks, before the read, as the app does. `args` are the request's.
+ * current showing reloads its document, and any other page returns to it after Back or Forward,
+ * or else shows it, at its heading or the top. Decided when the page asks, before the read, as
+ * the app does. `args` are the request's.
  */
 export async function answerAsTheApp(
   args: ArgsOf<"render_document">,
@@ -280,9 +332,18 @@ export async function answerAsTheApp(
 ): Promise<DocumentToShow> {
   const showing = currentShowing;
   const reloads = args.showing === showing;
+  const { stepped } = windowHistory;
   const placeAt = (heading: string | null): Place =>
-    reloads ? { place: "reload" } : { place: "show", heading };
-  const handedOver = { showing, file: SHOWN_FILE, notice: null };
+    reloads
+      ? { place: "reload" }
+      : stepped
+        ? { place: "return" }
+        : { place: "show", heading };
+  const steps = {
+    back: windowHistory.back.length > 0,
+    forward: windowHistory.forward.length > 0,
+  };
+  const handedOver = { showing, file: SHOWN_FILE, notice: null, steps };
   let content: Awaited<ReturnType<Read>>;
   try {
     content = await read();

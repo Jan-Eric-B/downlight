@@ -204,6 +204,62 @@ test("the app's answer that a reload can't be read keeps the document and says w
   );
 });
 
+test("the app's answer to return to a document shows it, heard as a return", async () => {
+  answerWithSamples("showAtTop", "return");
+  await startDocumentView(0);
+  await settle();
+  const reasons: ShownReason[] = [];
+  const stop = whenDocumentShown(({ reason }) => {
+    reasons.push(reason);
+  });
+
+  await requestDocument();
+  stop();
+  expect(reasons).toEqual(["return"]);
+  expect(heading()).toBe("Install");
+});
+
+test("the app's answer that a document returned to can't be read shows why", async () => {
+  const unread = unreadFileIn("unreadReturn");
+  answerWithSamples("showAtTop", "unreadReturn");
+  await startDocumentView(0);
+  await settle();
+
+  await requestDocument();
+  expect(document.querySelector("article")?.textContent).toContain(
+    `Can't read ${unread.name} in ${unread.folder ?? ""}`,
+  );
+});
+
+test.each([
+  ["showAtTop", false],
+  ["return", true],
+])(
+  "the app's %s answer offers Back and Forward in the menu as its steps say",
+  async (name, offered) => {
+    let entries: MenuEntry[] = [];
+    fakeTheApp({
+      render_document: () => renderDocumentSample(name),
+      show_document_menu: (args) => {
+        entries = args.entries;
+        return null;
+      },
+    });
+    startCommands(stopPage.signal);
+    await startDocumentView(0);
+
+    document.body.dispatchEvent(
+      new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+    );
+    await settle();
+    const enabled = (id: string) =>
+      entries.some(
+        (entry) => entry.kind === "command" && entry.id === id && entry.enabled,
+      );
+    expect([enabled("back"), enabled("forward")]).toEqual([offered, offered]);
+  },
+);
+
 test("the app's answer that the window shows no document offers to open one", async () => {
   answerWithSamples("noDocument");
   await startDocumentView(0);

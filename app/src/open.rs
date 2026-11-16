@@ -118,6 +118,7 @@ impl From<OpenError> for Notice {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::documents::history::Step;
     use crate::documents::recorder::recorded;
 
     #[test]
@@ -144,6 +145,18 @@ mod tests {
         );
         assert_eq!(documents.document_path(&window), Some(notes));
         assert_eq!(recorder.sent(), [(window, Message::AskForDocument)]);
+    }
+
+    #[test]
+    fn drop_of_another_document_leaves_a_step_back_to_the_one_the_window_showed() {
+        let notes = repo_file("core/tests/fixtures/notes.md");
+        let readme = repo_file("core/tests/fixtures/readme.md");
+        let (documents, _) = recorded();
+        let window = documents.open_empty().unwrap();
+        show_dropped(&documents, &window, std::slice::from_ref(&notes));
+        show_dropped(&documents, &window, &[readme]);
+        documents.step(&window, Step::Back).unwrap();
+        assert_eq!(documents.document_path(&window), Some(notes));
     }
 
     #[test]

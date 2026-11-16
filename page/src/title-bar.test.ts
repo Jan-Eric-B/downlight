@@ -222,6 +222,7 @@ function shownFrom(file: DocumentFile, showing = 0): DocumentToShow {
     showing,
     file,
     notice: null,
+    steps: { back: false, forward: false },
     place: "show",
     heading: null,
     document: `<h1>${file.name}</h1>\n<p><a href="guide.md">The guide</a></p>\n`,

@@ -240,6 +240,78 @@ describe("Reload", () => {
   });
 });
 
+// With nowhere to go in the document in view, a step goes to the app (`history.test.ts` covers
+// where it lands).
+describe("Back and Forward", () => {
+  /** Each `step_history` call's step since the view showed its document. */
+  let steps: ArgsOf<"step_history">["step"][];
+
+  beforeEach(async () => {
+    app.render_document = (args) =>
+      answerAsTheApp(args, () => Promise.resolve(readme));
+    app.step_history = ({ step }) => {
+      steps.push(step);
+      return null;
+    };
+    steps = [];
+    await startDocumentView(0);
+  });
+
+  test.each([
+    ["Alt+Left", { altKey: true, key: "ArrowLeft", code: "ArrowLeft" }],
+    ["the Browser Back key", { key: "BrowserBack", code: "BrowserBack" }],
+  ])("%s goes back", (_keys, keys) => {
+    const event = press(keys);
+    expect(steps).toEqual(["back"]);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  test.each([
+    ["Alt+Right", { altKey: true, key: "ArrowRight", code: "ArrowRight" }],
+    [
+      "the Browser Forward key",
+      { key: "BrowserForward", code: "BrowserForward" },
+    ],
+  ])("%s goes forward", (_keys, keys) => {
+    const event = press(keys);
+    expect(steps).toEqual(["forward"]);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  test.each([
+    ["back", 3],
+    ["forward", 4],
+  ])("the mouse's %s button goes %s", (step, button) => {
+    const event = new MouseEvent("mouseup", {
+      button,
+      bubbles: true,
+      cancelable: true,
+    });
+    document.body.dispatchEvent(event);
+    expect(steps).toEqual([step]);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  test.each([0, 1, 2])("mouse button %i goes nowhere", (button) => {
+    const event = new MouseEvent("mouseup", {
+      button,
+      bubbles: true,
+      cancelable: true,
+    });
+    document.body.dispatchEvent(event);
+    expect(steps).toEqual([]);
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  // The arrow keys alone scroll the document.
+  test("Left and Right without Alt go nowhere", () => {
+    const event = press({ key: "ArrowLeft", code: "ArrowLeft" });
+    press({ key: "ArrowRight", code: "ArrowRight" });
+    expect(steps).toEqual([]);
+    expect(event.defaultPrevented).toBe(false);
+  });
+});
+
 // Holding F3 steps on through Find's matches, as in a browser.
 test.each([
   ["F3", { key: "F3", code: "F3" }],
@@ -261,7 +333,7 @@ test("a key that names no shortcut never minimizes or maximizes the window", () 
 });
 
 describe("the right-click menu", () => {
-  test("replaces the webview's menu with Reload, Find, Open and Copy", () => {
+  test("replaces the webview's menu with Back, Forward, Reload, Find, Open and Copy", () => {
     let entries: MenuEntry[] = [];
     app.show_document_menu = (args) => {
       entries = args.entries;
@@ -273,11 +345,21 @@ describe("the right-click menu", () => {
     });
     document.body.dispatchEvent(event);
     expect(event.defaultPrevented).toBe(true);
+    // With nowhere to go back or forward to, Back and Forward are unavailable.
+    const command = (id: string, label: string, shortcut: string) => ({
+      kind: "command",
+      id,
+      label,
+      shortcut,
+      enabled: id !== "back" && id !== "forward",
+    });
     expect(entries).toEqual([
-      { kind: "command", id: "reload", label: "Reload", shortcut: "F5" },
-      { kind: "command", id: "find", label: "Find", shortcut: "Ctrl+F" },
+      command("back", "Back", "Alt+Left"),
+      command("forward", "Forward", "Alt+Right"),
+      command("reload", "Reload", "F5"),
+      command("find", "Find", "Ctrl+F"),
       { kind: "separator" },
-      { kind: "command", id: "open", label: "Open...", shortcut: "Ctrl+O" },
+      command("open", "Open...", "Ctrl+O"),
       { kind: "separator" },
       { kind: "copy" },
     ]);

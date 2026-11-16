@@ -4,9 +4,12 @@ import {
   type DocumentFile,
   type DocumentToShow,
   type Notice,
+  type Step,
+  type Steps,
 } from "./app";
 import { addCopyButtons } from "./copy";
-import { noticeContent, showNotice } from "./notice";
+import { WindowHistory, type Line } from "./history";
+import { noticeContent, showingWhy, showNotice } from "./notice";
 import { open } from "./open";
 import {
   afterNextFrame,
@@ -33,27 +36,32 @@ export const DOCUMENT_VIEW_SELECTOR = "article.markdown-body";
 export const SCROLLER_SELECTOR = ".view-scroller";
 
 /**
- * Scrolls the shown document to the element whose id is `heading`, or else to the anchor with
- * that name, as a browser does for a URL's fragment; null is the top. A heading in a closed
- * section opens it, as Find does. Only the document is searched, never the page's own elements. A
- * heading that isn't there leaves the view where it is.
+ * The element of the shown document whose id is `heading`, or else the anchor with that name, as
+ * a browser finds a URL's fragment. Only the document is searched, never the page's own elements.
  */
-export async function scrollToHeading(heading: string | null): Promise<void> {
+function headingTarget(heading: string): Element | undefined {
+  const view = document.querySelector(DOCUMENT_VIEW_SELECTOR);
+  if (!view) return undefined;
+  // By id and by name rather than by a selector, which would need the heading escaped; the
+  // page's own elements have no ids or names.
+  const byId = document.getElementById(heading);
+  return byId && view.contains(byId)
+    ? byId
+    : [...document.getElementsByName(heading)].find(
+        (element) => element.localName === "a" && view.contains(element),
+      );
+}
+
+/**
+ * Scrolls the shown document to `heading` (`headingTarget`); null is the top. A heading in a
+ * closed section opens it, as Find does. A heading that isn't there leaves the view where it is.
+ */
+async function scrollToHeading(heading: string | null): Promise<void> {
   if (heading === null) {
     scrollDocumentToTop();
     return;
   }
-  const view = document.querySelector(DOCUMENT_VIEW_SELECTOR);
-  if (!view) return;
-  // By id and by name rather than by a selector, which would need the heading escaped; the
-  // page's own elements have no ids or names.
-  const byId = document.getElementById(heading);
-  const target =
-    byId && view.contains(byId)
-      ? byId
-      : [...document.getElementsByName(heading)].find(
-          (element) => element.localName === "a" && view.contains(element),
-        );
+  const target = headingTarget(heading);
   if (!target) return;
   openSectionsAround(target);
   await scrollToTop(target, () => target.isConnected);
@@ -71,10 +79,11 @@ function scrollDocumentToTop(): void {
 
 /**
  * Why the view's content was replaced, as the `whenDocumentShown` listeners hear it: `shown` when
- * the window shows its document or another one, the empty state or why it can't show one, and
- * `reload` when it shows the document's new render at the reading position.
+ * the window shows its document or another one, the empty state or why it can't show one,
+ * `reload` when it shows the document's new render at the reading position, and `return` when
+ * Back or Forward gave the window a document it showed before, or why it can't show it now.
  */
-export type ShownReason = "shown" | "reload";
+export type ShownReason = "shown" | "reload" | "return";
 
 /** What the `whenDocumentShown` listeners hear each time the view's content was replaced. */
 interface Shown {
@@ -113,6 +122,9 @@ export function whenDocumentShown(listener: ShownListener): () => void {
 interface StartedView {
   request: () => Promise<void>;
   showing: () => number | null;
+  step: (step: Step) => void;
+  canStep: (step: Step) => boolean;
+  visitHeading: (heading: string | null) => Promise<void>;
 }
 
 /** The started view, until a view starts. */
@@ -137,12 +149,37 @@ export function showingInView(): number | null {
 }
 
 /**
+ * Goes back or forward in the window's history (ticket 12), as Alt+Left and Alt+Right, the
+ * mouse's side buttons and the right-click menu do: to the heading visited before or after in the
+ * document in view, back at the reading position the view had there, or else to the document the
+ * window showed before or after, which the app gives the window as any other. Nowhere to go does
+ * nothing. Does nothing until the view has started.
+ */
+export function stepThroughHistory(step: Step): void {
+  theView?.step(step);
+}
+
+/** Whether `step` goes anywhere now, for the right-click menu. */
+export function canStepThroughHistory(step: Step): boolean {
+  return theView?.canStep(step) ?? false;
+}
+
+/**
+ * Scrolls the shown document to `heading`, as a link does, or to its top for null: one more step
+ * in the window's history, which Back returns from to where the view was. A heading the document
+ * doesn't have leaves the view, and the history, as they are.
+ */
+export function visitHeading(heading: string | null): Promise<void> {
+  return theView?.visitHeading(heading) ?? Promise.resolve();
+}
+
+/**
  * The reader's state in the view, read just before its content is swapped and landed with just
- * after. Ticks (ticket 13) and a history entry's line (ticket 12) belong here.
+ * after. Ticks (ticket 13) belong here.
  */
 interface ReaderState {
   /** The reading position, or undefined at the start of the document. */
-  line: number | undefined;
+  line: Line;
 }
 
 /**
@@ -173,6 +210,28 @@ const atReadingPosition: Landing = (view, { line }, isLatest) =>
     ? Promise.resolve(true)
     : returnToReadingPosition(view, line, isLatest);
 
+/**
+ * Puts the view at the reading position `line`, or at the top for undefined. Returns false if
+ * `stillWanted` said no after the frame.
+ */
+function landAtLine(
+  view: HTMLElement,
+  line: Line,
+  stillWanted: () => boolean,
+): Promise<boolean> {
+  // From the top, so a line with no block before it shows the top rather than where the view was.
+  scrollDocumentToTop();
+  return line === undefined
+    ? Promise.resolve(true)
+    : returnToReadingPosition(view, line, stillWanted);
+}
+
+/** Lands where the view was in `showing` when it last left it, as `history` keeps it. */
+function atReturn(history: WindowHistory, showing: number): Landing {
+  return (view, _before, isLatest) =>
+    landAtLine(view, history.returnTo(showing), isLatest);
+}
+
 /** What a request puts in the view, and how it lands there. */
 interface Placement {
   reason: ShownReason;
@@ -186,30 +245,50 @@ interface Placement {
   /** The core's rendered HTML, why the document can't be shown, or null for the empty state. */
   content: { html: string } | { why: Notice } | null;
   land: Landing;
+  /**
+   * Whether the app has a document to go back or forward to, or null when the app couldn't be
+   * asked.
+   */
+  steps: Steps | null;
 }
+
+/** Nowhere to go, as for a window that shows no document. */
+const NO_STEPS: Steps = { back: false, forward: false };
 
 /** What a request does when the view keeps what it shows: tell the reader why. */
 interface Telling {
   notice: Notice;
 }
 
-/** Shows why the window can't show its document from `file`, in place of any render. */
-function placeError(why: Notice, file: DocumentFile | null): Placement {
+/**
+ * Shows why the window can't show its document from `file`, in place of any render, for a show
+ * or a return (`reason`), with what the app said of its history in `steps`.
+ */
+function placeError(
+  why: Notice,
+  file: DocumentFile | null,
+  reason: ShownReason,
+  steps: Steps | null,
+): Placement {
   return {
-    reason: "shown",
+    reason,
     showing: null,
     file,
     content: { why },
     land: atTop,
+    steps,
   };
 }
 
 /**
- * What to do with the app's answer: show the document at its heading or top, or reload it at the
- * reading position. A reload that can't read the file keeps the last render and says why, so the
- * reader can keep reading.
+ * What to do with the app's answer: show the document at its heading or top, return to where the
+ * view was in it, as `history` keeps it, or reload it at the reading position. A reload that can't
+ * read the file keeps the last render and says why, so the reader can keep reading.
  */
-function placementFor(answer: DocumentToShow): Placement | Telling {
+function placementFor(
+  answer: DocumentToShow,
+  history: WindowHistory,
+): Placement | Telling {
   if (answer === null)
     return {
       reason: "shown",
@@ -217,25 +296,43 @@ function placementFor(answer: DocumentToShow): Placement | Telling {
       file: null,
       content: null,
       land: atTop,
+      steps: NO_STEPS,
     };
-  if (answer.place === "reload") {
-    if ("error" in answer) return { notice: answer.error };
-    return {
-      reason: "reload",
-      showing: answer.showing,
-      file: answer.file,
-      content: { html: answer.document },
-      land: atReadingPosition,
-    };
+  const { showing, file, steps } = answer;
+  switch (answer.place) {
+    case "reload":
+      if ("error" in answer) return { notice: answer.error };
+      return {
+        reason: "reload",
+        showing,
+        file,
+        content: { html: answer.document },
+        land: atReadingPosition,
+        steps,
+      };
+    case "return":
+      if ("error" in answer)
+        return placeError(answer.error, file, "return", steps);
+      return {
+        reason: "return",
+        showing,
+        file,
+        content: { html: answer.document },
+        land: atReturn(history, showing),
+        steps,
+      };
+    case "show":
+      if ("error" in answer)
+        return placeError(answer.error, file, "shown", steps);
+      return {
+        reason: "shown",
+        showing,
+        file,
+        content: { html: answer.document },
+        land: atHeading(answer.heading),
+        steps,
+      };
   }
-  if ("error" in answer) return placeError(answer.error, answer.file);
-  return {
-    reason: "shown",
-    showing: answer.showing,
-    file: answer.file,
-    content: { html: answer.document },
-    land: atHeading(answer.heading),
-  };
 }
 
 /**
@@ -309,11 +406,11 @@ function keepTheKeysOn(scroller: HTMLElement): void {
 /**
  * Shows the window's document, or the empty state while it has none, and asks for it again
  * whenever the app says the window shows another document or the document's file changed. The
- * app's answer says whether to show it, at its heading or top, or reload it at the same reading
- * position (ticket 23); the page never decides that by which message made it ask. When the app
- * says the file of the showing in view is gone, it says so over the last render (ticket 26).
- * `scriptStart` is when the page's script
- * started, for the first paint report.
+ * app's answer says whether to show it, at its heading or top, reload it at the same reading
+ * position (ticket 23), or return to where the view was in it after Back or Forward (ticket 12);
+ * the page never decides that by which message made it ask. When the app says the file of the
+ * showing in view is gone, it says so over the last render (ticket 26). `scriptStart` is when the
+ * page's script started, for the first paint report.
  */
 export async function startDocumentView(scriptStart: number): Promise<void> {
   markFirstPaint("scriptStart", scriptStart);
@@ -329,6 +426,7 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
   const shown: ScrolledView = { view, scroller };
 
   let latestRequest = 0;
+  const history = new WindowHistory();
   /**
    * The showing whose render the view shows, sent with each request so the app can tell a show
    * from a reload; null while it shows the empty state, an error or nothing yet.
@@ -372,17 +470,30 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
       // The app couldn't be asked at all, so there is no answer to say what to do: a view that
       // shows a document keeps it, as a failed reload does.
       return showing === null
-        ? placeError(String(error), null)
+        ? placeError(String(error), null, "shown", null)
         : { notice: String(error) };
     }
     // Shown as soon as it comes, even if a later request overtakes this one: the app hands a held
     // notice over once, with the first answer (ticket 26).
     if (answer?.notice) showNotice(answer.notice);
-    return placementFor(answer);
+    return placementFor(answer, history);
   };
 
-  /** Replaces the view's content with `content`, or shows the empty state for null. */
-  const replaceContent = (placement: Placement, content: Node | null) => {
+  /**
+   * Replaces the view's content with `content`, or shows the empty state for null. The history
+   * learns of the swap here, the one place every request's content goes in, with the reader's
+   * state from just before it.
+   */
+  const replaceContent = (
+    placement: Placement,
+    content: Node | null,
+    before: ReaderState,
+  ) => {
+    const left = showing;
+    if (left !== null && left !== placement.showing)
+      history.leave(left, before.line);
+    if (placement.reason === "shown") history.showAnew(placement.showing, left);
+    if (placement.steps) history.appCanStep(placement.steps);
     showing = placement.showing;
     file = placement.file;
     view.hidden = content === null;
@@ -390,8 +501,43 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
     showGoneBar();
     if (content === null) view.replaceChildren();
     else view.replaceChildren(content);
-    // Listeners that haven't heard of a show yet hear "shown", even if a reload came after it.
-    unannounced = unannounced === "shown" ? "shown" : placement.reason;
+    // Listeners that haven't heard of a show or a return yet hear it, even if a reload came after
+    // it.
+    if (unannounced === undefined || placement.reason !== "reload")
+      unannounced = placement.reason;
+  };
+
+  /** Counts the steps within a document, so that only the latest one lands. */
+  let latestStepWithin = 0;
+
+  /**
+   * Back or Forward (`stepThroughHistory`): within the showing in view if it has a visit that
+   * way, or else through the app.
+   */
+  const step = (to: Step) => {
+    if (showing !== null) {
+      const within = history.stepWithin(showing, to, readingPosition(shown));
+      if (within) {
+        const inView = showing;
+        const thisStep = ++latestStepWithin;
+        void landAtLine(
+          view,
+          within.line,
+          () => showing === inView && thisStep === latestStepWithin,
+        );
+        return;
+      }
+    }
+    showingWhy(askApp("step_history", { step: to }));
+  };
+
+  /** A link's scroll to a heading, as one more visit (`visitHeading`). */
+  const visitHeadingInView = async (heading: string | null) => {
+    if (showing === null) return;
+    if (heading !== null && !headingTarget(heading)) return;
+    if (history.visitHeading(showing, readingPosition(shown)))
+      showingWhy(askApp("forget_forward", { showing }));
+    await scrollToHeading(heading);
   };
 
   /**
@@ -423,7 +569,7 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
     }
     // Read just before the swap, so a scroll while the new render was parsed counts.
     const before: ReaderState = { line: readingPosition(shown) };
-    replaceContent(outcome, content);
+    replaceContent(outcome, content, before);
     const inserted = epochMs();
     if (outcome.reason === "shown") {
       markFirstPaint("documentReceived", received);
@@ -462,14 +608,20 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
     if (isLatest()) await place(outcome, isLatest);
     if (isLatest()) settle();
   };
-  theView = { request, showing: () => showing };
+  theView = {
+    request,
+    showing: () => showing,
+    step,
+    canStep: (to) => history.canStep(showing, to),
+    visitHeading: visitHeadingInView,
+  };
 
   // The listeners only start: waiting for them would hold up first paint.
   listenToApp("ask-for-document", () => {
     void request();
   });
   listenToApp("scroll-to-heading", (heading) => {
-    void scrollToHeading(heading);
+    void visitHeadingInView(heading);
   });
   listenToApp("document-gone", (gone) => {
     goneShowing = gone;

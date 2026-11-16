@@ -61,6 +61,8 @@ fn main() -> ExitCode {
             timing::report_first_paint,
             timing::report_reload,
             timing::report_long_task,
+            documents::history::step_history,
+            documents::history::forget_forward,
             title_bar::minimize_window,
             title_bar::toggle_maximize_window,
             title_bar::place_maximize_button,

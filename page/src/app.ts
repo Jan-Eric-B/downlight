@@ -12,10 +12,22 @@ import { showNotice } from "./notice";
 /**
  * What the page does with a render, as the app decides it from the showing the page's view shows
  * (`Place` in `app/src/documents.rs`): show the document at the heading a link like
- * `guide.md#install` named, or at its top for null, or reload it at the reading position.
+ * `guide.md#install` named, or at its top for null, reload it at the reading position, or return
+ * to where the view was when it left this showing, after Back or Forward (ticket 12).
  */
 export type Place =
-  { place: "show"; heading: string | null } | { place: "reload" };
+  | { place: "show"; heading: string | null }
+  | { place: "reload" }
+  | { place: "return" };
+
+/** A step through the window's history (`Step` in `app/src/documents/history.rs`). */
+export type Step = "back" | "forward";
+
+/**
+ * Whether the window has a document to go back to, and one to go forward to (`Steps` in
+ * `app/src/documents/history.rs`).
+ */
+export type Steps = Record<Step, boolean>;
 
 /**
  * The file of the document a window shows, as the title bar shows it (`DocumentFile` in
@@ -79,11 +91,16 @@ export function isNotice(value: unknown): value is Notice {
  * The app's answer when the page asks for its document (`DocumentToShow` in
  * `app/src/documents.rs`), or null while the window shows no document: the showing the window is
  * at, for the next request, the document's file, what to do with the render, the rendered
- * document as its HTML or why it can't be read, and a notice the app held until the page first
- * asked, or null.
+ * document as its HTML or why it can't be read, a notice the app held until the page first
+ * asked, or null, and whether the window has a document to go back or forward to.
  */
 export type DocumentToShow =
-  | ({ showing: number; file: DocumentFile; notice: Notice | null } & Place &
+  | ({
+      showing: number;
+      file: DocumentFile;
+      notice: Notice | null;
+      steps: Steps;
+    } & Place &
       ({ document: string } | { error: Notice }))
   | null;
 
@@ -93,11 +110,17 @@ export type Followed =
 
 /**
  * A line of the right-click menu as `show_document_menu` takes it (`MenuEntry` in
- * `app/src/menu.rs`): a command the page runs when it is chosen, a separator, or the system's
- * Copy.
+ * `app/src/menu.rs`): a command the page runs when it is chosen, and whether it can run now, a
+ * separator, or the system's Copy.
  */
 export type MenuEntry =
-  | { kind: "command"; id: string; label: string; shortcut?: string }
+  | {
+      kind: "command";
+      id: string;
+      label: string;
+      shortcut?: string;
+      enabled: boolean;
+    }
   | { kind: "separator" }
   | { kind: "copy" };
 
@@ -188,6 +211,16 @@ export type Commands = {
     answer: Followed;
   };
   open_document: { args: undefined; answer: null };
+  /**
+   * Back or Forward to another document in the window's history, which the window is then given
+   * as it is any other (`ask-for-document`). Nowhere to go does nothing.
+   */
+  step_history: { args: { step: Step }; answer: null };
+  /**
+   * A link scrolled the view, which shows this showing, to a heading: as in a browser, Forward has
+   * nowhere to go any more. A showing the window has left changes nothing.
+   */
+  forget_forward: { args: { showing: number }; answer: null };
   show_document_menu: { args: { entries: MenuEntry[] }; answer: null };
   close_window: { args: undefined; answer: null };
   show_window: { args: undefined; answer: null };

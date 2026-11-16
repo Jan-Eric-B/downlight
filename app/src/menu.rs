@@ -14,13 +14,15 @@ use crate::message::Message;
 #[cfg_attr(test, derive(serde::Serialize))]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum MenuEntry {
-    /// A command the page carries out, with the shortcut shown beside it, such as `Ctrl+O`.
+    /// A command the page carries out, with the shortcut shown beside it, such as `Ctrl+O`, and
+    /// whether it can run now: Back with nowhere to go is shown unavailable (ticket 12).
     Command {
         id: String,
         label: String,
         // The page leaves out the shortcut of a command that has none, so its sample does too.
         #[cfg_attr(test, serde(skip_serializing_if = "Option::is_none"))]
         shortcut: Option<String>,
+        enabled: bool,
     },
     Separator,
     /// The system's own Copy, which copies the selection as Ctrl+C does.
@@ -39,10 +41,18 @@ pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
         id: "open".to_owned(),
         label: "Open...".to_owned(),
         shortcut: shortcut.map(str::to_owned),
+        enabled: true,
+    };
+    let back_with_nowhere_to_go = MenuEntry::Command {
+        id: "back".to_owned(),
+        label: "Back".to_owned(),
+        shortcut: Some("Alt+Left".to_owned()),
+        enabled: false,
     };
     Ok(serde_json::json!({
         "command": serde_json::to_value(open(Some("Ctrl+O")))?,
         "commandWithoutShortcut": serde_json::to_value(open(None))?,
+        "unavailableCommand": serde_json::to_value(back_with_nowhere_to_go)?,
         "separator": serde_json::to_value(MenuEntry::Separator)?,
         "copy": serde_json::to_value(MenuEntry::Copy)?,
     }))
@@ -59,11 +69,12 @@ pub fn show_document_menu(window: WebviewWindow, entries: Vec<MenuEntry>) -> tau
                 id,
                 label,
                 shortcut,
+                enabled,
             } => menu.append(&MenuItem::with_id(
                 &window,
                 item_id(window.label(), &id),
                 label,
-                true,
+                enabled,
                 shortcut,
             )?)?,
             MenuEntry::Separator => menu.append(&PredefinedMenuItem::separator(&window)?)?,

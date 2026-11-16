@@ -20,6 +20,7 @@ use super::*;
 
 mod give;
 mod handover;
+mod history;
 mod watch;
 
 /// A file that exists: the app crate's own manifest.
@@ -157,7 +158,9 @@ fn heading_of(documents: &Documents, window: &str) -> Option<Option<String>> {
         .handover(window, None)
         .map(|handover| match handover.place {
             Place::Show { heading } => heading,
-            Place::Reload => panic!("a page that shows nothing yet was told to reload"),
+            Place::Reload | Place::Return => {
+                panic!("a page that shows nothing yet was told to reload or return")
+            }
         })
 }
 

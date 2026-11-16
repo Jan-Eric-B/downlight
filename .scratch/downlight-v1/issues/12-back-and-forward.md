@@ -6,14 +6,37 @@ Spec: [Downlight v1](../spec.md)
 
 **Blocked by:** 03 (Page test harness), 09 (Opening from inside a window), 10 (Reload), 11 (Links), 22 (One module owns a window's shown document), 23 (The app decides whether a page shows or reloads its document), 24 (The documents module sends a link's scroll where it decides it), 25 (One pipeline places every document in the page's view), 26 (One message makes the page ask, and every request names its showing), 28 (The documents module carries out the whole show), 29 (The page owns every key)
 
-**Status:** ready-for-agent
+**Status:** ready-for-human
 
-- [ ] Following a link to a document or heading, Ctrl+O and dropping a file each add a history entry in the window.
-- [ ] Alt+Left and Alt+Right and the mouse's side buttons go back and forward.
-- [ ] Going back returns to the reading position the document had when it was left.
-- [ ] History belongs to its window, isn't saved, and is gone when the window closes.
-- [ ] Back and Forward are in the right-click menu and are unavailable when there is nowhere to go.
-- [ ] Page tests cover adding entries, going back and forward, and the restored reading position (by line number).
+- [x] Following a link to a document or heading, Ctrl+O and dropping a file each add a history entry in the window.
+- [x] Alt+Left and Alt+Right and the mouse's side buttons go back and forward.
+- [x] Going back returns to the reading position the document had when it was left.
+- [x] History belongs to its window, isn't saved, and is gone when the window closes.
+- [x] Back and Forward are in the right-click menu and are unavailable when there is nowhere to go.
+- [x] Page tests cover adding entries, going back and forward, and the restored reading position (by line number).
+
+## Results
+
+Built 2026-11-16. `npm run check` passes. The history is split by what each side knows. The app keeps which documents (`app/src/documents/history.rs`): each window's record in the table (`WindowRecord`) holds its shown document and its `History`, the documents before and after it, each kept as the `Showing` it had with its path and key. The page keeps where its view was (`page/src/history.ts`, `WindowHistory`): for each showing, its visits (one when the window showed it, one more for each heading a link scrolled to) with the line number each was left at, and the visit it is at. Back and Forward step through the visits of the showing in view first, with no request to the app and no read of the file, and only past its first or last visit ask the app (`step_history`).
+
+**Beyond the plan:**
+
+- A step is built on `claim` and `change`, as ticket 28 asked: `Documents::step` claims under the lock (`claim_step`), and `carry_out`, which `give` now uses too, titles the window, sends `AskForDocument`, starts the watch, and on failure puts back the whole record, shown document and history, so a step that fails leaves Back where it was. The document stepped to keeps its old `Showing` (`ShownDocument::arrived` with `Arrival::Stepped`), its render starts ahead and its file is watched again. `handover` answers it with the third place, `Place::Return` (`"return"`), timed as `read-and-render`; the page lands at the line its history kept for that showing (`landAtLine`, the same `returnToReadingPosition` a reload uses, from the top), through the same request and its "latest request wins" guard. The ticket 23 rule tested by `window_given_back_a_document_it_showed_before_shows_it_anew` stays for `give` (Ctrl+O, a drop, a link): only a step returns.
+- Every `render_document` answer carries `steps` (`{ back, forward }`): whether the app has a document to go back or forward to. With the page's own visits it decides what the menu offers. `MenuEntry::Command` takes `enabled` (a new contract sample, `unavailableCommand`), and a command can say `available()` in `page/src/commands.ts`.
+- A heading visited after Back drops what Forward would have gone to, as in a browser. The app doesn't see a scroll within a document, so the page tells it with a second command, `forget_forward`, which names the showing in view and changes nothing for a window that has left it. The page sends it only when the app had somewhere to go forward to.
+- Back to a document that another window shows by now brings that window to the front and leaves this window, and its history, where it is, as Ctrl+O does for that document (ADR 0001). Once the other window closes, the step can be taken.
+- The page's three ways to a heading: a link's own `scrollTo` and the app's `scroll-to-heading` (a link in another window) both go through `visitHeading` in `page/src/view.ts`, which records a visit only when the document has the heading. A show at a heading is one step, the document's; it records no second one. `scrollToHeading` is now private to the view.
+- `ShownReason` has `return` too, so ticket 13 tells a reload from everything else. Of several swaps the listeners hear at once, a show or a return wins over a reload.
+- The mouse's side buttons are `mouseButton: 3` and `4` on the Back and Forward entries of the command table, run on `mouseup` and cancelled there (not on `auxclick`, which needs the press and release on one element). `shortcutOf` writes `ArrowLeft` and `ArrowRight` as `Left` and `Right`, so the menu shows `Alt+Left` and `Alt+Right`. The menu is Back, Forward, Reload, Find, then Open, then Copy, in the spec's order.
+- The empty state is no step: a window started without a file and given one has nothing to go back to.
+- The page keeps the visits of every showing it has seen until the window closes, also of showings the app has since dropped from its history; a few numbers each.
+- `documents.rs` would have grown past 1,000 lines, so `WindowRecord`, `History`, `Step`, `Steps`, `StepError` and both commands live in `app/src/documents/history.rs`.
+
+**Tests changed:** the menu test in `page/src/commands.test.ts` ("replaces the webview's menu with Back, Forward, Reload, Find, Open and Copy"), since the menu gains Back and Forward and every entry `enabled`; `shownFrom` in `page/src/title-bar.test.ts` and `heading_of` in `app/src/documents/tests/mod.rs`, for the answer's new `steps` and the new place.
+
+**Measured:** nothing new. Going back reads and renders the document as a show does, and lands with the reading-position code a reload uses, which `npm run measure` times on the 1 MB document (ticket 02 holds the baseline); it has no Back case, and driving one needs the window by hand. A step within a document is a scroll.
+
+**Not yet checked by hand** (release build): Alt+Left, Alt+Right, the BrowserBack and BrowserForward keys and both side buttons go back and forward, and WebView2 does nothing of its own on any of them; Back returns to the line it left on a long document, after a link, Ctrl+O and a drop; a heading link, then Back and Forward, within one document; the menu's Back and Forward unavailable with nowhere to go; Back to a document opened in another window meanwhile brings that window to the front; closing the window and opening the document again starts with no history.
 
 ## Comments
 

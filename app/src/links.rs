@@ -211,6 +211,7 @@ impl From<FollowError> for Notice {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::documents::history::Step;
     use crate::documents::recorder::{ToWindow, recorded};
     use crate::message::Message;
 
@@ -316,6 +317,18 @@ mod tests {
             Some(fixtures().join("readme.md"))
         );
         assert_eq!(recorder.sent(), [(window, Message::AskForDocument)]);
+    }
+
+    #[test]
+    fn link_to_another_document_leaves_a_step_back_to_the_one_it_was_in() {
+        let (documents, _) = recorded();
+        let (window, showing) = window_showing_notes(&documents);
+        follow(&documents, &window, showing, "readme.md", false).unwrap();
+        documents.step(&window, Step::Back).unwrap();
+        assert_eq!(
+            documents.document_path(&window),
+            Some(fixtures().join("notes.md"))
+        );
     }
 
     #[test]

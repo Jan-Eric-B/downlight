@@ -1,11 +1,13 @@
 {
   "command": {
+    "enabled": true,
     "id": "open",
     "kind": "command",
     "label": "Open...",
     "shortcut": "Ctrl+O"
   },
   "commandWithoutShortcut": {
+    "enabled": true,
     "id": "open",
     "kind": "command",
     "label": "Open..."
@@ -15,5 +17,12 @@
   },
   "separator": {
     "kind": "separator"
+  },
+  "unavailableCommand": {
+    "enabled": false,
+    "id": "back",
+    "kind": "command",
+    "label": "Back",
+    "shortcut": "Alt+Left"
   }
 }

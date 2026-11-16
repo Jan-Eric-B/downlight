@@ -2,7 +2,11 @@ import { askApp, listenToApp, type MenuEntry } from "./app";
 import { findNext, findPrevious, openFind } from "./find";
 import { showingWhy } from "./notice";
 import { open } from "./open";
-import { requestDocument } from "./view";
+import {
+  canStepThroughHistory,
+  requestDocument,
+  stepThroughHistory,
+} from "./view";
 
 /**
  * The reader's commands: each one's name, keyboard shortcut and what it does. A new command is
@@ -28,6 +32,15 @@ interface Command {
    * and a held F5 would start a render per repeat.
    */
   repeatsWhileHeld?: boolean;
+  /**
+   * The mouse button that runs it, by `MouseEvent.button`: 3 is the side button for Back and 4
+   * the one for Forward. Any other button, and a command without one, does what it did.
+   */
+  mouseButton?: 3 | 4;
+  /**
+   * Whether it can run now, which the right-click menu shows; always, for a command without it.
+   */
+  available?(): boolean;
   run(): void;
 }
 
@@ -44,6 +57,24 @@ interface Shortcut {
 }
 
 const commands = {
+  back: {
+    label: "Back",
+    shortcuts: [{ alt: true, key: "ArrowLeft" }, { key: "BrowserBack" }],
+    mouseButton: 3,
+    available: () => canStepThroughHistory("back"),
+    run: () => {
+      stepThroughHistory("back");
+    },
+  },
+  forward: {
+    label: "Forward",
+    shortcuts: [{ alt: true, key: "ArrowRight" }, { key: "BrowserForward" }],
+    mouseButton: 4,
+    available: () => canStepThroughHistory("forward"),
+    run: () => {
+      stepThroughHistory("forward");
+    },
+  },
   reload: {
     label: "Reload",
     shortcuts: [{ key: "F5" }, { ctrl: true, key: "r" }],
@@ -100,6 +131,8 @@ type MenuLine = CommandId | "separator" | "copy";
 
 /** The right-click menu, top to bottom. */
 const menu: MenuLine[] = [
+  "back",
+  "forward",
   "reload",
   "find",
   "separator",
@@ -118,6 +151,7 @@ function menuEntries(): MenuEntry[] {
       id: line,
       label: command.label,
       shortcut: shortcutOf(command),
+      enabled: command.available?.() ?? true,
     };
   });
 }
@@ -141,7 +175,13 @@ export function commandButton(id: CommandId, glyph: string): HTMLButtonElement {
   return button;
 }
 
-/** The command's first shortcut as Windows writes it, such as `Ctrl+O` or `Shift+F3`. */
+/** The named keys that Windows writes otherwise than `KeyboardEvent.key` names them. */
+const WINDOWS_KEY_NAMES: Partial<Record<string, string>> = {
+  ArrowLeft: "Left",
+  ArrowRight: "Right",
+};
+
+/** The command's first shortcut as Windows writes it, such as `Ctrl+O` or `Alt+Left`. */
 function shortcutOf(command: Command): string | undefined {
   const shortcut = command.shortcuts?.[0];
   if (!shortcut) return undefined;
@@ -149,8 +189,9 @@ function shortcutOf(command: Command): string | undefined {
   if (shortcut.ctrl) names.push("Ctrl");
   if (shortcut.alt) names.push("Alt");
   if (shortcut.shift) names.push("Shift");
+  const { key } = shortcut;
   names.push(
-    isLetter(shortcut.key) ? shortcut.key.toUpperCase() : shortcut.key,
+    isLetter(key) ? key.toUpperCase() : (WINDOWS_KEY_NAMES[key] ?? key),
   );
   return names.join("+");
 }
@@ -187,9 +228,9 @@ function isCommandId(id: string): id is CommandId {
 }
 
 /**
- * Runs a command when its shortcut is pressed or it is chosen in the right-click menu, and shows
- * that menu on a right-click. The signal removes the key and right-click listeners again, for the
- * tests.
+ * Runs a command when its shortcut is pressed, its mouse button released or it is chosen in the
+ * right-click menu, and shows that menu on a right-click. The signal removes the key, button and
+ * right-click listeners again, for the tests.
  */
 export function startCommands(signal?: AbortSignal): void {
   addEventListener(
@@ -203,6 +244,22 @@ export function startCommands(signal?: AbortSignal): void {
       // other systems' until their ports, and a window whose keys the app couldn't turn off.
       event.preventDefault();
       if (event.repeat && !command.repeatsWhileHeld) return;
+      command.run();
+    },
+    { signal },
+  );
+
+  addEventListener(
+    "mouseup",
+    (event) => {
+      const command: Command | undefined = Object.values(commands).find(
+        (candidate: Command) => candidate.mouseButton === event.button,
+      );
+      if (!command) return;
+      // Taken from the webview, so that it does nothing of its own with the button. On the
+      // release rather than on `auxclick`, which comes only when the button is pressed and
+      // released on the same element.
+      event.preventDefault();
       command.run();
     },
     { signal },
