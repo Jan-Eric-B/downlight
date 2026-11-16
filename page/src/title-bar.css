@@ -46,10 +46,11 @@
 }
 
 /* The icon at 16 px, where Windows 11 puts a window's icon. It stays amber whatever the accent
-   color (window design spec). */
+   color (window design spec). Its drawing leaves about 3 px empty on each side inside its 16 px,
+   so the padding is small: the reader found 14 px and 8 px too airy in ticket 04's hand check. */
 .title-bar .logo {
   flex: none;
-  padding: 0 8px 0 14px;
+  padding: 0 2px 0 10px;
 }
 
 .title-bar .logo svg {
