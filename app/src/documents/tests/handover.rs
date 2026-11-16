@@ -1,8 +1,10 @@
 //! The handover to a page that asks for its document: the render started ahead, and whether the
 //! page shows the document or reloads it (`Place`, `Showing`). The answer as the page reads it is
-//! a contract sample (`contract_samples` in `documents.rs`).
+//! a contract sample (`contract_samples` in `documents/handover.rs`).
 
 use super::*;
+use crate::documents::handover::DocumentFile;
+use crate::notice::file_name_shown;
 
 #[test]
 fn window_given_a_new_document_renders_it_ahead() {

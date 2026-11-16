@@ -2,6 +2,7 @@
 //! link to a heading sends the window that already shows the document.
 
 use super::*;
+use crate::documents::show::title_of;
 
 #[test]
 fn first_given_document_opens_a_new_window_that_shows_it() {

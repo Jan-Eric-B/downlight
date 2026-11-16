@@ -55,7 +55,7 @@ fn main() -> ExitCode {
         .register_asynchronous_uri_scheme_protocol(image::SCHEME, image::serve)
         .manage(timing)
         .invoke_handler(tauri::generate_handler![
-            documents::render_document,
+            documents::handover::render_document,
             links::follow_link,
             open::open_document,
             menu::show_document_menu,

@@ -14,7 +14,6 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-use crate::documents::file_name_shown;
 use crate::platform;
 
 /// What the reader is told: plain text, or text before and after the file it names. Goes to the
@@ -138,6 +137,18 @@ impl fmt::Display for NamedFile {
             None => f.write_str(&self.name),
         }
     }
+}
+
+/// The name the file or folder at `path` is shown by, in notices, the title bar and the window's
+/// title, which share it so that none of them names a document differently. Kept with notices,
+/// which name every file they mention by it. Launches, the dialog, the drop and links give
+/// absolute paths, so only a drive root has no name of its own; it is named as its path rather
+/// than left blank.
+pub fn file_name_shown(path: &Path) -> String {
+    path.file_name().map_or_else(
+        || path.display().to_string(),
+        |name| name.to_string_lossy().into_owned(),
+    )
 }
 
 /// The folder `path` is in; a relative path's empty one counts as none.

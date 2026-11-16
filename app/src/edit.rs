@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 
 use tauri::{Manager as _, State, WebviewWindow};
 
-use crate::documents::{Documents, file_name_shown};
-use crate::notice::{NamedFile, Notice};
+use crate::documents::Documents;
+use crate::notice::{NamedFile, Notice, file_name_shown};
 use crate::platform;
 use crate::settings::{SettingsError, SettingsStore};
 

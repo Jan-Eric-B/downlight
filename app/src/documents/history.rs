@@ -11,7 +11,7 @@ use std::path::PathBuf;
 
 use tauri::{State, WebviewWindow};
 
-use super::{Arrival, Claimed, Documents, Given, ShowError, Showing, ShownDocument};
+use super::{Arrival, Claimed, Documents, Given, ShowError, Showing, ShownDocument, WindowRecord};
 use crate::notice::{NamedFile, Notice};
 
 /// The documents a window showed before the one it shows, and after it, nearest last.
@@ -92,15 +92,7 @@ impl History {
     }
 }
 
-/// An open window: the document it shows now, None while it shows none, and its history. Kept
-/// apart from the shown document so that the history outlives every change of document, and goes
-/// only with the window.
-#[derive(Default)]
-pub(super) struct WindowRecord {
-    pub(super) shown: Option<ShownDocument>,
-    pub(super) history: History,
-}
-
+/// How a window's record in the table changes its history as it changes its document.
 impl WindowRecord {
     /// Shows `shown` in place of the document shown now, which becomes the last step back, and
     /// gives back what the window was before, for [`Documents::put_back`].
