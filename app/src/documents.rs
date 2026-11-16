@@ -3,23 +3,30 @@
 //! reloading it while the window still shows it (ticket 10), answering the page's request for its
 //! document with whether to show or reload it (ticket 23, [`render_document`]), and forgetting it
 //! with the window. Which window shows which document is kept here, and a document is shown in at
-//! most one window (ADR 0001). Reading and rendering the file is the render module's. What a
-//! window's page is told goes through [`Pages`], so all of this is tested without a webview.
+//! most one window (ADR 0001). Reading and rendering the file is the render module's.
+//!
+//! A show is carried out here too (ticket 28): opening the new window, titling a window given
+//! another document, bringing a window to the front, and undoing the show when part of it fails.
+//! What a window's page is told goes through [`Pages`], and what is done to a window itself
+//! through [`Windows`], so all of this is tested without a webview.
 
 use std::collections::HashMap;
-use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
+use std::{fmt, io};
 
 use downlight_core::RenderedDocument;
 use tauri::{State, WebviewWindow};
 
 use crate::message::{Message, Pages};
 use crate::notice::{NamedFile, Notice};
-use crate::platform;
 use crate::render::{self, DocumentError, RenderTask};
 use crate::timing::Timing;
 use crate::watch::{Change, Watch};
+use crate::{APP_NAME, platform};
+
+#[cfg(test)]
+pub mod recorder;
 
 /// Which window shows which document, by window label. The app's managed state.
 pub struct Documents {
@@ -29,6 +36,88 @@ pub struct Documents {
 struct Inner {
     table: Mutex<WindowTable>,
     pages: Box<dyn Pages>,
+    windows: Box<dyn Windows>,
+}
+
+/// What is done to windows themselves, beside what their pages are told ([`Pages`]): Tauri's in
+/// the app (`window.rs`), a recorder in the tests. A trait with two adapters rather than code
+/// generic over Tauri's runtime, as ticket 22 decided for [`Pages`].
+pub trait Windows: Send + Sync + 'static {
+    /// Opens a new window with the label `window`, as `new_window` says. It stays hidden until
+    /// its page has drawn its first frame.
+    fn open(&self, window: &str, new_window: &NewWindow) -> Result<(), WindowError>;
+
+    /// Sets the title Alt+Tab and the taskbar show for `window`. A window that has closed gets
+    /// nothing, and that is no failure.
+    fn set_title(&self, window: &str, title: &str) -> Result<(), WindowError>;
+
+    /// Brings `window` to the front, restored if it was minimized. A window that has closed, or
+    /// is still being built or hidden, gets nothing, and that is no failure: a hidden one comes up
+    /// in front when its page asks to be shown.
+    fn bring_to_front(&self, window: &str) -> Result<(), WindowError>;
+}
+
+/// What a new window starts with that depends on its document: its title. What every window
+/// starts with alike (the page and its flags, the navigation guard, the backdrop, the key setup
+/// and the 5 s fallback for showing it) is decided in one place, `open_window` in `window.rs`.
+/// Ticket 16 adds the size and the offset here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewWindow {
+    /// What Alt+Tab and the taskbar show.
+    pub title: String,
+}
+
+/// Why the system couldn't open, change or tell a window or its page, in its own words: what
+/// [`Pages`] and [`Windows`] fail with. The reader sees it after what failed ([`ShowError`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WindowError(String);
+
+impl WindowError {
+    /// For the recorder, which fails as a window or page may.
+    #[cfg(test)]
+    pub fn new(reason: impl Into<String>) -> Self {
+        Self(reason.into())
+    }
+}
+
+impl fmt::Display for WindowError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl From<tauri::Error> for WindowError {
+    fn from(error: tauri::Error) -> Self {
+        Self(error.to_string())
+    }
+}
+
+/// Why a document isn't shown, in the reader's terms (ticket 28). The reader sees it after the
+/// document's name, as in `Can't show a.md in C:\docs: its window has closed`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ShowError {
+    /// The window it was to be shown in closed first.
+    WindowClosed,
+    /// A new window for it didn't open, and it opens anew next time.
+    NotOpened(WindowError),
+    /// The window's title or page couldn't be changed to it, so the window keeps the document it
+    /// showed (ticket 22's open item 6).
+    NotTaken(WindowError),
+    /// The window that shows it already didn't come to the front.
+    NotBroughtToFront(WindowError),
+}
+
+impl fmt::Display for ShowError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::WindowClosed => write!(f, "its window has closed"),
+            Self::NotOpened(error) => write!(f, "its window didn't open: {error}"),
+            Self::NotTaken(error) => write!(f, "the window couldn't change to it: {error}"),
+            Self::NotBroughtToFront(error) => {
+                write!(f, "its window didn't come to the front: {error}")
+            }
+        }
+    }
 }
 
 /// Every open window by label, whether it shows a document or none.
@@ -144,37 +233,47 @@ pub enum Target<'a> {
     Window(&'a str),
 }
 
-/// What [`Documents::give`] did with a document, by window label. The caller acts on it: it opens
-/// the new window, titles a changed one, or brings the one that shows the document to the front.
+/// What [`Documents::give`] did with a document, by window label.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Given {
-    /// A new window with this label shows the document, and the caller opens it. A window that
-    /// can't open is forgotten ([`Documents::forget`]).
+    /// A new window with this label opened, titled after the document, and shows it.
     NewWindow(String),
-    /// The window shows the document now, and its page has been told to ask for it.
+    /// The window shows the document now: it is titled after it, and its page has been told to
+    /// ask for it.
     Changed(String),
     /// The document is open already in this window, the one the request came from ([`Target`]),
-    /// as for a link to the document that window shows. It is told nothing: its page scrolls on
-    /// the link's own result.
+    /// as for a link to the document that window shows. It is brought to the front and its page
+    /// is told nothing: it scrolls on the link's own result.
     AlreadyHere(String),
     /// The document is open already in this window, another than the one the request came from,
-    /// or any window for a launch. Its page has been told to scroll to the document's heading, if
-    /// the document came with one and the page listens; a page that doesn't yet gets it with its
-    /// first render.
+    /// or any window for a launch, and it is brought to the front. Its page has been told to
+    /// scroll to the document's heading, if the document came with one and the page listens; a
+    /// page that doesn't yet gets it with its first render.
     AlreadyElsewhere(String),
-    /// The target window has closed.
-    WindowGone,
 }
 
-/// What [`Documents::claim`] recorded under the table's lock, for [`Documents::give`] to act on
+/// What [`Documents::claim`] recorded under the table's lock, for [`Documents::give`] to carry out
 /// after it.
 enum Claimed {
-    /// No window is to scroll now, and `give` returns this as it is.
-    Given(Given),
-    /// The document is open already in `window`, another than the one the request came from,
-    /// whose page listens: it is to scroll to `heading` now. `give` returns it as
-    /// [`Given::AlreadyElsewhere`].
-    ScrollElsewhere { window: String, heading: String },
+    /// A new window with this label is to open.
+    NewWindow(String),
+    /// `window` shows the document now as `showing`, in place of `left` (None while it showed
+    /// none), and is to be retitled and its page told; `left` is put back if that fails.
+    Changed {
+        window: String,
+        showing: Showing,
+        left: Box<Option<ShownDocument>>,
+    },
+    /// The document is open already in this window, the one the request came from.
+    AlreadyHere(String),
+    /// The document is open already in `window`, another than the one the request came from.
+    /// Its page is to scroll to `scroll_to` now, if that is Some.
+    AlreadyElsewhere {
+        window: String,
+        scroll_to: Option<String>,
+    },
+    /// The target window has closed.
+    WindowGone,
 }
 
 /// What a window's page gets when it asks for its document ([`render_document`]).
@@ -221,6 +320,22 @@ pub fn file_name_shown(path: &Path) -> String {
     )
 }
 
+/// `README.md - docs - Downlight`: the folder tells documents with the same name apart in Alt+Tab
+/// and on the taskbar. A window that shows no document (None) is titled `Downlight`.
+fn title_of(document: Option<&Path>) -> String {
+    let Some(document) = document else {
+        return APP_NAME.to_owned();
+    };
+    // The same name as the title bar's.
+    let file = file_name_shown(document);
+    // Launches, the open dialog and dropping all give absolute paths, so only a drive root has no
+    // folder.
+    match document.parent() {
+        Some(folder) => format!("{file} - {} - {APP_NAME}", file_name_shown(folder)),
+        None => format!("{file} - {APP_NAME}"),
+    }
+}
+
 /// What a page does with the render it asked for, decided by the showing its view shows rather
 /// than by which message made it ask, since a `reload` sent for the document a window has just
 /// left can reach the page after `document-shown` (ticket 23).
@@ -247,68 +362,92 @@ impl Place {
 }
 
 impl Documents {
-    /// No window shows a document yet; what pages are told goes to `pages`.
-    pub fn new(pages: impl Pages) -> Self {
+    /// No window shows a document yet; what pages are told goes to `pages`, and what is done to
+    /// windows to `windows`.
+    pub fn new(pages: impl Pages, windows: impl Windows) -> Self {
         Self {
             inner: Arc::new(Inner {
                 table: Mutex::default(),
                 pages: Box::new(pages),
+                windows: Box::new(windows),
             }),
         }
     }
 
-    /// Records a new window that shows no document, as for a launch that names none, and returns
-    /// its label for the caller to open it. A window that can't open is forgotten
-    /// ([`Documents::forget`]).
-    pub fn open_empty(&self) -> String {
-        let mut table = self.lock();
-        let window = table.next_label();
-        table.shown.insert(window.clone(), None);
-        window
+    /// Opens a new window that shows no document, as for a launch that names none, and returns
+    /// its label. A window that can't open is forgotten.
+    pub fn open_empty(&self) -> Result<String, WindowError> {
+        let window = {
+            let mut table = self.lock();
+            let window = table.next_label();
+            table.shown.insert(window.clone(), None);
+            window
+        };
+        self.open(&window, None)?;
+        Ok(window)
     }
 
-    /// Gives `target` the document, unless the document is open already, the one way a window
+    /// Shows the document in `target`, unless the document is open already, the one way a window
     /// gets or changes its document. Looking up and recording happen under one lock, so two
     /// requests for the same document end up in one window.
     ///
-    /// The document's render starts as soon as a window is given it, so that it runs while a new
-    /// window's webview starts, and the window starts watching the document's file, to reload it
-    /// when it changes.
+    /// A new window opens titled after the document, and a window given another document gets
+    /// that document's title and its page is told to ask for it. The document's render starts as
+    /// soon as a window is given it, so that it runs while a new window's webview starts, and the
+    /// window starts watching the document's file, to reload it when it changes.
     ///
-    /// A document that is open already, and came with a heading, has the window that shows it
-    /// scroll there: told now if its page listens, or with its first render if it doesn't yet.
-    /// The window the request came from ([`Target`]) is never told ([`Given::AlreadyHere`]): its
-    /// page scrolls on the link's own result.
+    /// A document that is open already has its window brought to the front instead, even the
+    /// window the request came from: dropping a file onto a window leaves the file manager in
+    /// front. If the document came with a heading, that window scrolls there: told now if its
+    /// page listens, or with its first render if it doesn't yet. The window the request came from
+    /// ([`Target`]) is never told ([`Given::AlreadyHere`]): its page scrolls on the link's own
+    /// result.
     ///
-    /// Fails when a window given another document can't tell its page so: the page keeps showing
-    /// its old document, and the caller tells the reader the new one isn't shown. The window
-    /// records the new document all the same, as before ticket 22.
-    pub fn give(&self, document: DocumentAt<'_>, target: Target<'_>) -> tauri::Result<Given> {
+    /// Fails when the target window has closed, or a part of the show fails. A show that fails is
+    /// undone: a new window that can't open is forgotten, so its document opens anew, and a window
+    /// whose title or page can't be changed keeps the document it showed, so the table and the
+    /// window agree (ticket 22's open item 6).
+    pub fn give(&self, document: DocumentAt<'_>, target: Target<'_>) -> Result<Given, ShowError> {
         let key = document_key(document.path);
-        let given = match self.claim(document, key.clone(), target) {
-            Claimed::Given(given) => given,
-            Claimed::ScrollElsewhere { window, heading } => {
-                // The window that shows the document is brought to the front all the same, and
-                // the page that asked shows only what went wrong with its own request, so a
-                // scroll that can't be sent there is nobody's to tell.
-                let _ = self.send(&window, Message::ScrollToHeading(heading));
-                Given::AlreadyElsewhere(window)
+        match self.claim(document, key.clone(), target) {
+            Claimed::NewWindow(window) => {
+                self.open(&window, Some(document.path))
+                    .map_err(ShowError::NotOpened)?;
+                self.watch(&window, document.path, key);
+                Ok(Given::NewWindow(window))
             }
-        };
-        match &given {
-            Given::NewWindow(window) => self.watch(window, document.path, key),
-            Given::Changed(window) => {
-                self.watch(window, document.path, key);
-                self.send(window, Message::AskForDocument)?;
+            Claimed::Changed {
+                window,
+                showing,
+                left,
+            } => {
+                self.change(&window, document.path, showing, *left)
+                    .map_err(ShowError::NotTaken)?;
+                self.watch(&window, document.path, key);
+                Ok(Given::Changed(window))
             }
-            Given::AlreadyHere(_) | Given::AlreadyElsewhere(_) | Given::WindowGone => {}
+            Claimed::AlreadyHere(window) => {
+                self.bring_to_front(&window)?;
+                Ok(Given::AlreadyHere(window))
+            }
+            Claimed::AlreadyElsewhere { window, scroll_to } => {
+                if let Some(heading) = scroll_to {
+                    // The window that shows the document is brought to the front all the same,
+                    // and the page that asked shows only what went wrong with its own request, so
+                    // a scroll that can't be sent there is nobody's to tell.
+                    let _ = self.send(&window, Message::ScrollToHeading(heading));
+                }
+                self.bring_to_front(&window)?;
+                Ok(Given::AlreadyElsewhere(window))
+            }
+            Claimed::WindowGone => Err(ShowError::WindowClosed),
         }
-        Ok(given)
     }
 
     /// Records that `target` shows `document` with `key`, and what that changed, including a
-    /// scroll for the window of an open document, which the caller sends outside the lock. Whether
-    /// the request came from the window that shows the document is decided here, and only here.
+    /// scroll for the window of an open document, which [`Documents::give`] sends outside the
+    /// lock. Whether the request came from the window that shows the document is decided here,
+    /// and only here.
     ///
     /// The window of an open document is to scroll to the document's heading, if it has one,
     /// unless the request came from that window. A page that hasn't asked for its document yet
@@ -319,38 +458,99 @@ impl Documents {
         if let Some(window) = table.window_showing(&key) {
             if matches!(target, Target::Window(from) | Target::NewWindowFrom(from) if from == window)
             {
-                return Claimed::Given(Given::AlreadyHere(window));
+                return Claimed::AlreadyHere(window);
             }
-            let Some(heading) = document.heading.map(str::to_owned) else {
-                return Claimed::Given(Given::AlreadyElsewhere(window));
+            let heading = document.heading.map(str::to_owned);
+            let scroll_to = match table.shown_mut(&window, &key) {
+                Some(shown) if !shown.page_asked && heading.is_some() => {
+                    shown.heading = heading;
+                    None
+                }
+                _ => heading,
             };
-            if let Some(shown) = table.shown_mut(&window, &key)
-                && !shown.page_asked
-            {
-                shown.heading = Some(heading);
-                return Claimed::Given(Given::AlreadyElsewhere(window));
-            }
-            return Claimed::ScrollElsewhere { window, heading };
+            return Claimed::AlreadyElsewhere { window, scroll_to };
         }
         // Made only once a window takes the document, so that an open document or a closed
         // window starts no render.
-        let given = match target {
+        match target {
             Target::NewWindow | Target::NewWindowFrom(_) => {
                 let window = table.next_label();
                 let shown = ShownDocument::given(document, key, table.next_showing());
                 table.shown.insert(window.clone(), Some(shown));
-                Given::NewWindow(window)
+                Claimed::NewWindow(window)
             }
             Target::Window(window) => {
-                if !table.shown.contains_key(window) {
-                    return Claimed::Given(Given::WindowGone);
+                let showing = table.next_showing();
+                let Some(entry) = table.shown.get_mut(window) else {
+                    return Claimed::WindowGone;
+                };
+                let left = entry.replace(ShownDocument::given(document, key, showing));
+                Claimed::Changed {
+                    window: window.to_owned(),
+                    showing,
+                    left: Box::new(left),
                 }
-                let shown = ShownDocument::given(document, key, table.next_showing());
-                table.shown.insert(window.to_owned(), Some(shown));
-                Given::Changed(window.to_owned())
+            }
+        }
+    }
+
+    /// Opens the window `window` just recorded, titled after `document` (None for a window that
+    /// shows none), or forgets it if it can't open, so that its document opens anew.
+    fn open(&self, window: &str, document: Option<&Path>) -> Result<(), WindowError> {
+        let new_window = NewWindow {
+            title: title_of(document),
+        };
+        self.inner
+            .windows
+            .open(window, &new_window)
+            .inspect_err(|_| self.forget(window))
+    }
+
+    /// Titles `window` after `document`, which it was just given as `showing` in place of `left`,
+    /// and tells its page to ask for it. The title goes first, so that a page told can't show the
+    /// new document under the old title. If either fails, the window keeps `left` and its title,
+    /// so the table, the title and the page agree again.
+    fn change(
+        &self,
+        window: &str,
+        document: &Path,
+        showing: Showing,
+        left: Option<ShownDocument>,
+    ) -> Result<(), WindowError> {
+        let windows = &self.inner.windows;
+        let changed = windows
+            .set_title(window, &title_of(Some(document)))
+            .and_then(|()| self.send(window, Message::AskForDocument));
+        if changed.is_err() {
+            // The error that failed the change is the one the reader is told; a title that can't
+            // be put back either stays as wrong as the failure left it.
+            let left_path = left.as_ref().map(|left| left.path.as_path());
+            let _ = windows.set_title(window, &title_of(left_path));
+            self.put_back(window, showing, left);
+        }
+        changed
+    }
+
+    /// Gives `window` back `left`, the document it showed before it was given one as `showing`,
+    /// unless it has been given another since, or closed.
+    fn put_back(&self, window: &str, showing: Showing, left: Option<ShownDocument>) {
+        // Dropped after the lock, since dropping a watch stops it.
+        let _dropped = {
+            let mut table = self.lock();
+            match table.shown.get_mut(window) {
+                Some(entry) if entry.as_ref().is_some_and(|shown| shown.showing == showing) => {
+                    std::mem::replace(entry, left)
+                }
+                _ => left,
             }
         };
-        Claimed::Given(given)
+    }
+
+    fn bring_to_front(&self, window: &str) -> Result<(), ShowError> {
+        self.inner
+            .windows
+            .bring_to_front(window)
+            .map_err(ShowError::NotBroughtToFront)
     }
 
     /// Hands `window`'s document over to its page, which has asked for it while its view shows
@@ -405,6 +605,14 @@ impl Documents {
             .as_ref()
             .filter(|shown| shown.showing == showing)
             .map(|shown| shown.path.clone())
+    }
+
+    /// What `window`'s page asking for its document does, for the tests of other modules, which
+    /// have no webview to call [`render_document`]: hands the document over, and gives the
+    /// showing the page then sends with a link (None while the window shows no document).
+    #[cfg(test)]
+    pub fn page_asks(&self, window: &str) -> Option<Showing> {
+        self.handover(window, None).map(|handover| handover.showing)
     }
 
     /// Forgets a window that closed or never opened, so its document opens anew. A render started
@@ -511,8 +719,11 @@ impl Documents {
         let _ = self.send(window, Message::Notice(notice));
     }
 
-    /// Sent outside the table's lock, so that no page is told anything while the table is held.
-    fn send(&self, window: &str, message: Message) -> tauri::Result<()> {
+    /// Sends `window`'s page `message`. Every message a page gets goes through here, also those
+    /// from outside this module (a drop's notice, a menu choice, the window's state), so the
+    /// tests see each one. Sent outside the table's lock, so that no page is told anything while
+    /// the table is held.
+    pub fn send(&self, window: &str, message: Message) -> Result<(), WindowError> {
         self.inner.pages.send(window, message)
     }
 

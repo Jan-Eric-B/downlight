@@ -4,7 +4,7 @@
 
 use tauri::{AppHandle, Emitter as _};
 
-use crate::documents::Showing;
+use crate::documents::{Showing, WindowError};
 use crate::notice::Notice;
 use crate::title_bar::MaximizeButtonState;
 
@@ -113,87 +113,20 @@ pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
     }))
 }
 
-/// Where messages for windows' pages go: their webviews in the app, a recorder in the tests.
+/// Where messages for windows' pages go: their webviews in the app, a recorder in the tests
+/// (`documents::recorder`). What is done to the windows themselves goes through the documents
+/// module's `Windows`.
 pub trait Pages: Send + Sync + 'static {
     /// Sends `message` to `window`'s page. A window that has closed gets nothing, and that is no
     /// failure; a failure is a page that is there but can't be given the message.
-    fn send(&self, window: &str, message: Message) -> tauri::Result<()>;
+    fn send(&self, window: &str, message: Message) -> Result<(), WindowError>;
 }
 
 impl Pages for AppHandle {
-    fn send(&self, window: &str, message: Message) -> tauri::Result<()> {
+    fn send(&self, window: &str, message: Message) -> Result<(), WindowError> {
         let (event, payload) = message.event();
         // Tauri 2.12 sends to a closed window's webview nothing and reports Ok, so an error is a
         // live webview that failed to run the event (or a payload that didn't serialize).
-        self.emit_to(window, event, payload)
-    }
-}
-
-/// The tests' [`Pages`].
-#[cfg(test)]
-pub mod recorder {
-    use std::io;
-    use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
-    use std::time::Duration;
-
-    use super::{Message, Pages};
-
-    /// A message as a [`Recorder`] keeps it: the window it went to, and the message.
-    pub type Sent = (String, Message);
-
-    /// Keeps every message sent, in order, for a test to check. Its clones share what they keep.
-    #[derive(Clone, Default)]
-    pub struct Recorder {
-        sent: Arc<(Mutex<Vec<Sent>>, Condvar)>,
-        /// Windows whose pages can't be given a message, as a webview that fails to run an event.
-        failing: Arc<Mutex<Vec<String>>>,
-    }
-
-    impl Recorder {
-        /// From now on, every message to `window`'s page fails to send, and isn't kept.
-        pub fn fail_sends_to(&self, window: &str) {
-            self.failing
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .push(window.to_owned());
-        }
-
-        /// Every message sent so far.
-        pub fn sent(&self) -> Vec<Sent> {
-            self.lock().clone()
-        }
-
-        /// Waits until the messages sent so far are `done`, or `timeout` has passed, and returns
-        /// every message sent by then. Messages sent from a watch's thread arrive in their own
-        /// time.
-        pub fn wait_until(&self, timeout: Duration, done: impl Fn(&[Sent]) -> bool) -> Vec<Sent> {
-            let (sent, arrived) = &*self.sent;
-            let sent = sent.lock().unwrap_or_else(PoisonError::into_inner);
-            let (sent, _) = arrived
-                .wait_timeout_while(sent, timeout, |sent| !done(sent))
-                .unwrap_or_else(PoisonError::into_inner);
-            sent.clone()
-        }
-
-        fn lock(&self) -> MutexGuard<'_, Vec<Sent>> {
-            self.sent.0.lock().unwrap_or_else(PoisonError::into_inner)
-        }
-    }
-
-    impl Pages for Recorder {
-        fn send(&self, window: &str, message: Message) -> tauri::Result<()> {
-            let failing = self
-                .failing
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .iter()
-                .any(|failing| failing == window);
-            if failing {
-                return Err(io::Error::other("the page can't be given the message").into());
-            }
-            self.lock().push((window.to_owned(), message));
-            self.sent.1.notify_all();
-            Ok(())
-        }
+        Ok(self.emit_to(window, event, payload)?)
     }
 }

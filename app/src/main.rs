@@ -41,7 +41,8 @@ fn main() -> ExitCode {
             // only if the window opens later, off the main thread.
             let app = app.clone();
             tauri::async_runtime::spawn_blocking(move || {
-                let failures = window::open_launch(&app, args, Path::new(&folder));
+                let documents = app.state::<Documents>();
+                let failures = window::open_launch(&documents, args, Path::new(&folder));
                 // The second launch has returned by now, so this process tells the reader.
                 if let Some(report) = window::failure_report(&failures) {
                     platform::show_error(&report);
@@ -77,7 +78,8 @@ fn main() -> ExitCode {
             // Without the current folder a relative path stays relative, and reading it reports
             // the problem to the reader.
             let folder = std::env::current_dir().unwrap_or_default();
-            let failures = window::open_launch(app.handle(), std::env::args_os(), &folder);
+            let documents = app.state::<Documents>();
+            let failures = window::open_launch(&documents, std::env::args_os(), &folder);
             let Some(report) = window::failure_report(&failures) else {
                 return Ok(());
             };
@@ -95,10 +97,10 @@ fn main() -> ExitCode {
         .build(tauri::generate_context!());
     match built {
         Ok(app) => {
-            // Its messages go to the pages through the app's handle, which exists only once the
-            // app is built. Managed before the event loop runs, so the launches in `setup` and a
-            // second launch's documents find it.
-            app.manage(Documents::new(app.handle().clone()));
+            // Its messages go to the pages, and its windows open, through the app's handle, which
+            // exists only once the app is built. Managed before the event loop runs, so the
+            // launches in `setup` and a second launch's documents find it.
+            app.manage(Documents::new(app.handle().clone(), app.handle().clone()));
             app.run(|_, _| {});
             ExitCode::SUCCESS
         }

@@ -8,19 +8,22 @@ use super::*;
 
 #[test]
 fn reload_for_the_shown_document_tells_the_page_and_reads_the_file_again() {
-    let path = document("reload-shown", "# First");
+    // The file isn't written: the window's real watch would report that too, during the pause.
     let (documents, pages) = documents();
-    let label = open_new(&documents, &path);
-    let mut on_change = watch_callback(&documents, &label, &path);
-    rendered_html(&documents, &label);
-    std::fs::write(&path, "# Second").unwrap();
+    let label = open_new(&documents, &manifest());
+    let mut on_change = watch_callback(&documents, &label, &manifest());
+    let page_shows = handover(&documents, &label, None).showing;
     on_change(Change::Changed);
-    wait_for_render_ahead(&documents, &label);
-    // Written after the reload's read, so only a read on the page's request would see it.
-    std::fs::write(&path, "# Third").unwrap();
-    let shown = rendered_html(&documents, &label);
-    std::fs::remove_file(&path).unwrap();
-    assert!(shown.contains("Second"), "{shown}");
+    let asked = after_a_render_could_start();
+    let reloaded = handover(&documents, &label, Some(page_shows));
+    let (shown, started) = html_and_start_of(reloaded.render);
+    // Started by the change, since the page took the render ahead with its first request.
+    assert!(
+        started < asked,
+        "the read started {started:?}, after {asked:?}"
+    );
+    assert_eq!(reloaded.place, Place::Reload);
+    assert!(shown.contains("downlight"), "{shown}");
     assert_eq!(pages.sent(), [to(&label, Message::AskForDocument)]);
 }
 
@@ -71,20 +74,25 @@ fn reload_overtaken_by_another_document_sends_nothing() {
     // Ticket 21: the watch on the first document reports a save just after the window was given
     // the second, before that watch has stopped.
     let first = document("reload-left-first", "# First document");
-    let second = document("reload-left-second", "# Second document");
     let (documents, pages) = documents();
     let label = open_new(&documents, &first);
     let mut on_first_change = watch_callback(&documents, &label, &first);
-    give(&documents, DocumentAt::new(&second), Target::Window(&label));
-    wait_for_render_ahead(&documents, &label);
-    // A render started now would read this, and the page would get it instead of the one ahead.
-    std::fs::write(&second, "# Changed since").unwrap();
+    give(
+        &documents,
+        DocumentAt::new(&manifest()),
+        Target::Window(&label),
+    );
+    // A render started by the change would replace the one started ahead, and start after this.
+    let changed = after_a_render_could_start();
     on_first_change(Change::Changed);
     on_first_change(Change::Gone);
-    let shown = rendered_html(&documents, &label);
+    let (shown, started) = html_and_start_of(handover(&documents, &label, None).render);
     std::fs::remove_file(&first).unwrap();
-    std::fs::remove_file(&second).unwrap();
-    assert!(shown.contains("Second document"), "{shown}");
+    assert!(
+        started < changed,
+        "the read started {started:?}, after {changed:?}"
+    );
+    assert!(shown.contains("downlight"), "{shown}");
     assert_eq!(pages.sent(), [to(&label, Message::AskForDocument)]);
 }
 
@@ -227,33 +235,25 @@ fn unwatchable() -> PathBuf {
         .join("unwatched.md")
 }
 
-/// Long enough for a watch that can't start to have failed.
-const WATCH_START_WAIT: Duration = Duration::from_millis(500);
+/// Long enough for a watch that can't start to have failed: its folder is missing, which it
+/// finds at once on its blocking thread. Only a stalled machine takes longer.
+const WATCH_START_WAIT: Duration = Duration::from_secs(1);
 
 #[test]
 fn watch_that_cannot_start_is_noticed_once_the_page_asks() {
+    // The notice is held, not sent: a page that hasn't asked yet may not listen (ticket 10).
     let (documents, pages) = documents();
     let label = open_new(&documents, &unwatchable());
     let before_asking = pages.wait_until(WATCH_START_WAIT, |sent| !sent.is_empty());
-    // With the first answer if the watch failed by then, as it does within the wait on any
-    // machine but a stalled one; sent once it fails otherwise.
     let answered = handover(&documents, &label, None).notice;
-    let notice = answered.or_else(|| {
-        match pages
-            .wait_until(REPORT_WAIT, |sent| !sent.is_empty())
-            .as_slice()
-        {
-            [(window, Message::Notice(notice))] if *window == label => Some(notice.clone()),
-            _ => None,
-        }
-    });
     assert_eq!(before_asking, []);
     assert!(
-        notice
+        answered
             .as_ref()
             .is_some_and(|notice| notice.to_string().starts_with("Can't watch")),
-        "{notice:?}"
+        "{answered:?}"
     );
+    assert_eq!(pages.sent(), []);
 }
 
 #[test]

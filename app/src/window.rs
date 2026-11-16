@@ -1,6 +1,7 @@
-//! A window per document, in one process (ADR 0001): opening a window for a document or bringing
-//! an open document's window to the front, and closing it. Which window shows which document is
-//! kept by the documents module (`documents.rs`).
+//! A window per document, in one process (ADR 0001): showing the documents a launch names, what
+//! every new window starts with, and closing a window. Which window shows which document, and
+//! carrying out a show, are the documents module's (`documents.rs`); Tauri's `AppHandle` is its
+//! [`Windows`] here.
 
 use std::ffi::OsString;
 use std::fmt;
@@ -13,41 +14,27 @@ use tauri::{
     WindowEvent,
 };
 
-use crate::documents::{DocumentAt, Documents, Given, Target, file_name_shown};
+use crate::documents::{DocumentAt, Documents, NewWindow, ShowError, Target, WindowError, Windows};
 use crate::timing::Timing;
-use crate::{APP_NAME, command_line, platform, title_bar};
+use crate::{command_line, platform, title_bar};
 
-/// What [`show`] did with a document.
-#[derive(Debug, PartialEq, Eq)]
-pub enum Shown {
-    /// It opened in a window: a new one, or the target window.
-    Opened,
-    /// It is open already, in the window the request came from ([`Given::AlreadyHere`]).
-    AlreadyHere,
-    /// It is open already, in another window, which was brought to the front. Its page has been
-    /// told to scroll to the document's heading, if it has to ([`Given::AlreadyElsewhere`]).
-    AlreadyElsewhere,
-}
-
-/// A window a launch couldn't open or bring to the front. Its message names the document, so the
-/// reader can tell which of a launch's documents failed.
+/// What a launch couldn't show. Its message names the document, so the reader can tell which of
+/// a launch's documents failed.
 #[derive(Debug)]
-pub struct LaunchFailure {
-    /// None for the window of a launch that names no document.
-    document: Option<PathBuf>,
-    error: tauri::Error,
+pub enum LaunchFailure {
+    /// A document the launch names isn't shown.
+    Document { document: PathBuf, error: ShowError },
+    /// The window of a launch that names no document didn't open.
+    EmptyWindow(WindowError),
 }
 
 impl fmt::Display for LaunchFailure {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.document {
-            Some(document) => write!(
-                f,
-                "Can't open a window for {}: {}",
-                document.display(),
-                self.error
-            ),
-            None => write!(f, "Can't open a window: {}", self.error),
+        match self {
+            Self::Document { document, error } => {
+                write!(f, "Can't show {}: {error}", document.display())
+            }
+            Self::EmptyWindow(error) => write!(f, "Can't open a window: {error}"),
         }
     }
 }
@@ -72,73 +59,28 @@ pub fn failure_report(failures: &[LaunchFailure]) -> Option<String> {
 /// fails doesn't keep the launch's other documents from opening; the failures come back for the
 /// caller to show (ticket 19), empty when every window opened.
 pub fn open_launch(
-    app: &AppHandle,
+    documents: &Documents,
     args: impl IntoIterator<Item = impl Into<OsString>>,
     launching_folder: &Path,
 ) -> Vec<LaunchFailure> {
-    let documents = command_line::document_paths(args, launching_folder);
-    if documents.is_empty() {
-        return open_empty(app)
+    let paths = command_line::document_paths(args, launching_folder);
+    if paths.is_empty() {
+        return documents
+            .open_empty()
             .err()
-            .map(|error| LaunchFailure {
-                document: None,
-                error,
-            })
+            .map(LaunchFailure::EmptyWindow)
             .into_iter()
             .collect();
     }
-    documents
+    paths
         .into_iter()
         .filter_map(|document| {
-            show(app, DocumentAt::new(&document), Target::NewWindow)
+            documents
+                .give(DocumentAt::new(&document), Target::NewWindow)
                 .err()
-                .map(|error| LaunchFailure {
-                    document: Some(document),
-                    error,
-                })
+                .map(|error| LaunchFailure::Document { document, error })
         })
         .collect()
-}
-
-/// Opens a new window that shows no document.
-fn open_empty(app: &AppHandle) -> tauri::Result<()> {
-    let documents = app.state::<Documents>();
-    open_or_forget(app, &documents, &documents.open_empty(), &title_of(None))
-}
-
-/// Shows `document` in `target`, the one way a window gets or changes its document
-/// ([`Documents::give`]). A document that is open already has its window brought to the front
-/// instead, so a document is shown in at most one window. A new window opens titled after the
-/// document; a window shown another document gets that document's title, and its page is told to
-/// render it. Either page gets the heading with the render. A page that can't be told fails the
-/// show, so the reader learns the document isn't shown.
-pub fn show(app: &AppHandle, document: DocumentAt<'_>, target: Target<'_>) -> tauri::Result<Shown> {
-    let documents = app.state::<Documents>();
-    let title = title_of(Some(document.path));
-    match documents.give(document, target)? {
-        Given::NewWindow(window) => {
-            open_or_forget(app, &documents, &window, &title)?;
-            Ok(Shown::Opened)
-        }
-        Given::Changed(label) => {
-            let window = app
-                .get_webview_window(&label)
-                .ok_or(tauri::Error::WindowNotFound)?;
-            window.set_title(&title)?;
-            Ok(Shown::Opened)
-        }
-        Given::AlreadyHere(window) => {
-            // Dropping a file onto a window from the file manager leaves the file manager in
-            // front, so even the window the request came from is brought there.
-            bring_to_front(app, &window)?;
-            Ok(Shown::AlreadyHere)
-        }
-        Given::AlreadyElsewhere(window) => {
-            bring_to_front(app, &window)?;
-            Ok(Shown::AlreadyElsewhere)
-        }
-        Given::WindowGone => Err(tauri::Error::WindowNotFound),
-    }
 }
 
 /// Forgets a closed window's document, so opening the document again opens a new window.
@@ -148,15 +90,33 @@ pub fn forget_when_destroyed(window: &tauri::Window, event: &WindowEvent) {
     }
 }
 
-/// Opens the window `label` the documents module has just recorded, or forgets it if it can't
-/// open, so that its document opens anew.
-fn open_or_forget(
-    app: &AppHandle,
-    documents: &Documents,
-    label: &str,
-    title: &str,
-) -> tauri::Result<()> {
-    open_window(app, label, title).inspect_err(|_| documents.forget(label))
+/// The app's [`Windows`]: Tauri's windows.
+impl Windows for AppHandle {
+    fn open(&self, window: &str, new_window: &NewWindow) -> Result<(), WindowError> {
+        Ok(open_window(self, window, new_window)?)
+    }
+
+    fn set_title(&self, window: &str, title: &str) -> Result<(), WindowError> {
+        // The window may have closed since it was given its document, and its title is then
+        // nobody's to see.
+        let Some(window) = self.get_webview_window(window) else {
+            return Ok(());
+        };
+        Ok(window.set_title(title)?)
+    }
+
+    fn bring_to_front(&self, window: &str) -> Result<(), WindowError> {
+        // A window that is still being built has no handle yet. One that is built but still
+        // hidden ignores set_focus (tao does nothing for a window that isn't visible). Either way
+        // it comes up in front when its page asks to be shown (`show_window`).
+        let Some(window) = self.get_webview_window(window) else {
+            return Ok(());
+        };
+        if window.is_minimized()? {
+            window.unminimize()?;
+        }
+        Ok(window.set_focus()?)
+    }
 }
 
 /// What a window leaves for its page to draw, decided once when it opens.
@@ -211,8 +171,10 @@ pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
 const LONGEST_HIDDEN: Duration = Duration::from_secs(5);
 
 /// Opens a window, hidden until its page has drawn its first frame (`show_window`), so it never
-/// shows WebView2's white or an empty frame while the webview starts (ticket 04).
-fn open_window(app: &AppHandle, label: &str, title: &str) -> tauri::Result<()> {
+/// shows WebView2's white or an empty frame while the webview starts (ticket 04). The one place
+/// that decides what every new window starts with: the page and its flags, its frame, the
+/// navigation guard, the backdrop, the key setup, the maximize button and the 5 s fallback.
+fn open_window(app: &AppHandle, label: &str, new_window: &NewWindow) -> tauri::Result<()> {
     let timing = app.state::<Timing>();
     timing.window_opening(label);
     // Decided once, so the page drops its background exactly when the window is transparent, and
@@ -225,7 +187,7 @@ fn open_window(app: &AppHandle, label: &str, title: &str) -> tauri::Result<()> {
     let page = page_origin(app);
     let builder = WebviewWindowBuilder::new(app, label, url)
         // Alt+Tab and the taskbar still show the title, though the page's title bar doesn't.
-        .title(title)
+        .title(&new_window.title)
         .decorations(!look.title_bar)
         .visible(false)
         // Links never navigate the webview or open one of its own windows: the page follows them
@@ -272,19 +234,6 @@ fn is_the_page(url: &Url, page_origin: &str) -> bool {
     url.origin().ascii_serialization() == page_origin && matches!(url.path(), "/" | "/index.html")
 }
 
-fn bring_to_front(app: &AppHandle, label: &str) -> tauri::Result<()> {
-    // A window that is still being built has no handle yet. One that is built but still hidden
-    // ignores set_focus (tao does nothing for a window that isn't visible). Either way it comes up
-    // in front when its page asks to be shown (`show_window`).
-    let Some(window) = app.get_webview_window(label) else {
-        return Ok(());
-    };
-    if window.is_minimized()? {
-        window.unminimize()?;
-    }
-    window.set_focus()
-}
-
 /// Ctrl+W.
 #[tauri::command]
 pub fn close_window(window: WebviewWindow) -> tauri::Result<()> {
@@ -298,22 +247,6 @@ pub fn show_window(window: WebviewWindow, timing: State<'_, Timing>) -> tauri::R
     window.show()?;
     timing.window_shown(window.label());
     Ok(())
-}
-
-/// `README.md - docs - Downlight`: the folder tells documents with the same name apart in Alt+Tab
-/// and on the taskbar. A window that shows no document (None) is titled `Downlight`.
-fn title_of(document: Option<&Path>) -> String {
-    let Some(document) = document else {
-        return APP_NAME.to_owned();
-    };
-    // The same name as the title bar's.
-    let file = file_name_shown(document);
-    // Launches, the open dialog and dropping all give absolute paths, so only a drive root has no
-    // folder.
-    match document.parent() {
-        Some(folder) => format!("{file} - {} - {APP_NAME}", file_name_shown(folder)),
-        None => format!("{file} - {APP_NAME}"),
-    }
 }
 
 #[cfg(all(test, windows))]

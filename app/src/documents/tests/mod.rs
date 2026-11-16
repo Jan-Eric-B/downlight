@@ -1,21 +1,21 @@
-//! Most tests drive the module through its public interface and check what pages are told. A
-//! page's request for its document goes through `handover`, which is all of `render_document`
-//! but its webview and timing, so that it is tested without either. A few tests call the private
-//! watch callbacks (`on_change`, `keep_watch`, `notice`) instead: they stand in for the watch's
-//! thread, so that a test reports a change, a late watch or a notice at the moment of its
-//! choosing and reproduces ticket 21's race and the held notice deterministically.
+//! Most tests drive the module through its public interface and check what pages are told and
+//! what is done to windows (the recorder). A page's request for its document goes through
+//! `handover`, which is all of `render_document` but its webview and timing, so that it is tested
+//! without either. A few tests call the private watch callbacks (`on_change`, `keep_watch`,
+//! `notice`) instead: they stand in for the watch's thread, so that a test reports a change, a
+//! late watch or a notice at the moment of its choosing and reproduces ticket 21's race and the
+//! held notice deterministically.
 //!
 //! The tests are split by feature, so that each is found by its name: giving a window its
 //! document, the handover to its page, and watching its file. The helpers here are the ones
 //! several of them use.
 
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use tauri::async_runtime::block_on;
 
-use crate::message::recorder::{Recorder, Sent};
-
+use super::recorder::{Recorder, Sent, ToWindow, recorded};
 use super::*;
 
 mod give;
@@ -31,19 +31,28 @@ fn app_file(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join(name)
 }
 
-/// No window shows a document yet, and what pages are told is recorded.
+/// No window shows a document yet, and what pages are told and what is done to windows is
+/// recorded.
 fn documents() -> (Documents, Recorder) {
-    let pages = Recorder::default();
-    (Documents::new(pages.clone()), pages)
+    recorded()
 }
 
-/// What [`Documents::give`] did, where every page can be told.
+/// What [`Documents::give`] did, where every window opens and every page can be told.
 #[expect(
     clippy::unwrap_used,
     reason = "a helper isn't a #[test] function, and its panic fails the test that called it"
 )]
 fn give(documents: &Documents, document: DocumentAt<'_>, target: Target<'_>) -> Given {
     documents.give(document, target).unwrap()
+}
+
+/// Opens a new window that shows no document and returns its label.
+#[expect(
+    clippy::unwrap_used,
+    reason = "a helper isn't a #[test] function, and its panic fails the test that called it"
+)]
+fn open_empty(documents: &Documents) -> String {
+    documents.open_empty().unwrap()
 }
 
 /// Gives a new window `document` and returns its label.
@@ -58,9 +67,21 @@ fn open_new(documents: &Documents, document: &Path) -> String {
     }
 }
 
-/// `message` as sent to `window`'s page.
-fn to(window: &str, message: Message) -> Sent {
-    (window.to_owned(), message)
+/// `what` as sent to `window`'s page, or done to `window`.
+fn to<T>(window: &str, what: T) -> (String, T) {
+    (window.to_owned(), what)
+}
+
+/// What a window opened with `title` is recorded as.
+fn opened(title: &str) -> ToWindow {
+    ToWindow::Opened(NewWindow {
+        title: title.to_owned(),
+    })
+}
+
+/// What a window titled `title` is recorded as.
+fn titled(title: &str) -> ToWindow {
+    ToWindow::Titled(title.to_owned())
 }
 
 /// A document file of the test's own, so that tests running in parallel never share one.
@@ -95,36 +116,34 @@ fn rendered_html(documents: &Documents, window: &str) -> String {
 }
 
 /// The HTML a render handed over gives.
+fn html_of(render: RenderTask) -> String {
+    html_and_start_of(render).0
+}
+
+/// The HTML a render handed over gives, and when its read started, as the timing switch reports
+/// it (`at`): a render started ahead, when the window was given its document or its file
+/// changed, started before the page asked, and one started on the page's request after it.
 #[expect(
     clippy::panic,
     reason = "a helper isn't a #[test] function, and its panic fails the test that called it"
 )]
-fn html_of(render: RenderTask) -> String {
+fn html_and_start_of(render: RenderTask) -> (String, SystemTime) {
     match block_on(render) {
-        Ok(Ok((document, _))) => document.as_str().to_owned(),
+        Ok(Ok((document, stages))) => (document.as_str().to_owned(), stages.started()),
         Ok(Err(error)) => panic!("expected a rendered document, got {error}"),
         Err(error) => panic!("the read and render stopped: {error}"),
     }
 }
 
-/// Waits until the render started ahead for `window` has read and rendered its document, so
-/// that a test can change the file afterwards and tell the two reads apart.
-#[expect(
-    clippy::panic,
-    reason = "a helper isn't a #[test] function, and its panic fails the test that called it"
-)]
-fn wait_for_render_ahead(documents: &Documents, window: &str) {
-    for _ in 0..500 {
-        let finished = documents.lock().shown[window]
-            .as_ref()
-            .and_then(|shown| shown.render_ahead.as_ref())
-            .is_some_and(|task| task.inner().is_finished());
-        if finished {
-            return;
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    panic!("the render ahead for {window} didn't finish in 5 s");
+/// Long enough for a render started ahead to have started reading on its blocking thread, so
+/// that a test can tell it from a render started later by when its read started. Only a stalled
+/// machine takes longer; a render that was never started ahead fails the test on any.
+const RENDER_START_WAIT: Duration = Duration::from_millis(200);
+
+/// Waits [`RENDER_START_WAIT`] and gives the time after it.
+fn after_a_render_could_start() -> SystemTime {
+    std::thread::sleep(RENDER_START_WAIT);
+    SystemTime::now()
 }
 
 /// The heading `window`'s page gets with its document when its view shows none yet, or None

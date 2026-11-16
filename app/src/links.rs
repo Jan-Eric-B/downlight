@@ -6,12 +6,11 @@ use std::path::{Path, PathBuf};
 use std::{fmt, io};
 
 use downlight_core::{LinkAction, LinkError, PathKind, resolve_link};
-use tauri::{AppHandle, Manager as _, WebviewWindow};
+use tauri::{Manager as _, WebviewWindow};
 
-use crate::documents::{DocumentAt, Documents, Showing, Target};
+use crate::documents::{DocumentAt, Documents, Given, ShowError, Showing, Target};
 use crate::notice::{NamedFile, Notice};
 use crate::platform;
-use crate::window::{self, Shown};
 
 /// Follows the link `target`, as written in the calling window's document as `showing`, and tells
 /// the page what is left for it to do. With `new_window` (Ctrl+click), a Markdown document opens
@@ -31,9 +30,17 @@ pub async fn follow_link(
 ) -> Result<Followed, FollowError> {
     let app = window.app_handle().clone();
     let label = window.label().to_owned();
-    tauri::async_runtime::spawn_blocking(move || follow(&app, &label, showing, &target, new_window))
-        .await
-        .map_err(|source| FollowError::Stopped { source })?
+    tauri::async_runtime::spawn_blocking(move || {
+        follow(
+            &app.state::<Documents>(),
+            &label,
+            showing,
+            &target,
+            new_window,
+        )
+    })
+    .await
+    .map_err(|source| FollowError::Stopped { source })?
 }
 
 /// What the page does after a link was followed.
@@ -69,7 +76,7 @@ pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
 }
 
 fn follow(
-    app: &AppHandle,
+    documents: &Documents,
     label: &str,
     showing: Showing,
     target: &str,
@@ -77,15 +84,32 @@ fn follow(
 ) -> Result<Followed, FollowError> {
     // A window that shows no document has no links, and one that has left the link's has none
     // of that document's.
-    let Some(document) = app
-        .state::<Documents>()
-        .document_path_shown_as(label, showing)
-    else {
+    let Some(document) = documents.document_path_shown_as(label, showing) else {
         return Ok(Followed::Nothing);
     };
     match resolve_link(&document, target, path_kind)? {
         LinkAction::ShowDocument { path, heading } => {
-            show_document(app, label, path, heading, new_window)
+            let document = DocumentAt {
+                path: &path,
+                heading: heading.as_deref(),
+            };
+            let target = if new_window {
+                Target::NewWindowFrom(label)
+            } else {
+                Target::Window(label)
+            };
+            // A link to the document this window shows already scrolls to the heading, or else
+            // to the top, also with Ctrl+click: `give` sends this window nothing, so the page
+            // scrolls only on this. Any other window that shows the document has been told to
+            // scroll by `give`, only if the link names a heading, so that otherwise it keeps its
+            // reading position.
+            match documents.give(document, target) {
+                Ok(Given::AlreadyHere(_)) => Ok(Followed::ScrollTo { heading }),
+                Ok(Given::NewWindow(_) | Given::Changed(_) | Given::AlreadyElsewhere(_)) => {
+                    Ok(Followed::Nothing)
+                }
+                Err(source) => Err(FollowError::Show { path, source }),
+            }
         }
         LinkAction::ScrollToHeading { heading } => Ok(Followed::ScrollTo { heading }),
         LinkAction::RevealFile(path) => match platform::reveal_file(&path) {
@@ -101,48 +125,6 @@ fn follow(
             Err(source) => Err(FollowError::OpenUrl { url, source }),
         },
         LinkAction::Nothing => Ok(Followed::Nothing),
-    }
-}
-
-/// Shows the linked document `path` in window `label`, or in a new window with `new_window`. A
-/// document that is open already has its window brought to the front: this window's page scrolls
-/// to the heading (or the top) on the link's result, and another window's page is told to scroll
-/// by `Documents::give`, only if the link names a heading, so that otherwise it keeps its reading
-/// position.
-fn show_document(
-    app: &AppHandle,
-    label: &str,
-    path: PathBuf,
-    heading: Option<String>,
-    new_window: bool,
-) -> Result<Followed, FollowError> {
-    let document = DocumentAt {
-        path: &path,
-        heading: heading.as_deref(),
-    };
-    let shown = window::show(app, document, destination(label, new_window))
-        .map_err(|source| FollowError::Show { path, source })?;
-    Ok(left_for_the_page(&shown, heading))
-}
-
-/// The window a link in window `label` shows a Markdown document in: this one, or a new one with
-/// Ctrl+click.
-fn destination(label: &str, new_window: bool) -> Target<'_> {
-    if new_window {
-        Target::NewWindowFrom(label)
-    } else {
-        Target::Window(label)
-    }
-}
-
-/// What is left for the page after its link to a document at `heading` was `shown`: a link to the
-/// document this window shows already scrolls to the heading, or else to the top, also with
-/// Ctrl+click. `Documents::give` sends this window no `scroll-to-heading`, so the page scrolls
-/// only on this.
-fn left_for_the_page(shown: &Shown, heading: Option<String>) -> Followed {
-    match shown {
-        Shown::AlreadyHere => Followed::ScrollTo { heading },
-        Shown::AlreadyElsewhere | Shown::Opened => Followed::Nothing,
     }
 }
 
@@ -181,9 +163,10 @@ pub enum FollowError {
         url: String,
         source: io::Error,
     },
+    /// The link names a Markdown document that isn't shown.
     Show {
         path: PathBuf,
-        source: tauri::Error,
+        source: ShowError,
     },
     /// The background task that follows the link panicked or was cancelled.
     Stopped {
@@ -246,6 +229,8 @@ impl serde::Serialize for FollowError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::documents::recorder::{ToWindow, recorded};
+    use crate::message::Message;
 
     #[test]
     fn path_kind_tells_files_folders_and_missing_apart() {
@@ -338,42 +323,145 @@ mod tests {
     }
 
     #[test]
+    fn link_to_another_document_shows_it_in_this_window() {
+        let (documents, recorder) = recorded();
+        let (window, showing) = window_showing_notes(&documents);
+        let followed = follow(&documents, &window, showing, "readme.md", false);
+        assert_eq!(followed.ok(), Some(Followed::Nothing));
+        assert_eq!(
+            documents.document_path(&window),
+            Some(fixtures().join("readme.md"))
+        );
+        assert_eq!(recorder.sent(), [(window, Message::AskForDocument)]);
+    }
+
+    #[test]
     fn ctrl_click_shows_the_document_in_a_new_window() {
-        assert!(matches!(
-            destination("document-0", true),
-            Target::NewWindowFrom("document-0")
-        ));
-        assert!(matches!(
-            destination("document-0", false),
-            Target::Window("document-0")
-        ));
+        let (documents, recorder) = recorded();
+        let (window, showing) = window_showing_notes(&documents);
+        let followed = follow(&documents, &window, showing, "readme.md#install", true);
+        assert_eq!(followed.ok(), Some(Followed::Nothing));
+        assert_eq!(
+            documents.document_path(&window),
+            Some(fixtures().join("notes.md"))
+        );
+        assert!(
+            matches!(recorder.done().as_slice(), [_, (new, ToWindow::Opened(_))] if *new != window),
+            "{:?}",
+            recorder.done()
+        );
     }
 
     #[test]
     fn link_to_the_document_this_window_shows_scrolls_to_its_heading_or_the_top() {
+        // Also with Ctrl+click: the document is shown in at most one window (ADR 0001).
+        let (documents, recorder) = recorded();
+        let (window, showing) = window_showing_notes(&documents);
+        let follow_here =
+            |target, new_window| follow(&documents, &window, showing, target, new_window).ok();
+        let followed = [
+            follow_here("notes.md#install", false),
+            follow_here("notes.md", false),
+            follow_here("notes.md#install", true),
+        ];
+        let scroll_to = |heading: Option<&str>| {
+            Some(Followed::ScrollTo {
+                heading: heading.map(str::to_owned),
+            })
+        };
         assert_eq!(
-            left_for_the_page(&Shown::AlreadyHere, Some("install".to_owned())),
-            Followed::ScrollTo {
-                heading: Some("install".to_owned())
-            }
+            followed,
+            [
+                scroll_to(Some("install")),
+                scroll_to(None),
+                scroll_to(Some("install"))
+            ]
+        );
+        assert_eq!(recorder.sent(), []);
+    }
+
+    #[test]
+    fn link_to_a_document_shown_elsewhere_brings_that_window_to_the_front_and_scrolls_it() {
+        // That window scrolls on the app's word (`scroll-to-heading`), not this page's.
+        let (documents, recorder) = recorded();
+        let (window, showing) = window_showing_notes(&documents);
+        let other = documents
+            .give(
+                DocumentAt::new(&fixtures().join("readme.md")),
+                Target::NewWindow,
+            )
+            .unwrap();
+        let Given::NewWindow(other) = other else {
+            panic!("expected a new window, got {other:?}");
+        };
+        documents.page_asks(&other);
+        let followed = follow(&documents, &window, showing, "readme.md#install", false);
+        assert_eq!(followed.ok(), Some(Followed::Nothing));
+        assert_eq!(
+            recorder.sent(),
+            [(
+                other.clone(),
+                Message::ScrollToHeading("install".to_owned())
+            )]
         );
         assert_eq!(
-            left_for_the_page(&Shown::AlreadyHere, None),
-            Followed::ScrollTo { heading: None }
+            recorder.done().last(),
+            Some(&(other, ToWindow::BroughtToFront))
         );
     }
 
     #[test]
-    fn link_to_a_document_shown_elsewhere_leaves_this_page_nothing_to_do() {
-        // Another window scrolls on the app's word (`scroll-to-heading`), not this page's.
-        let heading = || Some("install".to_owned());
+    fn link_to_a_document_whose_window_cannot_open_names_the_document_and_why() {
+        let (documents, recorder) = recorded();
+        let (window, showing) = window_showing_notes(&documents);
+        recorder.fail_window("document-1");
+        let followed = follow(&documents, &window, showing, "readme.md", true);
         assert_eq!(
-            left_for_the_page(&Shown::AlreadyElsewhere, heading()),
-            Followed::Nothing
+            followed.err().map(|error| error.to_string()),
+            Some(format!(
+                "Can't show readme.md in {}: its window didn't open: the window can't be changed",
+                fixtures().display()
+            ))
         );
-        assert_eq!(
-            left_for_the_page(&Shown::Opened, heading()),
-            Followed::Nothing
-        );
+        // Forgotten, so it opens anew.
+        assert_eq!(documents.document_path("document-1"), None);
+    }
+
+    #[test]
+    fn link_in_a_document_the_window_has_left_does_nothing() {
+        let (documents, recorder) = recorded();
+        let (window, left) = window_showing_notes(&documents);
+        let readme = fixtures().join("readme.md");
+        documents
+            .give(DocumentAt::new(&readme), Target::Window(&window))
+            .unwrap();
+        let followed = follow(&documents, &window, left, "notes.md", false);
+        assert_eq!(followed.ok(), Some(Followed::Nothing));
+        assert_eq!(documents.document_path(&window), Some(readme));
+        assert_eq!(recorder.sent(), [(window, Message::AskForDocument)]);
+    }
+
+    /// The core's committed fixture documents, among them `notes.md` and `readme.md`. Nothing
+    /// writes or removes them while the tests run, so the windows' watches start on them.
+    fn fixtures() -> PathBuf {
+        let folder = Path::new(env!("CARGO_MANIFEST_DIR")).join("../core/tests/fixtures");
+        // Resolves the `..`, as a launch does, so the folder is named as a link names it.
+        std::path::absolute(&folder).unwrap()
+    }
+
+    /// A new window that shows `notes.md`, and whose page has asked for it: its label, and the
+    /// showing its links name.
+    fn window_showing_notes(documents: &Documents) -> (String, Showing) {
+        let given = documents
+            .give(
+                DocumentAt::new(&fixtures().join("notes.md")),
+                Target::NewWindow,
+            )
+            .unwrap();
+        let Given::NewWindow(window) = given else {
+            panic!("expected a new window, got {given:?}");
+        };
+        let showing = documents.page_asks(&window).unwrap();
+        (window, showing)
     }
 }

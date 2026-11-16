@@ -1,50 +1,92 @@
-use std::path::PathBuf;
+use crate::documents::recorder::{ToWindow, recorded};
 
 use super::*;
 
+/// A document of a launch, which needn't exist: a missing one opens a window that says so.
+const LAUNCHED: &str = r"C:\work\docs\README.md";
+
 #[test]
-fn window_without_a_document_is_titled_downlight() {
-    assert_eq!(title_of(None), "Downlight");
+fn launch_that_names_no_document_opens_a_window_titled_downlight() {
+    let (documents, recorder) = recorded();
+    let failures = open_launch(&documents, ["downlight"], Path::new(r"C:\work"));
+    assert!(failures.is_empty(), "{failures:?}");
+    assert_eq!(
+        recorder.done(),
+        [(
+            "document-0".to_owned(),
+            ToWindow::Opened(NewWindow {
+                title: "Downlight".to_owned()
+            })
+        )]
+    );
 }
 
 #[test]
-fn failure_names_its_document_and_the_error() {
-    let failure = LaunchFailure {
-        document: Some(PathBuf::from(r"C:\work\docs\README.md")),
-        error: tauri::Error::WindowNotFound,
-    };
+fn launch_opens_a_window_for_each_document_titled_after_it() {
+    let (documents, recorder) = recorded();
+    let failures = open_launch(
+        &documents,
+        ["downlight", LAUNCHED, r"C:\work\b.md"],
+        Path::new(r"C:\work"),
+    );
+    let titles = recorder
+        .done()
+        .into_iter()
+        .map(|(_, done)| done)
+        .collect::<Vec<_>>();
+    assert!(failures.is_empty(), "{failures:?}");
     assert_eq!(
-        failure.to_string(),
-        r"Can't open a window for C:\work\docs\README.md: window not found"
+        titles,
+        [
+            ToWindow::Opened(NewWindow {
+                title: "README.md - docs - Downlight".to_owned()
+            }),
+            ToWindow::Opened(NewWindow {
+                title: "b.md - work - Downlight".to_owned()
+            })
+        ]
+    );
+}
+
+#[test]
+fn failure_names_its_document_and_why_in_the_reader_s_terms() {
+    let (documents, recorder) = recorded();
+    recorder.fail_window("document-0");
+    let failures = open_launch(&documents, ["downlight", LAUNCHED], Path::new(r"C:\work"));
+    assert_eq!(
+        failure_report(&failures).as_deref(),
+        Some(
+            r"Can't show C:\work\docs\README.md: its window didn't open: the window can't be changed"
+        )
     );
 }
 
 #[test]
 fn failure_of_the_window_without_a_document_names_the_error() {
-    let failure = LaunchFailure {
-        document: None,
-        error: tauri::Error::WindowNotFound,
-    };
-    assert_eq!(failure.to_string(), "Can't open a window: window not found");
+    let (documents, recorder) = recorded();
+    recorder.fail_window("document-0");
+    let failures = open_launch(&documents, ["downlight"], Path::new(r"C:\work"));
+    assert_eq!(
+        failure_report(&failures).as_deref(),
+        Some("Can't open a window: the window can't be changed")
+    );
 }
 
 #[test]
 fn report_names_each_failure_on_a_line_of_its_own() {
-    let failures = [
-        LaunchFailure {
-            document: Some(PathBuf::from(r"C:\work\a.md")),
-            error: tauri::Error::WindowNotFound,
-        },
-        LaunchFailure {
-            document: Some(PathBuf::from(r"C:\work\b.md")),
-            error: tauri::Error::WindowNotFound,
-        },
-    ];
+    let (documents, recorder) = recorded();
+    recorder.fail_window("document-0");
+    recorder.fail_window("document-1");
+    let failures = open_launch(
+        &documents,
+        ["downlight", "a.md", "b.md"],
+        Path::new(r"C:\work"),
+    );
     assert_eq!(
         failure_report(&failures).as_deref(),
         Some(
-            "Can't open a window for C:\\work\\a.md: window not found\n\
-             Can't open a window for C:\\work\\b.md: window not found"
+            "Can't show C:\\work\\a.md: its window didn't open: the window can't be changed\n\
+             Can't show C:\\work\\b.md: its window didn't open: the window can't be changed"
         )
     );
 }
@@ -52,22 +94,6 @@ fn report_names_each_failure_on_a_line_of_its_own() {
 #[test]
 fn launch_without_failures_has_nothing_to_report() {
     assert_eq!(failure_report(&[]), None);
-}
-
-#[test]
-fn title_names_the_file_then_its_folder_then_downlight() {
-    assert_eq!(
-        title_of(Some(Path::new(r"C:\work\docs\README.md"))),
-        "README.md - docs - Downlight"
-    );
-}
-
-#[test]
-fn title_of_a_file_at_a_drive_root_names_the_drive() {
-    assert_eq!(
-        title_of(Some(Path::new(r"C:\README.md"))),
-        r"README.md - C:\ - Downlight"
-    );
 }
 
 #[test]

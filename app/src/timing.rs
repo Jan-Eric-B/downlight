@@ -48,6 +48,13 @@ impl Stages {
         }
     }
 
+    /// When the work started, which the report gives as `at`. The documents tests tell a render
+    /// started ahead from one started on the page's request by it.
+    #[cfg(test)]
+    pub fn started(&self) -> SystemTime {
+        self.started
+    }
+
     /// Ends the stage named `stage`, which began when the work or the stage before ended.
     pub fn lap(&mut self, stage: &'static str) {
         let now = Instant::now();

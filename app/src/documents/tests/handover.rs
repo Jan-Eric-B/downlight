@@ -6,29 +6,34 @@ use super::*;
 
 #[test]
 fn window_given_a_new_document_renders_it_ahead() {
-    let path = document("new", "# Read ahead");
     let (documents, _) = documents();
-    let label = open_new(&documents, &path);
-    wait_for_render_ahead(&documents, &label);
-    std::fs::write(&path, "# Changed since").unwrap();
-    let shown = rendered_html(&documents, &label);
-    std::fs::remove_file(&path).unwrap();
-    assert!(shown.contains("Read ahead"), "{shown}");
+    let label = open_new(&documents, &manifest());
+    let asked = after_a_render_could_start();
+    let (shown, started) = html_and_start_of(handover(&documents, &label, None).render);
+    assert!(
+        started < asked,
+        "the read started {started:?}, after {asked:?}"
+    );
+    assert!(shown.contains("downlight"), "{shown}");
 }
 
 #[test]
 fn window_changed_to_another_document_renders_the_new_one_ahead() {
-    let first = document("changed-first", "# First document");
-    let second = document("changed-second", "# Second document");
     let (documents, _) = documents();
-    let label = open_new(&documents, &first);
-    give(&documents, DocumentAt::new(&second), Target::Window(&label));
-    wait_for_render_ahead(&documents, &label);
-    std::fs::write(&second, "# Changed since").unwrap();
-    let shown = rendered_html(&documents, &label);
-    std::fs::remove_file(&first).unwrap();
-    std::fs::remove_file(&second).unwrap();
-    assert!(shown.contains("Second document"), "{shown}");
+    let label = open_new(&documents, &manifest());
+    let _ = handover(&documents, &label, None);
+    give(
+        &documents,
+        DocumentAt::new(&app_file("build.rs")),
+        Target::Window(&label),
+    );
+    let asked = after_a_render_could_start();
+    let (shown, started) = html_and_start_of(handover(&documents, &label, None).render);
+    assert!(
+        started < asked,
+        "the read started {started:?}, after {asked:?}"
+    );
+    assert!(shown.contains("fn main"), "{shown}");
 }
 
 #[test]
@@ -45,15 +50,25 @@ fn next_render_after_the_first_reads_the_file_again() {
 
 #[test]
 fn opening_an_open_document_again_starts_no_render_for_its_window() {
-    let (documents, _) = documents();
+    // Its window shows it already, so a render ahead would be read and then never used: the
+    // page's next request reads the file itself.
+    let (documents, recorder) = documents();
     let label = open_new(&documents, &manifest());
-    let _ = documents.handover(&label, None);
+    let page_shows = handover(&documents, &label, None).showing;
     give(&documents, DocumentAt::new(&manifest()), Target::NewWindow);
-    // Its window shows it already, so a render ahead would be read and then never used.
-    let shown = documents.lock().shown[&label]
-        .as_ref()
-        .map(|shown| shown.render_ahead.is_some());
-    assert_eq!(shown, Some(false));
+    let asked = after_a_render_could_start();
+    let (_, started) = html_and_start_of(handover(&documents, &label, Some(page_shows)).render);
+    assert!(
+        started >= asked,
+        "the read started {started:?}, before {asked:?}"
+    );
+    assert_eq!(
+        recorder.done(),
+        [
+            to(&label, opened("Cargo.toml - app - Downlight")),
+            to(&label, ToWindow::BroughtToFront)
+        ]
+    );
 }
 
 #[test]
@@ -79,7 +94,7 @@ fn window_shown_a_document_at_a_heading_hands_it_over_with_every_render() {
     // Two links followed in quick succession each tell the page to ask, and the page keeps only
     // its latest request, which must still get the heading.
     let (documents, _) = documents();
-    let label = documents.open_empty();
+    let label = open_empty(&documents);
     give(
         &documents,
         DocumentAt {
@@ -97,7 +112,7 @@ fn window_shown_a_document_at_a_heading_hands_it_over_with_every_render() {
 #[test]
 fn window_shown_a_document_without_a_heading_hands_over_none() {
     let (documents, _) = documents();
-    let label = documents.open_empty();
+    let label = open_empty(&documents);
     give(
         &documents,
         DocumentAt {
@@ -117,7 +132,7 @@ fn window_shown_a_document_without_a_heading_hands_over_none() {
 #[test]
 fn window_without_a_document_has_nothing_to_render() {
     let (documents, _) = documents();
-    let label = documents.open_empty();
+    let label = open_empty(&documents);
     assert!(documents.handover(&label, None).is_none());
 }
 
@@ -203,7 +218,7 @@ fn page_that_shows_the_current_document_is_answered_with_a_reload() {
 fn reload_answer_keeps_the_heading_out() {
     // A reload keeps the reading position, so the heading a link named goes only with a show.
     let (documents, _) = documents();
-    let label = documents.open_empty();
+    let label = open_empty(&documents);
     let at_install = DocumentAt {
         path: &manifest(),
         heading: Some("install"),

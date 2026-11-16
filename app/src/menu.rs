@@ -4,9 +4,10 @@
 
 use serde::Deserialize;
 use tauri::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
-use tauri::{AppHandle, WebviewWindow};
+use tauri::{AppHandle, Manager as _, WebviewWindow};
 
-use crate::message::{Message, Pages as _};
+use crate::documents::Documents;
+use crate::message::Message;
 
 /// One line of the menu, as the page describes it. Serialized only for its contract samples.
 #[derive(Deserialize)]
@@ -74,9 +75,14 @@ pub fn show_document_menu(window: WebviewWindow, entries: Vec<MenuEntry>) -> tau
 
 /// Passes the reader's choice to the page of the window whose menu it was.
 pub fn forward_choice(app: &AppHandle, event: MenuEvent) {
-    if let Some((window, command)) = chosen(event.id().as_ref()) {
+    forward(&app.state::<Documents>(), event.id().as_ref());
+}
+
+/// Passes the choice of the menu item `item_id` to the page of the window it names.
+fn forward(documents: &Documents, item_id: &str) {
+    if let Some((window, command)) = chosen(item_id) {
         // A menu choice arrives as an app event that nobody waits on, so nobody is left to tell.
-        let _ = app.send(window, Message::MenuCommand(command.to_owned()));
+        let _ = documents.send(window, Message::MenuCommand(command.to_owned()));
     }
 }
 
@@ -94,6 +100,21 @@ fn chosen(item_id: &str) -> Option<(&str, &str)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::documents::recorder::recorded;
+
+    #[test]
+    fn choice_goes_to_the_page_of_the_window_whose_menu_it_was() {
+        let (documents, recorder) = recorded();
+        forward(&documents, &item_id("document-3", "open"));
+        forward(&documents, "quit");
+        assert_eq!(
+            recorder.sent(),
+            [(
+                "document-3".to_owned(),
+                Message::MenuCommand("open".to_owned())
+            )]
+        );
+    }
 
     #[test]
     fn chosen_item_names_its_window_and_command() {

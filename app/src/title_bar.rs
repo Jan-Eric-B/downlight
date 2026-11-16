@@ -11,7 +11,7 @@ use tauri::{Manager as _, State, WebviewWindow, WindowEvent};
 
 use crate::documents::Documents;
 use crate::links::reveal_failed;
-use crate::message::{Message, Pages as _};
+use crate::message::Message;
 use crate::notice::{NamedFile, Notice};
 use crate::platform;
 
@@ -68,7 +68,9 @@ pub fn add_maximize_button(window: &WebviewWindow) {
     let label = window.label().to_owned();
     platform::add_maximize_button(window, move |state| {
         // A page that can't be told keeps showing the button as it was, which is all it costs.
-        let _ = app.send(&label, Message::MaximizeButton(state));
+        let _ = app
+            .state::<Documents>()
+            .send(&label, Message::MaximizeButton(state));
     });
 }
 
@@ -202,7 +204,7 @@ pub fn tell_window_state(window: &tauri::Window, event: &WindowEvent) {
     {
         // Sent on every resize, so a missed one is put right by the next.
         let _ = window
-            .app_handle()
+            .state::<Documents>()
             .send(window.label(), Message::WindowState { maximized });
     }
 }
