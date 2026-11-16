@@ -1,4 +1,22 @@
 {
+  "notFound": {
+    "after": ".",
+    "before": "Can't find ",
+    "file": {
+      "folder": "C:\\docs",
+      "folderOpens": true,
+      "name": "a.md"
+    }
+  },
+  "notFoundInGoneFolder": {
+    "after": ".",
+    "before": "Can't find ",
+    "file": {
+      "folder": "C:\\docs",
+      "folderOpens": false,
+      "name": "a.md"
+    }
+  },
   "nothing": {
     "kind": "nothing"
   },

@@ -4,10 +4,11 @@
 
 use tauri::{AppHandle, Emitter as _};
 
+use crate::notice::Notice;
 use crate::title_bar::MaximizeButtonState;
 
 /// A message for one window's page. Each goes as the event the page listens for, with a string
-/// payload or none (`Messages` in `page/src/app.ts`).
+/// payload, a notice or none (`Messages` in `page/src/app.ts`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Message {
     /// The window shows another document now, and the page is to ask for it.
@@ -24,7 +25,7 @@ pub enum Message {
     ScrollToHeading(String),
     /// A short message to show the reader for a few seconds, such as why a dropped file didn't
     /// open or why the document's file isn't watched.
-    Notice(String),
+    Notice(Notice),
     /// The command, by id, that the reader chose in the window's right-click menu.
     MenuCommand(String),
     /// The window's size changed, and whether it is maximized now, so the page's title bar shows
@@ -35,23 +36,32 @@ pub enum Message {
     MaximizeButton(MaximizeButtonState),
 }
 
+/// What a message carries to the page.
+#[derive(Clone, serde::Serialize)]
+#[serde(untagged)]
+enum Payload<'a> {
+    Text(&'a str),
+    Notice(&'a Notice),
+}
+
 impl Message {
     /// The event the page listens for, and its payload: None goes as `null`.
-    fn event(&self) -> (&'static str, Option<&str>) {
+    fn event(&self) -> (&'static str, Option<Payload<'_>>) {
+        let text = |text| Some(Payload::Text(text));
         match self {
             Self::DocumentShown => ("document-shown", None),
-            Self::Reload => ("document-changed", Some("reload")),
-            Self::Gone => ("document-changed", Some("gone")),
-            Self::ScrollToHeading(heading) => ("scroll-to-heading", Some(heading)),
-            Self::Notice(text) => ("notice", Some(text)),
-            Self::MenuCommand(id) => ("menu-command", Some(id)),
+            Self::Reload => ("document-changed", text("reload")),
+            Self::Gone => ("document-changed", text("gone")),
+            Self::ScrollToHeading(heading) => ("scroll-to-heading", text(heading)),
+            Self::Notice(notice) => ("notice", Some(Payload::Notice(notice))),
+            Self::MenuCommand(id) => ("menu-command", text(id)),
             Self::WindowState { maximized } => (
                 "window-state",
-                Some(if *maximized { "maximized" } else { "restored" }),
+                text(if *maximized { "maximized" } else { "restored" }),
             ),
             Self::MaximizeButton(state) => (
                 "maximize-button",
-                Some(match state {
+                text(match state {
                     MaximizeButtonState::Normal => "normal",
                     MaximizeButtonState::Hovered => "hovered",
                     MaximizeButtonState::Pressed => "pressed",
@@ -65,6 +75,8 @@ impl Message {
 /// tests read (`app/src/contract.rs`, ticket 27).
 #[cfg(test)]
 pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
+    use crate::notice::NamedFile;
+
     // A new message stops the build here: give it a sample below, then name it here.
     let _sampled = |message: &Message| match message {
         Message::DocumentShown
@@ -80,12 +92,18 @@ pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
         let (event, payload) = message.event();
         serde_json::json!({ "event": event, "payload": payload })
     };
+    let naming_file = Notice::naming(
+        "Can't watch ",
+        NamedFile::sample(false),
+        " for changes, so only F5 reloads it: Access is denied.",
+    );
     Ok(serde_json::json!({
         "documentShown": sample(Message::DocumentShown),
         "reload": sample(Message::Reload),
         "gone": sample(Message::Gone),
         "scrollToHeading": sample(Message::ScrollToHeading("install".to_owned())),
-        "notice": sample(Message::Notice("Can't watch the document's file".to_owned())),
+        "notice": sample(Message::Notice("Can't watch the document's file".into())),
+        "noticeNamingFile": sample(Message::Notice(naming_file)),
         "menuCommand": sample(Message::MenuCommand("open".to_owned())),
         "maximized": sample(Message::WindowState { maximized: true }),
         "restored": sample(Message::WindowState { maximized: false }),

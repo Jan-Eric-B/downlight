@@ -1,7 +1,8 @@
-//! The contract samples (ticket 27): a sample of each answer and message the app sends a page,
-//! and of each argument the page sends the app that is more than a number, string or flag (the
-//! menu entries and the timing reports), and of the flags a window tells its page in the page's
-//! URL, committed as JSON in `tests/fixtures`. The page's tests read the same files through the
+//! The contract samples (ticket 27): a sample of each answer and message the app sends a page, of
+//! the failures that name a missing file (window design ticket 11), and of each argument the page
+//! sends the app that is more than a number, string or flag (the menu entries and the timing
+//! reports), and of the flags a window tells its page in the page's URL, committed as JSON in
+//! `tests/fixtures`. The page's tests read the same files through the
 //! types in `page/src/app.ts`: they drive each answer and message through the page, check the
 //! arguments the page sends against their samples, and read the flags from the sampled URLs, so a
 //! change to a shape on one side fails a test on the other. After an intended change to a shape,

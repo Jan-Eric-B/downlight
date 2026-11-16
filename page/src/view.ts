@@ -3,9 +3,10 @@ import {
   listenToApp,
   type DocumentFile,
   type DocumentToShow,
+  type Notice,
 } from "./app";
 import { addCopyButtons } from "./copy";
-import { showNotice } from "./notice";
+import { noticeContent, showNotice } from "./notice";
 import { open } from "./open";
 import {
   afterNextFrame,
@@ -168,22 +169,22 @@ interface Placement {
    */
   file: DocumentFile | null;
   /** The core's rendered HTML, why the document can't be shown, or null for the empty state. */
-  content: { html: string } | { text: string } | null;
+  content: { html: string } | { why: Notice } | null;
   land: Landing;
 }
 
 /** What a request does when the view keeps what it shows: tell the reader why. */
-interface Notice {
-  notice: string;
+interface Telling {
+  notice: Notice;
 }
 
 /** Shows why the window can't show its document from `file`, in place of any render. */
-function placeError(why: string, file: DocumentFile | null): Placement {
+function placeError(why: Notice, file: DocumentFile | null): Placement {
   return {
     reason: "shown",
     showing: null,
     file,
-    content: { text: why },
+    content: { why },
     land: atTop,
   };
 }
@@ -193,7 +194,7 @@ function placeError(why: string, file: DocumentFile | null): Placement {
  * reading position. A reload that can't read the file keeps the last render and says why, so the
  * reader can keep reading.
  */
-function placementFor(answer: DocumentToShow): Placement | Notice {
+function placementFor(answer: DocumentToShow): Placement | Telling {
   if (answer === null)
     return {
       reason: "shown",
@@ -339,7 +340,7 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
    * Asks the app for the window's document, sending the showing the view shows, and says what to
    * do with the answer.
    */
-  const ask = async (): Promise<Placement | Notice> => {
+  const ask = async (): Promise<Placement | Telling> => {
     let answer: DocumentToShow;
     try {
       answer = await askApp("render_document", { showing });
@@ -374,7 +375,7 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
    * stops if a later request overtook this one.
    */
   const place = async (
-    outcome: Placement | Notice,
+    outcome: Placement | Telling,
     isLatest: () => boolean,
   ): Promise<void> => {
     if ("notice" in outcome) {
@@ -388,7 +389,7 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
         ? null
         : "html" in given
           ? prepare(given.html)
-          : document.createTextNode(given.text);
+          : noticeContent(given.why);
     if (outcome.reason === "reload") {
       // Parsed in a task and a frame of its own, apart from the swap and the layout for the
       // anchoring, so that neither holds up the page for over 100 ms with a 1 MB document

@@ -272,6 +272,29 @@ article.markdown-body > * {
   display: none;
 }
 
+/* A file a notice names (window design ticket 11): its name never breaks, as one would after a
+   hyphen, and its folder breaks only between its parts, after a separator (notice.ts). */
+.unbreakable {
+  white-space: nowrap;
+}
+
+/* A missing file's folder, which opens on a click, in the color of the document's links. Not an
+   `a`, so the document's own link handling never takes it in the view's "can't read". */
+.folder-link {
+  color: var(--accent-link);
+  cursor: pointer;
+}
+
+.folder-link:hover {
+  text-decoration: underline;
+}
+
+.folder-link:focus-visible {
+  outline: 2px solid var(--accent-emphasis);
+  outline-offset: 1px;
+  border-radius: 2px;
+}
+
 /* A link's target while the pointer is over the link or it has the focus (links.ts), at the bottom
    left as a browser's status bar shows it. WebView2's own status bar is off, and the target shows
    before a click, so the reader knows where a link goes. It never takes the pointer, so moving

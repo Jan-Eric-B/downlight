@@ -31,6 +31,18 @@
     "event": "notice",
     "payload": "Can't watch the document's file"
   },
+  "noticeNamingFile": {
+    "event": "notice",
+    "payload": {
+      "after": " for changes, so only F5 reloads it: Access is denied.",
+      "before": "Can't watch ",
+      "file": {
+        "folder": "C:\\docs",
+        "folderOpens": false,
+        "name": "a.md"
+      }
+    }
+  },
   "reload": {
     "event": "document-changed",
     "payload": "reload"

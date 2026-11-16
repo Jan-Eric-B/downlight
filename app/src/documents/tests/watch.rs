@@ -243,7 +243,7 @@ fn watch_that_cannot_start_is_noticed_once_the_page_asks() {
         matches!(
             sent.as_slice(),
             [(window, Message::Notice(notice))]
-                if *window == label && notice.starts_with("Can't watch")
+                if *window == label && notice.to_string().starts_with("Can't watch")
         ),
         "{sent:?}"
     );
@@ -253,14 +253,14 @@ fn watch_that_cannot_start_is_noticed_once_the_page_asks() {
 fn notice_held_before_the_page_asks_is_sent_when_it_first_asks() {
     let (documents, pages) = documents();
     let label = open_new(&documents, &manifest());
-    documents.notice(&label, &document_key(&manifest()), "Can't watch".to_owned());
+    documents.notice(&label, &document_key(&manifest()), "Can't watch".into());
     let before_asking = pages.sent();
     let _ = documents.handover(&label, None);
     let _ = documents.handover(&label, None);
     assert_eq!(before_asking, []);
     assert_eq!(
         pages.sent(),
-        [to(&label, Message::Notice("Can't watch".to_owned()))]
+        [to(&label, Message::Notice("Can't watch".into()))]
     );
 }
 
@@ -269,10 +269,10 @@ fn notice_after_the_page_asked_is_sent_now() {
     let (documents, pages) = documents();
     let label = open_new(&documents, &manifest());
     let _ = documents.handover(&label, None);
-    documents.notice(&label, &document_key(&manifest()), "Can't watch".to_owned());
+    documents.notice(&label, &document_key(&manifest()), "Can't watch".into());
     assert_eq!(
         pages.sent(),
-        [to(&label, Message::Notice("Can't watch".to_owned()))]
+        [to(&label, Message::Notice("Can't watch".into()))]
     );
 }
 
@@ -285,7 +285,7 @@ fn notice_for_a_document_the_window_has_left_is_dropped() {
         DocumentAt::new(&app_file("build.rs")),
         Target::Window(&label),
     );
-    documents.notice(&label, &document_key(&manifest()), "Can't watch".to_owned());
+    documents.notice(&label, &document_key(&manifest()), "Can't watch".into());
     let _ = documents.handover(&label, None);
     assert_eq!(pages.sent(), [to(&label, Message::DocumentShown)]);
 }
@@ -294,7 +294,7 @@ fn notice_for_a_document_the_window_has_left_is_dropped() {
 fn notice_for_a_document_the_window_had_before_is_not_sent_with_the_new_one() {
     let (documents, pages) = documents();
     let label = open_new(&documents, &manifest());
-    documents.notice(&label, &document_key(&manifest()), "Can't watch".to_owned());
+    documents.notice(&label, &document_key(&manifest()), "Can't watch".into());
     give(
         &documents,
         DocumentAt::new(&app_file("build.rs")),

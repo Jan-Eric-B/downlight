@@ -12,6 +12,7 @@ mod image;
 mod links;
 mod menu;
 mod message;
+mod notice;
 mod open;
 mod platform;
 mod render;
@@ -65,6 +66,7 @@ fn main() -> ExitCode {
             title_bar::place_maximize_button,
             title_bar::show_window_menu,
             title_bar::reveal_document,
+            notice::open_named_folder,
         ])
         .on_menu_event(menu::forward_choice)
         .on_window_event(|window, event| {

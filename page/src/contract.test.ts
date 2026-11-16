@@ -5,15 +5,17 @@
 // side fails a test.
 import { clearMocks, mockWindows } from "@tauri-apps/api/mocks";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { pageFlags, type ArgsOf, type MenuEntry } from "./app";
+import { pageFlags, type ArgsOf, type MenuEntry, type NamedFile } from "./app";
 import { startCommands } from "./commands";
 import { startLinks } from "./links";
 import { startTitleBar } from "./title-bar";
 import {
   askedOfTheApp,
   emptyWindow,
+  failingWith,
   fakeTheApp,
   fakeTitleBarLayout,
+  followLinkFailureSample,
   followLinkSample,
   goneBar,
   heading,
@@ -24,6 +26,7 @@ import {
   openPageWith,
   pageUrlSample,
   renderDocumentSample,
+  revealFailureSample,
   settle,
   spyOnHeadingScrolls,
   spyOnScrollsToTop,
@@ -46,12 +49,16 @@ let requested: ArgsOf<"render_document">[] = [];
 /** Each `follow_link` request's arguments, in turn. */
 let follows: ArgsOf<"follow_link">[] = [];
 
+/** Each opening of a notice's folder the page asked the app for, by the folder it sent. */
+let foldersOpened: string[] = [];
+
 let stopPage: AbortController;
 
 beforeEach(() => {
   mockWindows("document-0");
   requested = [];
   follows = [];
+  foldersOpened = [];
   stopPage = new AbortController();
 });
 
@@ -140,16 +147,50 @@ test.each(["showAtTop", "showAtHeading", "reload"])(
   },
 );
 
-test("the app's answer that a document can't be read shows why", async () => {
-  answerWithSamples("unreadShow");
+/** The file the `render_document` sample `name` says can't be read. */
+function unreadFileIn(name: string): NamedFile {
+  const sample = renderDocumentSample(name);
+  if (
+    sample === null ||
+    !("error" in sample) ||
+    typeof sample.error === "string"
+  )
+    throw new Error(`The sample ${name} names no file it can't read.`);
+  return sample.error.file;
+}
+
+/** Answers `open_named_folder` by keeping the folder the page sent. */
+function openFolder({ folder }: ArgsOf<"open_named_folder">): null {
+  foldersOpened.push(folder);
+  return null;
+}
+
+/** The link that opens a folder in `container`, if it has one. */
+function folderLinkIn(container: Element | null): HTMLElement | null {
+  return container?.querySelector<HTMLElement>('[role="link"]') ?? null;
+}
+
+test("the app's answer that a document can't be read shows why, naming its file and opening its folder", async () => {
+  const unread = unreadFileIn("unreadShow");
+  fakeTheApp({
+    render_document: () => renderDocumentSample("unreadShow"),
+    open_named_folder: openFolder,
+  });
   await startDocumentView(0);
 
-  expect(document.querySelector("article")?.textContent).toContain(
-    "Can't read C:\\docs\\a.md",
+  const view = document.querySelector("article");
+  expect(view?.textContent).toContain(
+    `Can't read ${unread.name} in ${unread.folder ?? ""}`,
   );
+  expect(view?.querySelector("strong")?.textContent).toBe(unread.name);
+  folderLinkIn(view)?.click();
+  await vi.waitFor(() => {
+    expect(foldersOpened).toEqual([unread.folder]);
+  });
 });
 
 test("the app's answer that a reload can't be read keeps the document and says why", async () => {
+  const unread = unreadFileIn("unreadReload");
   answerWithSamples("showAtTop", "unreadReload");
   await startDocumentView(0);
   await settle();
@@ -157,7 +198,7 @@ test("the app's answer that a reload can't be read keeps the document and says w
   await requestDocument();
   expect(heading()).toBe("Install");
   expect(document.querySelector(".notice")?.textContent).toContain(
-    "Can't read C:\\docs\\a.md",
+    `Can't read ${unread.name} in ${unread.folder ?? ""}`,
   );
 });
 
@@ -227,6 +268,23 @@ test("the app's notice shows", async () => {
 
   await tellAsSampled(notice);
   expect(document.querySelector(".notice")?.textContent).toBe(notice.payload);
+});
+
+test("the app's notice naming a file shows its name in bold and its folder after it", async () => {
+  answerWithSamples("showAtTop");
+  await startDocumentView(0);
+  await settle();
+  const sample = messageSample("noticeNamingFile");
+  if (sample.event !== "notice" || typeof sample.payload === "string")
+    throw new Error("The sample is no notice naming a file.");
+  const { before, file, after } = sample.payload;
+
+  await tellAsSampled(sample);
+  const notice = document.querySelector(".notice");
+  expect(notice?.textContent).toBe(
+    `${before}${file.name} in ${file.folder ?? ""}${after}`,
+  );
+  expect(notice?.querySelector("strong")?.textContent).toBe(file.name);
 });
 
 test("the app's message that the reader chose a menu command runs it", async () => {
@@ -324,6 +382,77 @@ test("the app's nothing left to do leaves the view where it is", async () => {
   expect(follows).toHaveLength(1);
   expect(scrolledTo()).toEqual([]);
   expect(scrollsToTop()).toBe(0);
+});
+
+/** Follows the sampled document's link, which fails as the `follow_link` failure sample `name`. */
+async function followLinkFailingAs(
+  name: "notFound" | "notFoundInGoneFolder",
+): Promise<NamedFile> {
+  const failure = followLinkFailureSample(name);
+  if (typeof failure === "string")
+    throw new Error(`The sample ${name} names no file.`);
+  fakeTheApp({
+    render_document: () => renderDocumentSample("showAtTop"),
+    follow_link: () => failingWith(failure),
+    open_named_folder: openFolder,
+  });
+  startLinks(stopPage.signal);
+  await startDocumentView(0);
+  await settle();
+  document
+    .querySelector<HTMLAnchorElement>(
+      'article.markdown-body a[href="#install"]',
+    )
+    ?.click();
+  await vi.waitFor(() => {
+    expect(document.querySelector(".notice strong")?.textContent).toBe(
+      failure.file.name,
+    );
+  });
+  return failure.file;
+}
+
+test("the app's failure for a link to a missing file opens its folder from the notice", async () => {
+  const file = await followLinkFailingAs("notFound");
+
+  folderLinkIn(document.querySelector(".notice"))?.click();
+  await vi.waitFor(() => {
+    expect(foldersOpened).toEqual([file.folder]);
+  });
+});
+
+test("the app's failure for a link to a missing file whose folder is gone too shows the folder as text", async () => {
+  const file = await followLinkFailingAs("notFoundInGoneFolder");
+
+  const notice = document.querySelector(".notice");
+  expect(notice?.textContent).toContain(`in ${file.folder ?? ""}`);
+  expect(folderLinkIn(notice)).toBeNull();
+});
+
+test("the app's failure to reveal a missing file opens its folder from the notice", async () => {
+  const failure = revealFailureSample();
+  if (typeof failure === "string")
+    throw new Error("The sample revealNotFound names no file.");
+  fakeTitleBarLayout();
+  openPageWith("titleBar");
+  fakeTheApp({
+    render_document: () => renderDocumentSample("showAtTop"),
+    reveal_document: () => failingWith(failure),
+    open_named_folder: openFolder,
+  });
+  startTitleBar(stopPage.signal);
+  await startDocumentView(0);
+
+  titleBarFileName().click();
+  await vi.waitFor(() => {
+    expect(document.querySelector(".notice strong")?.textContent).toBe(
+      failure.file.name,
+    );
+  });
+  folderLinkIn(document.querySelector(".notice"))?.click();
+  await vi.waitFor(() => {
+    expect(foldersOpened).toEqual([failure.file.folder]);
+  });
 });
 
 /**

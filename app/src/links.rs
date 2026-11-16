@@ -9,6 +9,7 @@ use downlight_core::{LinkAction, LinkError, PathKind, resolve_link};
 use tauri::{AppHandle, Manager as _, WebviewWindow};
 
 use crate::documents::{DocumentAt, Documents, Target};
+use crate::notice::{NamedFile, Notice};
 use crate::platform;
 use crate::window::{self, Shown};
 
@@ -43,8 +44,9 @@ pub enum Followed {
     Nothing,
 }
 
-/// A sample of each answer [`follow_link`] gives, by name, which the page's tests read
-/// (`app/src/contract.rs`, ticket 27).
+/// A sample of each answer [`follow_link`] gives, by name, and of its failure for a link to a
+/// missing file, whose folder is there or gone too (window design ticket 11), which the page's
+/// tests read (`app/src/contract.rs`, ticket 27).
 #[cfg(test)]
 pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
     // A new answer stops the build here: give it a sample below, then name it here.
@@ -56,6 +58,9 @@ pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
         "scrollToHeading": serde_json::to_value(Followed::ScrollTo { heading })?,
         "scrollToTop": serde_json::to_value(Followed::ScrollTo { heading: None })?,
         "nothing": serde_json::to_value(Followed::Nothing)?,
+        "notFound": serde_json::to_value(FollowError::NotFound(NamedFile::sample(true)))?,
+        "notFoundInGoneFolder":
+            serde_json::to_value(FollowError::NotFound(NamedFile::sample(false)))?,
     }))
 }
 
@@ -144,13 +149,12 @@ fn path_kind(path: &Path) -> io::Result<Option<PathKind>> {
     }
 }
 
-/// Why a link wasn't followed. The page shows the message to the reader.
+/// Why a link wasn't followed. The page shows it to the reader as a notice.
 #[derive(Debug)]
 pub enum FollowError {
-    /// The link names a file or folder that doesn't exist.
-    NotFound {
-        path: PathBuf,
-    },
+    /// The link names a file or folder that doesn't exist; the notice opens its folder (window
+    /// design ticket 11).
+    NotFound(NamedFile),
     /// Whether the link's file or folder exists can't be told.
     Unreachable {
         path: PathBuf,
@@ -181,36 +185,52 @@ pub enum FollowError {
 impl From<LinkError> for FollowError {
     fn from(error: LinkError) -> Self {
         match error {
-            LinkError::NotFound { path } => Self::NotFound { path },
+            // Made on the blocking thread that follows the link, as it looks at the folder.
+            LinkError::NotFound { path } => Self::NotFound(NamedFile::missing(&path)),
             LinkError::Unreachable { path, source } => Self::Unreachable { path, source },
         }
     }
 }
 
-impl fmt::Display for FollowError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl FollowError {
+    fn notice(&self) -> Notice {
+        let why = |source: &dyn fmt::Display| format!(": {source}");
         match self {
-            Self::NotFound { path } => write!(f, "Can't find {}.", path.display()),
+            Self::NotFound(file) => Notice::naming("Can't find ", file.clone(), "."),
             Self::Unreachable { path, source } => {
-                write!(f, "Can't reach {}: {source}", path.display())
+                Notice::naming("Can't reach ", NamedFile::at(path), why(source))
             }
             Self::Reveal { path, source } => {
-                write!(f, "Can't show {} in its folder: {source}", path.display())
+                Notice::naming("Can't show ", NamedFile::at(path), reveal_failed(source))
             }
             Self::OpenFolder { path, source } => {
-                write!(f, "Can't open the folder {}: {source}", path.display())
+                Notice::naming("Can't open the folder ", NamedFile::at(path), why(source))
             }
-            Self::OpenUrl { url, source } => write!(f, "Can't open {url}: {source}"),
-            Self::Show { path, source } => write!(f, "Can't show {}: {source}", path.display()),
-            Self::Stopped { source } => write!(f, "Following the link stopped: {source}"),
+            Self::OpenUrl { url, source } => format!("Can't open {url}: {source}").into(),
+            Self::Show { path, source } => {
+                Notice::naming("Can't show ", NamedFile::at(path), why(source))
+            }
+            Self::Stopped { source } => format!("Following the link stopped: {source}").into(),
         }
     }
 }
 
-// Tauri sends a command's error to the page serialized; the page shows it as text.
+/// What follows the file in the notice of a reveal that failed, the same for a link's reveal and
+/// the title bar's.
+pub fn reveal_failed(source: &io::Error) -> String {
+    format!(" in Explorer: {source}")
+}
+
+impl fmt::Display for FollowError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.notice().fmt(f)
+    }
+}
+
+// Tauri sends a command's error to the page serialized; the page shows it as a notice.
 impl serde::Serialize for FollowError {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.collect_str(self)
+        self.notice().serialize(serializer)
     }
 }
 
@@ -240,12 +260,55 @@ mod tests {
         );
     }
 
-    #[test]
-    fn missing_file_message_names_the_file() {
+    /// The link target `missing.md` in a folder of its own, which is there unless `folder_gone`.
+    fn missing_link_target(folder_gone: bool) -> (PathBuf, FollowError) {
+        let folder = std::env::temp_dir().join(format!(
+            "downlight-links-{}-{folder_gone}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&folder).unwrap();
+        if folder_gone {
+            std::fs::remove_dir_all(&folder).unwrap();
+        }
         let error = FollowError::from(LinkError::NotFound {
-            path: PathBuf::from(r"C:\docs\x.md"),
+            path: folder.join("missing.md"),
         });
-        assert_eq!(error.to_string(), r"Can't find C:\docs\x.md.");
+        let _ = std::fs::remove_dir_all(&folder);
+        (folder, error)
+    }
+
+    #[test]
+    fn link_to_a_missing_file_names_it_and_its_folder_which_opens() {
+        let (folder, error) = missing_link_target(false);
+        assert_eq!(
+            serde_json::to_value(&error).unwrap(),
+            serde_json::json!({
+                "before": "Can't find ",
+                "file": {
+                    "name": "missing.md",
+                    "folder": folder.display().to_string(),
+                    "folderOpens": true,
+                },
+                "after": ".",
+            })
+        );
+        assert_eq!(
+            error.to_string(),
+            format!("Can't find missing.md in {}.", folder.display())
+        );
+    }
+
+    #[test]
+    fn link_to_a_missing_file_whose_folder_is_gone_too_names_a_folder_that_does_not_open() {
+        let (folder, error) = missing_link_target(true);
+        assert_eq!(
+            serde_json::to_value(&error).unwrap()["file"],
+            serde_json::json!({
+                "name": "missing.md",
+                "folder": folder.display().to_string(),
+                "folderOpens": false,
+            })
+        );
     }
 
     #[test]
@@ -256,7 +319,12 @@ mod tests {
         });
         assert_eq!(
             error.to_string(),
-            r"Can't reach \\server\share\a.md: The network path was not found."
+            r"Can't reach a.md in \\server\share\: The network path was not found."
+        );
+        assert!(
+            !serde_json::to_value(&error).unwrap()["file"]["folderOpens"]
+                .as_bool()
+                .unwrap()
         );
     }
 

@@ -10,6 +10,7 @@ use tauri::{DragDropEvent, Manager as _, WebviewWindow, WindowEvent};
 
 use crate::documents::{DocumentAt, Target};
 use crate::message::{Message, Pages as _};
+use crate::notice::{NamedFile, Notice};
 use crate::window;
 
 /// Shows the open dialog, filtered to Markdown files, and shows the chosen document in the
@@ -63,7 +64,7 @@ pub fn show_when_dropped(window: &tauri::Window, event: &WindowEvent) {
         };
         // The notice is the only way to tell the reader about the drop, so a notice that can't be
         // sent leaves nobody to tell.
-        let _ = app.send(&label, Message::Notice(failure.to_string()));
+        let _ = app.send(&label, Message::Notice(failure.notice()));
     });
 }
 
@@ -89,29 +90,37 @@ pub enum OpenError {
     DialogStopped { source: tauri::Error },
 }
 
-impl fmt::Display for OpenError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl OpenError {
+    fn notice(&self) -> Notice {
         match self {
             Self::NotMarkdown => {
                 let extensions = MARKDOWN_EXTENSIONS.map(|extension| format!(".{extension}"));
-                write!(
-                    f,
+                format!(
                     "Downlight opens Markdown files ({}).",
                     extensions.join(", ")
                 )
+                .into()
             }
-            Self::Show { document, source } => {
-                write!(f, "Can't show {}: {source}", document.display())
-            }
-            Self::DialogStopped { source } => write!(f, "The open dialog stopped: {source}"),
+            Self::Show { document, source } => Notice::naming(
+                "Can't show ",
+                NamedFile::at(document),
+                format!(": {source}"),
+            ),
+            Self::DialogStopped { source } => format!("The open dialog stopped: {source}").into(),
         }
     }
 }
 
-// Tauri sends a command's error to the page serialized; the page shows it as text.
+impl fmt::Display for OpenError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.notice().fmt(f)
+    }
+}
+
+// Tauri sends a command's error to the page serialized; the page shows it as a notice.
 impl serde::Serialize for OpenError {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.collect_str(self)
+        self.notice().serialize(serializer)
     }
 }
 

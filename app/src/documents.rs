@@ -15,6 +15,7 @@ use downlight_core::RenderedDocument;
 use tauri::{State, WebviewWindow};
 
 use crate::message::{Message, Pages};
+use crate::notice::{NamedFile, Notice};
 use crate::platform;
 use crate::render::{self, DocumentError, RenderTask};
 use crate::timing::Timing;
@@ -72,7 +73,7 @@ struct ShownDocument {
     page_asked: bool,
     /// A notice about this document, held for the page's first request. Held on the document's
     /// entry, it goes when the window is given another document.
-    held_notice: Option<String>,
+    held_notice: Option<Notice>,
     /// The heading the window shows the document at, from a link like `guide.md#install` (ticket
     /// 11). Handed over with every show rather than taken by the first, so that of two links
     /// followed in quick succession, the page's latest request still gets it; never with a
@@ -424,9 +425,10 @@ impl Documents {
                 Err(error) => documents.notice(
                     &window,
                     &key,
-                    format!(
-                        "Can't watch {} for changes, so only F5 reloads it: {error}",
-                        document.display()
+                    Notice::naming(
+                        "Can't watch ",
+                        NamedFile::at(&document),
+                        format!(" for changes, so only F5 reloads it: {error}"),
                     ),
                 ),
             }
@@ -484,22 +486,22 @@ impl Documents {
         }
     }
 
-    /// Sends `window`'s page the notice `text`, about the document with `key`, or holds it until
-    /// the page first asks for that document, since until then the page may not be listening. A
+    /// Sends `window`'s page the `notice` about the document with `key`, or holds it until the
+    /// page first asks for that document, since until then the page may not be listening. A
     /// notice for a document the window has left, or for a closed window, is dropped.
-    fn notice(&self, window: &str, key: &Path, text: String) {
+    fn notice(&self, window: &str, key: &Path, notice: Notice) {
         {
             let mut table = self.lock();
             let Some(shown) = table.shown_mut(window, key) else {
                 return;
             };
             if !shown.page_asked {
-                shown.held_notice = Some(text);
+                shown.held_notice = Some(notice);
                 return;
             }
         }
         // Sent from the watch's thread, which nobody waits on, so nobody is left to tell.
-        let _ = self.send(window, Message::Notice(text));
+        let _ = self.send(window, Message::Notice(notice));
     }
 
     /// Sent outside the table's lock, so that no page is told anything while the table is held.
@@ -609,9 +611,11 @@ pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
             "",
         ))
     };
+    // A missing file whose folder is there, so the notice opens the folder (window design ticket
+    // 11).
     let unread = || {
         Content::Error(DocumentError::Read {
-            path: PathBuf::from(r"C:\docs\a.md"),
+            file: NamedFile::sample(true),
             source: io::ErrorKind::NotFound.into(),
         })
     };

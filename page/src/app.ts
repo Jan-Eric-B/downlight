@@ -24,6 +24,26 @@ export type Place =
 export type DocumentFile = { name: string; path: string };
 
 /**
+ * A file or folder a notice names (`NamedFile` in `app/src/notice.rs`, window design ticket 11):
+ * its name, shown in bold, and its folder after it, or null for a drive's root. The folder opens
+ * from the notice (`open_named_folder`) when `folderOpens`: the file is missing and its folder is
+ * there.
+ */
+export type NamedFile = {
+  name: string;
+  folder: string | null;
+  folderOpens: boolean;
+};
+
+/**
+ * What the reader is told when something fails (`Notice` in `app/src/notice.rs`): plain text, or
+ * text before and after the file it names. Every command that fails rejects with one, and a
+ * document that can't be read says why with one.
+ */
+export type Notice =
+  string | { before: string; file: NamedFile; after: string };
+
+/**
  * The app's answer when the page asks for its document (`DocumentToShow` in
  * `app/src/documents.rs`), or null while the window shows no document: the showing the window is
  * at, for the next request, the document's file, what to do with the render, and the rendered
@@ -31,7 +51,7 @@ export type DocumentFile = { name: string; path: string };
  */
 export type DocumentToShow =
   | ({ showing: number; file: DocumentFile } & Place &
-      ({ document: string } | { error: string }))
+      ({ document: string } | { error: Notice }))
   | null;
 
 /** What `follow_link` leaves for the page to do (`Followed` in `app/src/links.rs`). */
@@ -150,6 +170,11 @@ export type Commands = {
    * such as a file that was deleted or moved.
    */
   reveal_document: { args: undefined; answer: null };
+  /**
+   * The folder of a notice's missing file was clicked: the folder, as the notice named it, opened
+   * in the file manager. The app opens only a folder a notice named, and only while it is there.
+   */
+  open_named_folder: { args: { folder: string }; answer: null };
 };
 
 export type Command = keyof Commands;
@@ -161,8 +186,9 @@ type ArgumentList<C extends Command> =
   ArgsOf<C> extends undefined ? [] : [args: ArgsOf<C>];
 
 /**
- * Asks the app for `command` and resolves with its answer. Rejects with why, as Tauri gives it,
- * when the command fails or the app couldn't be asked.
+ * Asks the app for `command` and resolves with its answer. Rejects with why when the command
+ * fails, as a `Notice`, or when the app couldn't be asked, as Tauri gives it (`showingWhy` in
+ * `notice.ts` tells the two apart).
  */
 export function askApp<C extends Command>(
   command: C,
@@ -184,7 +210,7 @@ export type Messages = {
   /** The heading a link in another window named, to scroll to. */
   "scroll-to-heading": string;
   /** A notice to show the reader. */
-  notice: string;
+  notice: Notice;
   /** The id of the command the reader chose in the right-click menu. */
   "menu-command": string;
   /** The window's size changed, and whether it is maximized now. */

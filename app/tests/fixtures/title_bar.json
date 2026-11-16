@@ -4,5 +4,14 @@
     "width": 69,
     "x": 1362,
     "y": 0
+  },
+  "revealNotFound": {
+    "after": ", so it can't be shown in its folder.",
+    "before": "Can't find ",
+    "file": {
+      "folder": "C:\\docs",
+      "folderOpens": true,
+      "name": "a.md"
+    }
   }
 }

@@ -10,7 +10,9 @@ use serde::Deserialize;
 use tauri::{Manager as _, State, WebviewWindow, WindowEvent};
 
 use crate::documents::Documents;
+use crate::links::reveal_failed;
 use crate::message::{Message, Pages as _};
+use crate::notice::{NamedFile, Notice};
 use crate::platform;
 
 /// Where the page's maximize button is, in physical pixels from the top left of the window's
@@ -44,7 +46,8 @@ pub enum MaximizeButtonState {
 }
 
 /// A sample of the argument `place_maximize_button` takes, which the page's tests check the
-/// button it measures against (`app/src/contract.rs`).
+/// button it measures against, and of `reveal_document`'s failure for a missing file, which they
+/// show (`app/src/contract.rs`).
 #[cfg(test)]
 pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
     Ok(serde_json::json!({
@@ -54,6 +57,7 @@ pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
             width: 69,
             height: 48,
         })?,
+        "revealNotFound": serde_json::to_value(RevealError::NotFound(NamedFile::sample(true)))?,
     }))
 }
 
@@ -134,9 +138,7 @@ fn reveal_with(
     if let Err(error) = std::fs::metadata(path)
         && platform::is_missing(&error)
     {
-        return Err(RevealError::NotFound {
-            path: path.to_owned(),
-        });
+        return Err(RevealError::NotFound(NamedFile::missing(path)));
     }
     // The look is the only one to say the file is missing: the reveal fails as not found on an
     // offline share too, where the file may well exist (`links::path_kind`).
@@ -146,13 +148,11 @@ fn reveal_with(
     })
 }
 
-/// Why the document's file wasn't shown in its folder. The page shows the message as a notice.
+/// Why the document's file wasn't shown in its folder. The page shows it as a notice.
 #[derive(Debug)]
 pub enum RevealError {
-    /// The file was deleted or moved.
-    NotFound {
-        path: PathBuf,
-    },
+    /// The file was deleted or moved; the notice opens its folder (window design ticket 11).
+    NotFound(NamedFile),
     Reveal {
         path: PathBuf,
         source: io::Error,
@@ -163,28 +163,34 @@ pub enum RevealError {
     },
 }
 
-impl fmt::Display for RevealError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl RevealError {
+    fn notice(&self) -> Notice {
         match self {
-            Self::NotFound { path } => write!(
-                f,
-                "Can't find {}, so it can't be shown in its folder.",
-                path.display()
+            Self::NotFound(file) => Notice::naming(
+                "Can't find ",
+                file.clone(),
+                ", so it can't be shown in its folder.",
             ),
             Self::Reveal { path, source } => {
-                write!(f, "Can't show {} in its folder: {source}", path.display())
+                Notice::naming("Can't show ", NamedFile::at(path), reveal_failed(source))
             }
             Self::Stopped { source } => {
-                write!(f, "Showing the file in its folder stopped: {source}")
+                format!("Showing the file in its folder stopped: {source}").into()
             }
         }
     }
 }
 
-// Tauri sends a command's error to the page serialized; the page shows it as text.
+impl fmt::Display for RevealError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.notice().fmt(f)
+    }
+}
+
+// Tauri sends a command's error to the page serialized; the page shows it as a notice.
 impl serde::Serialize for RevealError {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.collect_str(self)
+        self.notice().serialize(serializer)
     }
 }
 
@@ -207,23 +213,48 @@ mod tests {
 
     // A reveal that succeeds opens an Explorer window, so it is a hand check (ticket 04).
 
-    #[test]
-    fn missing_document_is_not_revealed_and_the_reader_is_told_why() {
-        let missing = std::env::temp_dir().join(format!(
-            "downlight-title-bar-{}-missing.md",
+    /// Reveals `missing.md` in a folder of its own, which is there unless `folder_gone`.
+    fn reveal_missing(folder_gone: bool) -> (PathBuf, Option<RevealError>) {
+        let folder = std::env::temp_dir().join(format!(
+            "downlight-title-bar-{}-{folder_gone}",
             std::process::id()
         ));
-        let error = reveal(&missing).err();
+        std::fs::create_dir_all(&folder).unwrap();
+        if folder_gone {
+            std::fs::remove_dir_all(&folder).unwrap();
+        }
+        let error = reveal(&folder.join("missing.md")).err();
+        let _ = std::fs::remove_dir_all(&folder);
+        (folder, error)
+    }
+
+    #[test]
+    fn missing_document_is_not_revealed_and_the_notice_opens_its_folder() {
+        let (folder, error) = reveal_missing(false);
         assert!(
-            matches!(&error, Some(RevealError::NotFound { path }) if *path == missing),
+            matches!(&error, Some(RevealError::NotFound(_))),
             "{error:?}"
         );
         assert_eq!(
-            error.map(|error| error.to_string()),
-            Some(format!(
-                "Can't find {}, so it can't be shown in its folder.",
-                missing.display()
-            ))
+            serde_json::to_value(&error).unwrap(),
+            serde_json::json!({
+                "before": "Can't find ",
+                "file": {
+                    "name": "missing.md",
+                    "folder": folder.display().to_string(),
+                    "folderOpens": true,
+                },
+                "after": ", so it can't be shown in its folder.",
+            })
+        );
+    }
+
+    #[test]
+    fn missing_document_whose_folder_is_gone_too_names_a_folder_that_does_not_open() {
+        let (_, error) = reveal_missing(true);
+        assert_eq!(
+            serde_json::to_value(&error).unwrap()["file"]["folderOpens"],
+            false
         );
     }
 
@@ -253,7 +284,7 @@ mod tests {
         };
         assert_eq!(
             error.to_string(),
-            r"Can't show C:\docs\a.md in its folder: Explorer didn't start."
+            r"Can't show a.md in C:\docs in Explorer: Explorer didn't start."
         );
     }
 }

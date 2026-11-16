@@ -207,6 +207,9 @@ test("the page colors with the accent only through the roles, and uses each of t
  */
 const ROLE_USES: Record<string, string> = {
   ".markdown-body a / color": "link",
+  // A notice's folder that opens (window design ticket 11).
+  ".folder-link / color": "link",
+  ".folder-link:focus-visible / outline": "emphasis",
   "::selection / background-color": "selection",
   "::highlight(find-match) / background-color": "find-match",
   "::highlight(find-current) / background-color": "find-current",

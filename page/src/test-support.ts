@@ -23,6 +23,7 @@ import type {
   MenuEntry,
   Message,
   Messages,
+  Notice,
   PageFlags,
   Place,
   ReloadMarks,
@@ -99,6 +100,12 @@ export function fakeTheApp(app: FakeApp = {}): void {
   });
 }
 
+/** A command's failure as the app gives it: its notice as it is, never an `Error`. */
+export function failingWith(notice: Notice): Promise<never> {
+  // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- Tauri rejects with the command's error as the app serialized it.
+  return Promise.reject(notice);
+}
+
 /** The commands the page asked the fake app for since it started, in turn. */
 export function askedOfTheApp(): Command[] {
   return [...asked];
@@ -142,6 +149,21 @@ export function renderDocumentSample(name: string): DocumentToShow {
 /** A sample of the app's answers to `follow_link`, by name. */
 export function followLinkSample(name: string): Followed {
   return sampleIn(followLinkSamples, name) as Followed;
+}
+
+/**
+ * A sample of `follow_link`'s failure for a link to a missing file, whose folder is there or gone
+ * too.
+ */
+export function followLinkFailureSample(
+  name: "notFound" | "notFoundInGoneFolder",
+): Notice {
+  return sampleIn(followLinkSamples, name) as Notice;
+}
+
+/** The sample of `reveal_document`'s failure for a missing file. */
+export function revealFailureSample(): Notice {
+  return sampleIn(titleBarSamples, "revealNotFound") as Notice;
 }
 
 /** A sample of the app's messages, by name. */

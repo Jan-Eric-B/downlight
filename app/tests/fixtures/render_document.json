@@ -30,7 +30,15 @@
     "showing": 7
   },
   "unreadReload": {
-    "error": "Can't read C:\\docs\\a.md: entity not found",
+    "error": {
+      "after": ": entity not found",
+      "before": "Can't read ",
+      "file": {
+        "folder": "C:\\docs",
+        "folderOpens": true,
+        "name": "a.md"
+      }
+    },
     "file": {
       "name": "a.md",
       "path": "C:\\docs\\a.md"
@@ -39,7 +47,15 @@
     "showing": 7
   },
   "unreadShow": {
-    "error": "Can't read C:\\docs\\a.md: entity not found",
+    "error": {
+      "after": ": entity not found",
+      "before": "Can't read ",
+      "file": {
+        "folder": "C:\\docs",
+        "folderOpens": true,
+        "name": "a.md"
+      }
+    },
     "file": {
       "name": "a.md",
       "path": "C:\\docs\\a.md"
