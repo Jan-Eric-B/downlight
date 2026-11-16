@@ -20,6 +20,13 @@ import {
   type ScrolledView,
 } from "./reading-position";
 import {
+  makeTickable,
+  NO_TICKS,
+  readTicks,
+  restoreTicks,
+  type Ticks,
+} from "./ticks";
+import {
   epochMs,
   markFirstPaint,
   reportFirstPaint,
@@ -174,13 +181,24 @@ export function visitHeading(heading: string | null): Promise<void> {
 }
 
 /**
- * The reader's state in the view, read just before its content is swapped and landed with just
- * after. Ticks (ticket 13) belong here.
+ * The reader's state in the view, read just before its content is swapped, when the old content
+ * is still there, and landed with just after.
  */
 interface ReaderState {
   /** The reading position, or undefined at the start of the document. */
   line: Line;
+  /** The ticks in the document the view showed (ticket 13). */
+  ticks: Ticks;
 }
+
+/** The ticks a request's content takes, given the reader's state from before the swap. */
+type TicksTaken = (before: ReaderState) => Ticks;
+
+/** A reload keeps the ticks, which `restoreTicks` drops if the number of task items changed. */
+const ticksFromBefore: TicksTaken = ({ ticks }) => ticks;
+
+/** A show, the empty state and an error take no ticks. */
+const noTicks: TicksTaken = () => NO_TICKS;
 
 /**
  * Puts the view where a request lands once its content is in place, given the reader's state
@@ -244,6 +262,7 @@ interface Placement {
   file: DocumentFile | null;
   /** The core's rendered HTML, why the document can't be shown, or null for the empty state. */
   content: { html: string } | { why: Notice } | null;
+  ticks: TicksTaken;
   land: Landing;
   /**
    * Whether the app has a document to go back or forward to, or null when the app couldn't be
@@ -275,6 +294,7 @@ function placeError(
     showing: null,
     file,
     content: { why },
+    ticks: noTicks,
     land: atTop,
     steps,
   };
@@ -295,6 +315,7 @@ function placementFor(
       showing: null,
       file: null,
       content: null,
+      ticks: noTicks,
       land: atTop,
       steps: NO_STEPS,
     };
@@ -307,6 +328,7 @@ function placementFor(
         showing,
         file,
         content: { html: answer.document },
+        ticks: ticksFromBefore,
         land: atReadingPosition,
         steps,
       };
@@ -318,6 +340,9 @@ function placementFor(
         showing,
         file,
         content: { html: answer.document },
+        // As a reload does, the ticks are dropped if the file's number of task items changed
+        // since the view left it, so a tick never lands on the wrong item.
+        ticks: () => history.ticksOf(showing),
         land: atReturn(history, showing),
         steps,
       };
@@ -329,6 +354,7 @@ function placementFor(
         showing,
         file,
         content: { html: answer.document },
+        ticks: noTicks,
         land: atHeading(answer.heading),
         steps,
       };
@@ -337,14 +363,15 @@ function placementFor(
 
 /**
  * Parses the core's rendered HTML into the view's next content and prepares it as every render
- * is, with copy buttons on its code blocks (ticket 07). The template's content is inert: its
- * images load only once it is in the view.
+ * is, with copy buttons on its code blocks (ticket 07) and tickable task items (ticket 13). The
+ * template's content is inert: its images load only once it is in the view.
  */
 function prepare(html: string): DocumentFragment {
   const parsed = document.createElement("template");
   // The HTML comes only from the core's render, never from the page.
   parsed.innerHTML = html;
   addCopyButtons(parsed.content);
+  makeTickable(parsed.content);
   return parsed.content;
 }
 
@@ -480,9 +507,9 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
   };
 
   /**
-   * Replaces the view's content with `content`, or shows the empty state for null. The history
-   * learns of the swap here, the one place every request's content goes in, with the reader's
-   * state from just before it.
+   * Replaces the view's content with `content`, or shows the empty state for null, and gives it
+   * the ticks it takes. The history learns of the swap here, the one place every request's
+   * content goes in, with the reader's state from just before it.
    */
   const replaceContent = (
     placement: Placement,
@@ -491,7 +518,7 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
   ) => {
     const left = showing;
     if (left !== null && left !== placement.showing)
-      history.leave(left, before.line);
+      history.leave(left, before.line, before.ticks);
     if (placement.reason === "shown") history.showAnew(placement.showing, left);
     if (placement.steps) history.appCanStep(placement.steps);
     showing = placement.showing;
@@ -501,6 +528,9 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
     showGoneBar();
     if (content === null) view.replaceChildren();
     else view.replaceChildren(content);
+    // Before the landing and the listeners, so neither sees the file's ticks in place of the
+    // reader's.
+    restoreTicks(view, placement.ticks(before));
     // Listeners that haven't heard of a show or a return yet hear it, even if a reload came after
     // it.
     if (unannounced === undefined || placement.reason !== "reload")
@@ -567,8 +597,11 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
       await afterNextFrame();
       if (!isLatest()) return;
     }
-    // Read just before the swap, so a scroll while the new render was parsed counts.
-    const before: ReaderState = { line: readingPosition(shown) };
+    // Read just before the swap, so a scroll or a tick while the new render was parsed counts.
+    const before: ReaderState = {
+      line: readingPosition(shown),
+      ticks: readTicks(view),
+    };
     replaceContent(outcome, content, before);
     const inserted = epochMs();
     if (outcome.reason === "shown") {

@@ -6,13 +6,30 @@ Spec: [Downlight v1](../spec.md)
 
 **Blocked by:** 12 (Back and Forward)
 
-**Status:** ready-for-agent
+**Status:** ready-for-human
 
-- [ ] Task items can be ticked and unticked with the mouse and with the keyboard.
-- [ ] A reload with the same number of task items keeps the ticks; a reload with a different number clears them.
-- [ ] Back and Forward restore the ticks of that history entry.
-- [ ] Ticks are never written to the file and are gone when the window closes.
-- [ ] Page tests cover each rule above.
+- [x] Task items can be ticked and unticked with the mouse and with the keyboard.
+- [x] A reload with the same number of task items keeps the ticks; a reload with a different number clears them.
+- [x] Back and Forward restore the ticks of that history entry.
+- [x] Ticks are never written to the file and are gone when the window closes.
+- [x] Page tests cover each rule above.
+
+## Results
+
+Built 2026-11-16. `npm run check` passes. Ticks are the page's alone: a new module, `page/src/ticks.ts`, and no change to the core, the app or the contract. `prepare` in `page/src/view.ts` makes the task items tickable (`makeTickable`), the reader state read just before every swap holds the ticks (`readTicks`), and `replaceContent` gives the new content the ticks it takes (`restoreTicks`) right after the swap, before the landing and the `whenDocumentShown` listeners. Each placement says which ticks it takes, as it says where it lands: a reload those from before the swap, a return those `WindowHistory` kept for its showing (`ticksOf`), a show, the empty state and an error none. `history.leave` keeps the ticks on the showing's `Kept`, and `showAnew` starts a showing without them.
+
+**Beyond the plan:**
+
+- **The page enables the checkboxes, not the core.** The core still writes them `disabled`, as GitHub does, so the rendered fixtures and the sanitizing rules are unchanged; the page, which handles the reader's input, takes `disabled` off in `prepare`, as the architecture review asked. That stays safe because sanitizing keeps `input` only where rendering writes it (`RENDERING_ONLY_TAGS`, tested by `checkboxes_come_only_from_task_lists`), so every checkbox the page enables is a task item's, never a form field of the document's.
+- **A tick is kept as where the reader's mark differs from the file** (`checked` against `defaultChecked`, which is the render's `checked` attribute), not as every item's state. So a reload that keeps the ticks still shows what the file now says of the items the reader left alone: marking `[x]` in the editor and saving shows it ticked. A click also unticks an item the file has ticked, and that untick is kept like a tick.
+- **A return checks the number of task items too.** Back and Forward read the file again, so if its number of task items changed since the view left it, the ticks are dropped rather than land on the wrong items, as for a reload (story 65).
+- **The keyboard:** a tickable checkbox takes the focus with Tab or a click, and Space ticks it through the webview's own click; no command or Find handler takes Space. happy-dom gives no click for Space, so the page test checks that the item takes the focus and that the page leaves the key alone.
+
+**Tests:** eleven new page tests in `page/src/ticks.test.ts`, written first: ticking and unticking with a click (also an item the file ticked), the keyboard's focus and Space, no command to the app when ticking, a reload with the same and with a different number of task items, a reload showing the file's new state of untouched items, Back, Forward and Back again, Back to a document whose number of task items changed, and a document shown anew. No existing test changed.
+
+**Measured:** inconclusive, the machine was under heavy load. The change adds two `querySelectorAll` walks per swap (the old view and the new content) and restores nothing when there are no ticks; the generated documents have no task items. `npm run measure` on the release build, three sessions: the reload of the 1 MB mixed document was bimodal, and in its quiet runs (read about 77 ms) insert was 54 ms, anchor 51 to 55 ms and nothing over 100 ms, under ticket 28's 63 and 66 ms. In the loaded runs the core's read (430 to 470 ms) and render (up to 1426 ms) were several times slower too, which the page can't cause, and insert, anchor and the longest frame were 100 to 240 ms. The first session's cold first paint was 1035 ms for 100 KB and 1263 ms for 1 MB mixed, against ticket 28's 787 and 1137 ms, on the same load. The scrolling and Find cases timed out with no window shown in 20 s in the first and third sessions, after the same documents had shown normally earlier in the session. Run `npm run measure` again on a quiet machine.
+
+**Not yet checked by hand** (release build): a ticked checkbox is amber in light and dark (window design ticket 03 expected gray while they were disabled) and its focus ring shows; a click and Tab then Space tick and untick, Space on a focused item doesn't scroll; ticks survive a save with the same number of task items and clear when an item is added; Back and Forward after a link and Ctrl+O bring them back; the file is unchanged on disk after ticking; closing the window and opening the document again shows the file's own ticks.
 
 ## Comments
 
