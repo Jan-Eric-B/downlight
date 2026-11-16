@@ -6,7 +6,7 @@ Spec: [Window design](../spec.md)
 
 **Blocked by:** 02 (The amber icon and the accent scale)
 
-**Status:** ready-for-human
+**Status:** closed
 
 - [x] Link text: Dark 2 in light, Light 1 in dark.
 - [x] The selection's background: Light 2 in light, Dark 2 in dark, with the text still readable.
@@ -15,7 +15,7 @@ Spec: [Window design](../spec.md)
 - [x] Each use refers to a shade by its variable, so swapping the scale (ticket 09) recolors them all.
 - [x] Alerts, code highlighting, tables and headings keep GitHub's colors.
 - [x] High contrast keeps its system colors (`Mark`, `Highlight`, `LinkText`), as Find's highlights already do.
-- [ ] Checked by hand with `core/tests/fixtures/github.md` in light and dark, on Mica and solid.
+- [x] Checked by hand with `core/tests/fixtures/github.md` in light and dark, on Mica and solid.
 
 ## Comments
 
@@ -46,3 +46,5 @@ Spec: [Window design](../spec.md)
 4. Tab to a link, the copy button, the find box and (with no document) Open file: each focus ring is amber. Hover a code block's copy button: its icon turns amber.
 5. The ticked task item's checkbox: amber, or gray because it is disabled (see Ticks above).
 6. High contrast (Windows' contrast themes): links in `LinkText`, matches in `Mark` and `Highlight`, no amber anywhere in the document.
+
+**2026-11-16, checked by hand and closed.** The reader went through the six hand checks above on the release build with `core/tests/fixtures/github.md`, in light and dark, and found them all fine, Find's pale matches included. The solid backdrop could only be approximated with Windows' transparency effects off; the Backdrop setting itself comes with ticket 08, whose hand check covers every backdrop.

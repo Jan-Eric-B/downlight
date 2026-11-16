@@ -6,15 +6,15 @@ Spec: [Window design](../spec.md)
 
 **Blocked by:** 01 (Spike: the page draws the title bar), 02 (The amber icon and the accent scale), v1 [16](../../downlight-v1/issues/16-zoom-and-window-size.md) (Zoom and window size)
 
-**Status:** ready-for-human
+**Status:** ready-for-agent
 
-- [ ] The logo is the icon's SVG inlined into the page (the content security policy has no `'self'` in `img-src`). Its tooltip is "Downlight", and a click opens the window menu, as Alt+Space does. (Built, and tested up to the app's `show_window_menu`; the menu itself is hand check 1.)
+- [x] The logo is the icon's SVG inlined into the page (the content security policy has no `'self'` in `img-src`). Its tooltip is "Downlight", and a click opens the window menu, as Alt+Space does. (Built, and tested up to the app's `show_window_menu`; the menu itself is hand check 1.)
 - [x] The file name shows the shown document's file name and follows it on links, Back, Forward, Open and drops. The empty window shows only the logo. (Back and Forward don't exist yet, v1 ticket 12; they will show their documents the same way, so the name follows them with no change here.)
 - [x] Hovering the name shows the full path. A click reveals the file in Explorer through the app's `reveal_file`; a missing file shows a notice instead.
 - [ ] The zoom level (`125%`) shows next to the name only when it isn't 100%, and a click resets it. (Waits for v1 ticket 16.)
-- [ ] A long file name is cut with an ellipsis before it pushes the buttons. (Built; hand check 3.)
+- [x] A long file name is cut with an ellipsis before it pushes the buttons. (Built; hand check 3.)
 - [x] The window's OS title stays "README.md - docs - Downlight" (v1 story 10). (Unchanged: `title_of` in `app/src/window.rs` now takes its names from `file_name_shown`, and its tests pass unchanged.)
-- [ ] The logo, name and zoom level are not part of the drag region; the rest of the left side is. (Built for the logo and the name; hand check 4.)
+- [x] The logo, name and zoom level are not part of the drag region; the rest of the left side is. (Built for the logo and the name; hand check 4.)
 - [ ] Page tests: the name and its tooltip after a show and after a link; the reveal request on a click; the zoom level hidden at 100%, shown otherwise, and reset on a click. (All but the zoom level's, which wait for v1 ticket 16.)
 
 ## Comments
@@ -43,3 +43,5 @@ Spec: [Window design](../spec.md)
 4. Dragging the bar between the name and the buttons moves the window, and a double-click there maximizes; pressing on the logo or the name and dragging doesn't move it, and a double-click on the name doesn't maximize.
 5. The name follows the document on a link, Ctrl+O and a drop; an empty window (`downlight` with no file) shows only the logo.
 6. Light, dark and a real contrast theme: the name is legible, dims when the window isn't active, and the logo stays amber.
+
+**2026-11-16, checked by hand.** The reader went through the six hand checks above on the release build and found them fine, with one change: the logo had too much room beside it, so its padding went from 14 px left and 8 px right to 10 px and 2 px (`page/src/title-bar.css`; the drawing already leaves about 3 px empty on each side). Their wish to open the folder of a missing file, and to tell the path apart from the rest of a notice, became ticket 11. Only the zoom level is left, so the status is back to ready-for-agent, blocked by v1 ticket 16.
