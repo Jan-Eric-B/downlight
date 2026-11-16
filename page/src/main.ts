@@ -1,6 +1,7 @@
 import "github-markdown-css/github-markdown.css";
 import "./accent.css";
 import "./document.css";
+import "./title-bar.css";
 import { applyBackdrop } from "./backdrop";
 import { startCommands } from "./commands";
 import { startFind } from "./find";

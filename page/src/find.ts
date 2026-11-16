@@ -554,8 +554,8 @@ export function startFind(signal?: AbortSignal): void {
     { signal },
   );
 
-  const stopListening = whenDocumentShown((shown) => {
-    started.documentShown(shown);
+  const stopListening = whenDocumentShown(({ view }) => {
+    started.documentShown(view);
   });
   signal?.addEventListener("abort", () => {
     stopListening();

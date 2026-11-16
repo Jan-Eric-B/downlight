@@ -1,0 +1,164 @@
+/* The title bar the page draws in place of the native one (title-bar.ts, ADR 0005), as high as
+   Windows 11's. It draws no background of its own, so it sits on Mica with the document, or on the
+   page's solid background where Mica is off. WebView2 drags the window by it, maximizes and
+   restores it on a double-click, and shows the window menu on a right-click (app-region). */
+:root {
+  --title-bar-height: 0px;
+}
+
+:root:has(> body > .title-bar) {
+  --title-bar-height: 32px;
+}
+
+.title-bar {
+  /* Windows 11's subtle fills under the pointer and while pressed, shared by everything on the bar
+     that takes clicks and shows it. */
+  --title-bar-hover: light-dark(rgb(0 0 0 / 3.73%), rgb(255 255 255 / 6.05%));
+  --title-bar-pressed: light-dark(rgb(0 0 0 / 2.41%), rgb(255 255 255 / 4.19%));
+
+  position: fixed;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 4;
+  display: flex;
+  height: var(--title-bar-height);
+  /* Windows 11's caption colors (WinUI's primary and disabled text fills). */
+  color: light-dark(rgb(0 0 0 / 89.4%), #ffffff);
+  user-select: none;
+  app-region: drag;
+}
+
+.title-bar.inactive {
+  color: light-dark(rgb(0 0 0 / 36.1%), rgb(255 255 255 / 36.3%));
+}
+
+/* Everything on the bar that takes clicks (title-bar.ts): the logo, the file name and the window
+   buttons. They draw only what their own rules give them, in the bar's color, and the window isn't
+   dragged by them; the rest of the bar drags it. */
+.bar-item {
+  display: flex;
+  align-items: center;
+  border: none;
+  background: transparent;
+  color: inherit;
+  app-region: no-drag;
+}
+
+/* The icon at 16 px, where Windows 11 puts a window's icon. It stays amber whatever the accent
+   color (window design spec). */
+.title-bar .logo {
+  flex: none;
+  padding: 0 8px 0 14px;
+}
+
+.title-bar .logo svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Windows 11's caption text. It gives way first when the window narrows, cut with an ellipsis
+   before it pushes the window's buttons. */
+.title-bar .file-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin: 4px 0;
+  padding: 0 6px;
+  border-radius: 4px;
+  font:
+    12px "Segoe UI Variable Text",
+    "Segoe UI",
+    system-ui,
+    sans-serif;
+}
+
+/* An empty window shows only the logo; display: flex above would show the name all the same. */
+.title-bar .file-name[hidden] {
+  display: none;
+}
+
+.title-bar .file-name span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.title-bar .file-name:hover {
+  background-color: var(--title-bar-hover);
+}
+
+.title-bar .file-name:active {
+  background-color: var(--title-bar-pressed);
+}
+
+.window-buttons {
+  display: flex;
+  flex: none;
+  margin-left: auto;
+}
+
+/* Minimize, maximize or restore, and close, at Windows 11's size and in its colors. On Windows
+   the pointer over maximize reaches the app's window behind it, so the app says when it is
+   hovered or pressed (data-state). */
+.window-button {
+  justify-content: center;
+  width: 46px;
+  height: 100%;
+  padding: 0;
+}
+
+.window-button svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+}
+
+.window-button:hover,
+.window-button[data-state="hovered"] {
+  background-color: var(--title-bar-hover);
+  color: light-dark(rgb(0 0 0 / 89.4%), #ffffff);
+}
+
+.window-button:active,
+.window-button[data-state="pressed"] {
+  background-color: var(--title-bar-pressed);
+  color: light-dark(rgb(0 0 0 / 62%), rgb(255 255 255 / 78.6%));
+}
+
+.window-button.close:hover {
+  background-color: #c42b1c;
+  color: #ffffff;
+}
+
+.window-button.close:active {
+  background-color: rgb(196 43 28 / 90%);
+  color: rgb(255 255 255 / 70%);
+}
+
+/* High contrast: the reader's own colors, with the selection's for a button under the pointer,
+   and the glyphs in them rather than the background color forced colors would give a fill. */
+@media (forced-colors: active) {
+  .title-bar {
+    color: CanvasText;
+  }
+
+  .title-bar.inactive {
+    color: GrayText;
+  }
+
+  .bar-item {
+    forced-color-adjust: none;
+  }
+
+  .title-bar .file-name:hover,
+  .title-bar .file-name:active,
+  .window-button:hover,
+  .window-button[data-state="hovered"],
+  .window-button:active,
+  .window-button[data-state="pressed"],
+  .window-button.close:hover,
+  .window-button.close:active {
+    background-color: Highlight;
+    color: HighlightText;
+  }
+}

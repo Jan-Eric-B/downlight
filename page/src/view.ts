@@ -1,4 +1,9 @@
-import { askApp, listenToApp, type DocumentToShow } from "./app";
+import {
+  askApp,
+  listenToApp,
+  type DocumentFile,
+  type DocumentToShow,
+} from "./app";
 import { addCopyButtons } from "./copy";
 import { showNotice } from "./notice";
 import { open } from "./open";
@@ -70,18 +75,31 @@ function scrollDocumentToTop(): void {
  */
 export type ShownReason = "shown" | "reload";
 
-type ShownListener = (shown: ScrolledView, reason: ShownReason) => void;
+/** What the `whenDocumentShown` listeners hear each time the view's content was replaced. */
+interface Shown {
+  /** The view and its scroller. */
+  view: ScrolledView;
+  reason: ShownReason;
+  /**
+   * The file of the document the window shows: null while it shows none, or when the app couldn't
+   * be asked.
+   */
+  file: DocumentFile | null;
+}
+
+type ShownListener = (shown: Shown) => void;
 
 const shownListeners = new Set<ShownListener>();
 
 /**
- * Runs `listener` with the view and its scroller, and why the view's content changed, each time
- * the view's content has been replaced: when the window shows its document or another one, after
- * a reload once the view is back at the reading position, and when the window shows no document
- * or why it can't show one. A request that replaced the content but was then overtaken leaves the
- * call to the request that overtook it, which makes it even if it fails, so a replaced view is
- * always heard of, once the last request ends. This is the one hook for that, so Find recounts
- * here (ticket 14). Returns a function that removes the listener.
+ * Runs `listener` with the view and its scroller, why the view's content changed, and the file of
+ * the document the window shows, each time the view's content has been replaced: when the window shows its document or another
+ * one, after a reload once the view is back at the reading position, and when the window shows no
+ * document or why it can't show one. A request that replaced the content but was then overtaken
+ * leaves the call to the request that overtook it, which makes it even if it fails, so a replaced
+ * view is always heard of, once the last request ends. This is the one hook for that, so Find
+ * recounts here (ticket 14) and the title bar names the file (window design ticket 04). Returns a
+ * function that removes the listener.
  */
 export function whenDocumentShown(listener: ShownListener): () => void {
   shownListeners.add(listener);
@@ -144,6 +162,11 @@ interface Placement {
   reason: ShownReason;
   /** The showing whose render this is, or null for the empty state or an error. */
   showing: number | null;
+  /**
+   * The file of the document the window shows, also when it can't be read, or null for the
+   * empty state or when the app couldn't be asked.
+   */
+  file: DocumentFile | null;
   /** The core's rendered HTML, why the document can't be shown, or null for the empty state. */
   content: { html: string } | { text: string } | null;
   land: Landing;
@@ -154,11 +177,12 @@ interface Notice {
   notice: string;
 }
 
-/** Shows why the window can't show its document, in place of any render. */
-function placeError(why: string): Placement {
+/** Shows why the window can't show its document from `file`, in place of any render. */
+function placeError(why: string, file: DocumentFile | null): Placement {
   return {
     reason: "shown",
     showing: null,
+    file,
     content: { text: why },
     land: atTop,
   };
@@ -171,20 +195,28 @@ function placeError(why: string): Placement {
  */
 function placementFor(answer: DocumentToShow): Placement | Notice {
   if (answer === null)
-    return { reason: "shown", showing: null, content: null, land: atTop };
+    return {
+      reason: "shown",
+      showing: null,
+      file: null,
+      content: null,
+      land: atTop,
+    };
   if (answer.place === "reload") {
     if ("error" in answer) return { notice: answer.error };
     return {
       reason: "reload",
       showing: answer.showing,
+      file: answer.file,
       content: { html: answer.document },
       land: atReadingPosition,
     };
   }
-  if ("error" in answer) return placeError(answer.error);
+  if ("error" in answer) return placeError(answer.error, answer.file);
   return {
     reason: "shown",
     showing: answer.showing,
+    file: answer.file,
     content: { html: answer.document },
     land: atHeading(answer.heading),
   };
@@ -210,7 +242,9 @@ function createEmptyState(): HTMLElement {
   const button = document.createElement("button");
   button.type = "button";
   button.textContent = "Open file";
-  button.addEventListener("click", () => void open());
+  button.addEventListener("click", () => {
+    open();
+  });
   const hint = document.createElement("p");
   hint.textContent = "or drop a file here";
   empty.append(button, hint);
@@ -283,6 +317,8 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
    * from a reload; null while it shows the empty state, an error or nothing yet.
    */
   let showing: number | null = null;
+  /** The file of the document the view shows, for the `whenDocumentShown` listeners. */
+  let file: DocumentFile | null = null;
   /** Whether the document's file went away since the window last asked for its render. */
   let fileGone = false;
   /**
@@ -311,7 +347,7 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
       // The app couldn't be asked at all, so there is no answer to say what to do: a view that
       // shows a document keeps it, as a failed reload does.
       return showing === null
-        ? placeError(String(error))
+        ? placeError(String(error), null)
         : { notice: String(error) };
     }
     return placementFor(answer);
@@ -323,6 +359,7 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
     // as the app sends it after `document-shown` at times (ticket 23). A reload keeps the bar.
     if (placement.reason === "shown") fileGone = false;
     showing = placement.showing;
+    file = placement.file;
     view.hidden = content === null;
     empty.hidden = content !== null;
     goneBar.hidden = !fileGone;
@@ -382,7 +419,8 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
     if (unannounced === undefined) return;
     const reason = unannounced;
     unannounced = undefined;
-    for (const listener of shownListeners) listener(shown, reason);
+    for (const listener of shownListeners)
+      listener({ view: shown, reason, file });
   };
 
   /**

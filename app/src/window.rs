@@ -13,7 +13,7 @@ use tauri::{
     WindowEvent,
 };
 
-use crate::documents::{DocumentAt, Documents, Given, Target};
+use crate::documents::{DocumentAt, Documents, Given, Target, file_name_shown};
 use crate::timing::Timing;
 use crate::{APP_NAME, command_line, platform, title_bar};
 
@@ -306,19 +306,12 @@ fn title_of(document: Option<&Path>) -> String {
     let Some(document) = document else {
         return APP_NAME.to_owned();
     };
-    let file = document
-        .file_name()
-        .map_or_else(|| document.display(), |name| Path::new(name).display());
+    // The same name as the title bar's.
+    let file = file_name_shown(document);
     // Launches, the open dialog and dropping all give absolute paths, so only a drive root has no
     // folder.
     match document.parent() {
-        // A drive root has no name of its own, so it shows as itself.
-        Some(folder) => {
-            let folder = folder
-                .file_name()
-                .map_or_else(|| folder.display(), |name| Path::new(name).display());
-            format!("{file} - {folder} - {APP_NAME}")
-        }
+        Some(folder) => format!("{file} - {} - {APP_NAME}", file_name_shown(folder)),
         None => format!("{file} - {APP_NAME}"),
     }
 }

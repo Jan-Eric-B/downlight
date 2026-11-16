@@ -30,6 +30,7 @@ import {
   tellAsSampled,
   timingReportSample,
   titleBarButton,
+  titleBarFileName,
   titleBarSample,
 } from "./test-support";
 import {
@@ -112,7 +113,7 @@ test("the app's answer to reload the document reloads it", async () => {
   await startDocumentView(0);
   await settle();
   const reasons: ShownReason[] = [];
-  const stop = whenDocumentShown((_view, reason) => {
+  const stop = whenDocumentShown(({ reason }) => {
     reasons.push(reason);
   });
 
@@ -166,6 +167,21 @@ test("the app's answer that the window shows no document offers to open one", as
 
   expect(emptyWindow()?.hidden).toBe(false);
 });
+
+test.each(["showAtTop", "unreadShow"])(
+  "the app's %s answer names the document's file in the title bar",
+  async (name) => {
+    fakeTitleBarLayout();
+    openPageWith("titleBar");
+    answerWithSamples(name);
+    startTitleBar(stopPage.signal);
+    await startDocumentView(0);
+
+    const sample = renderDocumentSample(name);
+    expect(titleBarFileName().textContent).toBe(sample?.file.name);
+    expect(titleBarFileName().title).toBe(sample?.file.path);
+  },
+);
 
 // `messages.json`
 

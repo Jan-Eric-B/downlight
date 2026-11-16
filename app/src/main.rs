@@ -63,6 +63,8 @@ fn main() -> ExitCode {
             title_bar::minimize_window,
             title_bar::toggle_maximize_window,
             title_bar::place_maximize_button,
+            title_bar::show_window_menu,
+            title_bar::reveal_document,
         ])
         .on_menu_event(menu::forward_choice)
         .on_window_event(|window, event| {

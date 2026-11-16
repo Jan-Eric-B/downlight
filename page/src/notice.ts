@@ -37,3 +37,10 @@ export function showNotice(message: string): void {
     notice.replaceChildren();
   }, SHOWN_MS);
 }
+
+/** Shows the reader why, in a notice, if the app couldn't do what it was `asked`. */
+export function showingWhy(asked: Promise<unknown>): void {
+  asked.catch((error: unknown) => {
+    showNotice(String(error));
+  });
+}

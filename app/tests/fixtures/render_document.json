@@ -2,28 +2,48 @@
   "noDocument": null,
   "reload": {
     "document": "<h1 id=\"install\" data-sourcepos=\"1:1-1:9\">Install<a href=\"#install\" aria-label=\"Link to heading 'Install'\" data-heading-content=\"Install\" class=\"anchor\"></a></h1>\n<p data-sourcepos=\"3:1-3:18\">Run the installer.</p>\n",
+    "file": {
+      "name": "a.md",
+      "path": "C:\\docs\\a.md"
+    },
     "place": "reload",
     "showing": 7
   },
   "showAtHeading": {
     "document": "<h1 id=\"install\" data-sourcepos=\"1:1-1:9\">Install<a href=\"#install\" aria-label=\"Link to heading 'Install'\" data-heading-content=\"Install\" class=\"anchor\"></a></h1>\n<p data-sourcepos=\"3:1-3:18\">Run the installer.</p>\n",
+    "file": {
+      "name": "a.md",
+      "path": "C:\\docs\\a.md"
+    },
     "heading": "install",
     "place": "show",
     "showing": 7
   },
   "showAtTop": {
     "document": "<h1 id=\"install\" data-sourcepos=\"1:1-1:9\">Install<a href=\"#install\" aria-label=\"Link to heading 'Install'\" data-heading-content=\"Install\" class=\"anchor\"></a></h1>\n<p data-sourcepos=\"3:1-3:18\">Run the installer.</p>\n",
+    "file": {
+      "name": "a.md",
+      "path": "C:\\docs\\a.md"
+    },
     "heading": null,
     "place": "show",
     "showing": 7
   },
   "unreadReload": {
     "error": "Can't read C:\\docs\\a.md: entity not found",
+    "file": {
+      "name": "a.md",
+      "path": "C:\\docs\\a.md"
+    },
     "place": "reload",
     "showing": 7
   },
   "unreadShow": {
     "error": "Can't read C:\\docs\\a.md: entity not found",
+    "file": {
+      "name": "a.md",
+      "path": "C:\\docs\\a.md"
+    },
     "heading": null,
     "place": "show",
     "showing": 7

@@ -11,6 +11,7 @@
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::io;
 use std::sync::Once;
 
 use tauri::WebviewWindow;
@@ -24,10 +25,10 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, FindWindowExW, GWLP_USERDATA, GetParent, GetWindowLongPtrW,
     GetWindowRect, HTMAXBUTTON, HTTRANSPARENT, HWND_TOP, IsWindow, IsZoomed, PostMessageW,
-    RegisterClassExW, SC_MAXIMIZE, SC_RESTORE, SM_CYFRAME, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
-    SWP_NOZORDER, SetWindowLongPtrW, SetWindowPos, WM_NCDESTROY, WM_NCHITTEST, WM_NCLBUTTONDBLCLK,
-    WM_NCLBUTTONDOWN, WM_NCLBUTTONUP, WM_NCMOUSELEAVE, WM_NCMOUSEMOVE, WM_SYSCOMMAND, WNDCLASSEXW,
-    WS_CHILD, WS_CLIPSIBLINGS, WS_VISIBLE,
+    RegisterClassExW, SC_KEYMENU, SC_MAXIMIZE, SC_RESTORE, SM_CYFRAME, SWP_NOACTIVATE, SWP_NOMOVE,
+    SWP_NOSIZE, SWP_NOZORDER, SetWindowLongPtrW, SetWindowPos, WM_NCDESTROY, WM_NCHITTEST,
+    WM_NCLBUTTONDBLCLK, WM_NCLBUTTONDOWN, WM_NCLBUTTONUP, WM_NCMOUSELEAVE, WM_NCMOUSEMOVE,
+    WM_SYSCOMMAND, WNDCLASSEXW, WS_CHILD, WS_CLIPSIBLINGS, WS_VISIBLE,
 };
 
 use crate::title_bar::{ButtonRect, MaximizeButtonState};
@@ -160,6 +161,28 @@ pub fn place_maximize_button(window: &WebviewWindow, rect: ButtonRect) {
     let _ = window.run_on_main_thread(move || {
         place(std::ptr::with_exposed_provenance_mut(parent), rect);
     });
+}
+
+/// Opens `window`'s window menu as Alt+Space does, for a click on the page's logo (window design
+/// ticket 04): Windows' own menu, at the place Alt+Space puts it, with its entries enabled for the
+/// window's state. Posted rather than sent, since Windows runs the menu until the reader picks
+/// an entry or dismisses it, and the page's command shouldn't wait on that.
+pub fn show_window_menu(window: &WebviewWindow) -> io::Result<()> {
+    let window = window.hwnd().map_err(io::Error::other)?;
+    // SAFETY: a plain call; a handle that is gone makes it fail, which is reported.
+    let posted = unsafe {
+        PostMessageW(
+            window.0,
+            WM_SYSCOMMAND,
+            SC_KEYMENU as WPARAM,
+            // The character pressed with Alt: a space for the window menu.
+            LPARAM::from(b' '),
+        )
+    };
+    if posted == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
 }
 
 fn place(parent: HWND, rect: ButtonRect) {

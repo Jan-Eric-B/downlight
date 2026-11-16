@@ -51,8 +51,8 @@ export default defineConfig({
   test: {
     // The page's tests run without a webview (spec: Testing Decisions).
     environment: "happy-dom",
-    // Vitest empties every stylesheet unless told otherwise, and the accent scale's test reads the
-    // scale's stylesheet as text (accent.test.ts). Only that import is kept.
-    css: { include: [/\/page\/src\/accent\.css\?raw$/] },
+    // Vitest empties every stylesheet unless told otherwise, and the accent color's test reads
+    // every stylesheet of the page as text (accent.test.ts). Only those imports are kept.
+    css: { include: [/\/page\/src\/[^/]+\.css\?raw$/] },
   },
 });

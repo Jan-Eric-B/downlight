@@ -1,5 +1,5 @@
 import { askApp } from "./app";
-import { showNotice } from "./notice";
+import { showingWhy } from "./notice";
 import { DOCUMENT_VIEW_SELECTOR, scrollToHeading } from "./view";
 
 /** The document's link under `target`, the element an event happened on, if there is one. */
@@ -12,13 +12,12 @@ function linkAt(target: EventTarget | null): HTMLAnchorElement | null {
  * Follows a link through the app, which resolves it with the core's link resolution (ticket 11),
  * and does what is left for the page. The target goes as the document wrote it.
  */
-async function follow(target: string, newWindow: boolean): Promise<void> {
-  try {
-    const followed = await askApp("follow_link", { target, newWindow });
-    if (followed.kind === "scrollTo") await scrollToHeading(followed.heading);
-  } catch (error) {
-    showNotice(String(error));
-  }
+function follow(target: string, newWindow: boolean): void {
+  showingWhy(
+    askApp("follow_link", { target, newWindow }).then(async (followed) => {
+      if (followed.kind === "scrollTo") await scrollToHeading(followed.heading);
+    }),
+  );
 }
 
 /** The schemes whose link targets the bubble shows as the URL that is opened. */
@@ -65,7 +64,7 @@ export function startLinks(signal?: AbortSignal): void {
       event.preventDefault();
       if (event.button !== 0 || event.shiftKey || event.altKey || event.metaKey)
         return;
-      void follow(link.getAttribute("href") ?? "", event.ctrlKey);
+      follow(link.getAttribute("href") ?? "", event.ctrlKey);
     },
     { signal },
   );

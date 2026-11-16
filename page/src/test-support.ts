@@ -15,6 +15,7 @@ import type {
   ArgsOf,
   ButtonRect,
   Command,
+  DocumentFile,
   DocumentToShow,
   FirstPaintMarks,
   Followed,
@@ -215,6 +216,12 @@ export async function giveAnotherDocument(): Promise<void> {
 }
 
 /**
+ * The file of every document `answerAsTheApp` hands over; the title bar's tests answer with
+ * files of their own.
+ */
+const SHOWN_FILE: DocumentFile = { name: "a.md", path: "C:\\docs\\a.md" };
+
+/**
  * Answers `render_document` as the app does (`Documents::handover`): a page whose view shows the
  * current showing reloads its document, and any other page shows it, at its heading or the top.
  * Decided when the page asks, before the read, as the app does. `args` are the request's.
@@ -227,17 +234,22 @@ export async function answerAsTheApp(
   const reloads = args.showing === showing;
   const placeAt = (heading: string | null): Place =>
     reloads ? { place: "reload" } : { place: "show", heading };
+  const handedOver = { showing, file: SHOWN_FILE };
   let content: Awaited<ReturnType<Read>>;
   try {
     content = await read();
   } catch (error) {
     const why = error instanceof Error ? error.message : String(error);
-    return { showing, ...placeAt(null), error: why };
+    return { ...handedOver, ...placeAt(null), error: why };
   }
   if (content === null) return null;
   return typeof content === "string"
-    ? { showing, ...placeAt(null), document: content }
-    : { showing, ...placeAt(content.heading), document: content.document };
+    ? { ...handedOver, ...placeAt(null), document: content }
+    : {
+        ...handedOver,
+        ...placeAt(content.heading),
+        document: content.document,
+      };
 }
 
 /**
@@ -341,6 +353,20 @@ export function fakeTitleBarLayout(): () => void {
   return () => {
     for (const report of observers) report([], {} as ResizeObserver);
   };
+}
+
+/** The title bar's logo. */
+export function titleBarLogo(): HTMLElement {
+  const found = document.querySelector<HTMLElement>(".title-bar .logo");
+  if (!found) throw new Error("The title bar has no logo.");
+  return found;
+}
+
+/** The title bar's file name, which names the shown document's file. */
+export function titleBarFileName(): HTMLElement {
+  const found = document.querySelector<HTMLElement>(".title-bar .file-name");
+  if (!found) throw new Error("The title bar has no file name.");
+  return found;
 }
 
 /** The title bar's button that a screen reader names `label`. */

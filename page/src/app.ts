@@ -18,13 +18,20 @@ export type Place =
   { place: "show"; heading: string | null } | { place: "reload" };
 
 /**
+ * The file of the document a window shows, as the title bar shows it (`DocumentFile` in
+ * `app/src/documents.rs`): its name, and its full path for the name's tooltip.
+ */
+export type DocumentFile = { name: string; path: string };
+
+/**
  * The app's answer when the page asks for its document (`DocumentToShow` in
  * `app/src/documents.rs`), or null while the window shows no document: the showing the window is
- * at, for the next request, what to do with the render, and the rendered document as its HTML or
- * why it can't be read.
+ * at, for the next request, the document's file, what to do with the render, and the rendered
+ * document as its HTML or why it can't be read.
  */
 export type DocumentToShow =
-  | ({ showing: number } & Place & ({ document: string } | { error: string }))
+  | ({ showing: number; file: DocumentFile } & Place &
+      ({ document: string } | { error: string }))
   | null;
 
 /** What `follow_link` leaves for the page to do (`Followed` in `app/src/links.rs`). */
@@ -136,6 +143,13 @@ export type Commands = {
   toggle_maximize_window: { args: undefined; answer: null };
   /** The title bar was laid out, and its maximize button is at `button` now. */
   place_maximize_button: { args: { button: ButtonRect }; answer: null };
+  /** The logo was clicked: the window menu, as Alt+Space opens it. */
+  show_window_menu: { args: undefined; answer: null };
+  /**
+   * The file name was clicked: the window's document selected in its folder. Rejects with why,
+   * such as a file that was deleted or moved.
+   */
+  reveal_document: { args: undefined; answer: null };
 };
 
 export type Command = keyof Commands;

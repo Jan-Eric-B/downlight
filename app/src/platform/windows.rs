@@ -32,7 +32,7 @@ use crate::APP_NAME;
 
 mod title_bar;
 
-pub use title_bar::{add_maximize_button, place_maximize_button};
+pub use title_bar::{add_maximize_button, place_maximize_button, show_window_menu};
 
 /// Windows 11's first build. Mica needs it; Windows 10 has no Mica, and Tauri drops the effect
 /// there without an error, which would leave a transparent window see-through.
@@ -136,7 +136,11 @@ pub fn reveal_file(path: &Path) -> io::Result<()> {
         // SAFETY: `path` is a NUL-terminated UTF-16 buffer that outlives the call.
         let item = unsafe { ILCreateFromPathW(path.as_ptr()) };
         if item.is_null() {
-            return Err(io::ErrorKind::NotFound.into());
+            // The reader is shown this message, by the title bar's file name and by links.
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "Windows has no shell item for it",
+            ));
         }
         // SAFETY: `item` is a live absolute item ID list naming the file; with no items to select
         // (0 and null), Explorer opens the file's folder and selects the file itself.

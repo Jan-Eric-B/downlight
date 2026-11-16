@@ -749,7 +749,7 @@ test("the whenDocumentShown listeners hear whether another document was shown or
   await startDocumentView(0);
   await settle();
   const reasons: ShownReason[] = [];
-  const stop = whenDocumentShown((_view, reason) => {
+  const stop = whenDocumentShown(({ reason }) => {
     reasons.push(reason);
   });
 
@@ -779,7 +779,7 @@ test("a reload overtaken after its swap by a reload that can't read the file is 
     void tell("document-changed", "reload");
   });
   const reasons: ShownReason[] = [];
-  const stop = whenDocumentShown((_view, reason) => {
+  const stop = whenDocumentShown(({ reason }) => {
     reasons.push(reason);
   });
 

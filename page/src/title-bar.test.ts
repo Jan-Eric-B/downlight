@@ -1,20 +1,32 @@
 import { clearMocks, mockWindows } from "@tauri-apps/api/mocks";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import type { ArgsOf } from "./app";
+import type { AnswerOf, ArgsOf, DocumentFile, DocumentToShow } from "./app";
 import { startCommands } from "./commands";
+import { startLinks } from "./links";
 import {
   askedOfTheApp,
   fakeTheApp,
   fakeTitleBarLayout,
+  nextInTurn,
+  nextShown,
   openPageWith,
   settle,
   tell,
   titleBarButton,
+  titleBarFileName,
+  titleBarLogo,
 } from "./test-support";
 import { startTitleBar } from "./title-bar";
+import { startDocumentView } from "./view";
 
 /** Each `place_maximize_button` request's arguments, in turn. */
 let placed: ArgsOf<"place_maximize_button">[];
+
+/** The app's answers to `render_document`, in turn; the last one repeats. */
+let answers: DocumentToShow[];
+
+/** How the app answers `reveal_document`. */
+let reveal: () => Promise<AnswerOf<"reveal_document">>;
 
 /** Lays the title bar out, as the webview does when the window's size or DPI changes. */
 let layOutTitleBar: () => void;
@@ -24,11 +36,20 @@ let stop: AbortController;
 beforeEach(() => {
   mockWindows("document-0");
   placed = [];
+  answers = [];
+  reveal = () => Promise.resolve(null);
   layOutTitleBar = fakeTitleBarLayout();
   fakeTheApp({
     place_maximize_button: (args) => {
       placed.push(args);
       return null;
+    },
+    render_document: () => nextInTurn(answers) ?? null,
+    reveal_document: () => reveal(),
+    // A link shows another document in this window: the app tells the page, which asks for it.
+    follow_link: async () => {
+      await tell("document-shown", null);
+      return { kind: "nothing" };
     },
   });
   // The app's flag for a window that has no native frame.
@@ -181,5 +202,113 @@ test("the window buttons never take the focus from the keyboard", () => {
   startTitleBar(stop.signal);
   for (const label of ["Minimize", "Maximize", "Close"]) {
     expect(titleBarButton(label).tabIndex, label).toBe(-1);
+  }
+});
+
+/** A document's file as the app hands it over, the name worked out by the app. */
+const README: DocumentFile = {
+  name: "README.md",
+  path: "C:\\work\\docs\\README.md",
+};
+const GUIDE: DocumentFile = {
+  name: "guide.md",
+  path: "C:\\work\\docs\\guide.md",
+};
+
+/** The app's answer for a window that shows `file`, its `showing`th document. */
+function shownFrom(file: DocumentFile, showing = 0): DocumentToShow {
+  return {
+    showing,
+    file,
+    place: "show",
+    heading: null,
+    document: `<h1>${file.name}</h1>\n<p><a href="guide.md">The guide</a></p>\n`,
+  };
+}
+
+/** Starts the title bar and the document view, and waits until the view shows its first answer. */
+async function startWithTheDocumentView(): Promise<void> {
+  startTitleBar(stop.signal);
+  await startDocumentView(0);
+}
+
+test("the logo is Downlight's icon, named Downlight on hover", () => {
+  startTitleBar(stop.signal);
+  expect(titleBarLogo().title).toBe("Downlight");
+  expect(titleBarLogo().querySelector("svg")).not.toBeNull();
+});
+
+test("a click on the logo asks the app for the window menu", async () => {
+  startTitleBar(stop.signal);
+  titleBarLogo().click();
+  await settle();
+  expect(askedOfTheApp()).toEqual(["show_window_menu"]);
+});
+
+test("the title bar names the shown document's file, with its full path on hover", async () => {
+  answers = [shownFrom(README)];
+  await startWithTheDocumentView();
+
+  expect(titleBarFileName().hidden).toBe(false);
+  expect(titleBarFileName().textContent).toBe("README.md");
+  expect(titleBarFileName().title).toBe("C:\\work\\docs\\README.md");
+});
+
+test("the name follows the document a link shows", async () => {
+  answers = [shownFrom(README, 0), shownFrom(GUIDE, 1)];
+  startLinks(stop.signal);
+  await startWithTheDocumentView();
+  await settle();
+
+  const shown = nextShown();
+  document.querySelector<HTMLAnchorElement>('a[href="guide.md"]')?.click();
+  await shown;
+  expect(titleBarFileName().textContent).toBe("guide.md");
+  expect(titleBarFileName().title).toBe("C:\\work\\docs\\guide.md");
+});
+
+test("the empty window shows only the logo", async () => {
+  answers = [null];
+  await startWithTheDocumentView();
+
+  expect(titleBarFileName().hidden).toBe(true);
+  expect(titleBarLogo().hidden).toBe(false);
+});
+
+test("a click on the name asks the app to reveal the document's file", async () => {
+  answers = [shownFrom(README)];
+  await startWithTheDocumentView();
+
+  titleBarFileName().click();
+  await settle();
+  expect(
+    askedOfTheApp().filter((command) => command === "reveal_document"),
+  ).toEqual(["reveal_document"]);
+});
+
+test("a file the app can't reveal shows why in a notice", async () => {
+  const why =
+    "Can't find C:\\work\\docs\\README.md, so it can't be shown in its folder.";
+  reveal = () => Promise.reject(new Error(why));
+  answers = [shownFrom(README)];
+  await startWithTheDocumentView();
+
+  titleBarFileName().click();
+  await vi.waitFor(() => {
+    expect(document.querySelector(".notice")?.textContent).toContain(why);
+  });
+});
+
+test("the logo and the name leave the focus in the document", async () => {
+  answers = [shownFrom(README)];
+  await startWithTheDocumentView();
+  for (const element of [titleBarLogo(), titleBarFileName()]) {
+    expect(element.tabIndex, element.className).toBe(-1);
+    const press = new MouseEvent("mousedown", {
+      bubbles: true,
+      cancelable: true,
+    });
+    element.dispatchEvent(press);
+    expect(press.defaultPrevented, element.className).toBe(true);
   }
 });

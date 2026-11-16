@@ -221,3 +221,35 @@ fn opening_a_shown_document_again_keeps_its_showing() {
     let next = handover(&documents, &label, Some(page_shows));
     assert_eq!(next.place, Place::Reload);
 }
+
+#[test]
+fn handover_names_the_document_s_file_and_its_full_path() {
+    // For the title bar, which shows the name and the path as its tooltip (window design ticket
+    // 04).
+    let (documents, _) = documents();
+    let label = open_new(&documents, &manifest());
+    assert_eq!(
+        handover(&documents, &label, None).file,
+        DocumentFile {
+            name: "Cargo.toml".to_owned(),
+            path: manifest().display().to_string(),
+        }
+    );
+}
+
+#[test]
+fn window_given_another_document_hands_over_the_new_file() {
+    let (documents, _) = documents();
+    let label = open_new(&documents, &manifest());
+    let _ = handover(&documents, &label, None);
+    let other = app_file("build.rs");
+    give(&documents, DocumentAt::new(&other), Target::Window(&label));
+    assert_eq!(handover(&documents, &label, None).file.name, "build.rs");
+}
+
+#[test]
+fn name_shown_for_a_path_without_one_is_never_blank() {
+    // No document is a drive root, so this only guards the window's title and the title bar
+    // against a blank name, should a path without a name of its own ever reach them.
+    assert_eq!(file_name_shown(Path::new(r"C:\")), r"C:\");
+}

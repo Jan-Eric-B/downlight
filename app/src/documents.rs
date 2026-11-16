@@ -174,8 +174,40 @@ struct Handover {
     render: RenderTask,
     /// This time the window was given the document, for the page to send with its next request.
     showing: Showing,
+    /// The document's file, for the title bar.
+    file: DocumentFile,
     /// What the page does with the render.
     place: Place,
+}
+
+/// The file of the document a window shows, as the page's title bar shows it (window design
+/// ticket 04): its name, and its full path as the name's tooltip. Sent with every render rather
+/// than worked out by the page, which would have to know each system's paths.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+struct DocumentFile {
+    name: String,
+    path: String,
+}
+
+impl DocumentFile {
+    /// The file at `path`, as the launch, the dialog, the drop or the link named it.
+    fn of(path: &Path) -> Self {
+        Self {
+            name: file_name_shown(path),
+            path: path.display().to_string(),
+        }
+    }
+}
+
+/// The name the file or folder at `path` is shown by, in the title bar and in the window's title,
+/// which share it so the two can't name a document differently. Launches, the dialog, the drop
+/// and links give absolute paths, so only a drive root has no name of its own; it is named as its
+/// path rather than left blank.
+pub fn file_name_shown(path: &Path) -> String {
+    path.file_name().map_or_else(
+        || path.display().to_string(),
+        |name| name.to_string_lossy().into_owned(),
+    )
 }
 
 /// What a page does with the render it asked for, decided by the showing its view shows rather
@@ -332,6 +364,7 @@ impl Documents {
         Some(Handover {
             render: ahead.unwrap_or_else(|| render::start(&path, "read-and-render")),
             showing,
+            file: DocumentFile::of(&path),
             place,
         })
     }
@@ -513,19 +546,21 @@ pub async fn render_document(
     };
     Ok(Some(DocumentToShow {
         showing: handover.showing,
+        file: handover.file,
         place: handover.place,
         content,
     }))
 }
 
-/// What the page gets when it asks for its document: the showing the window is at, what to do
-/// with the render (show it at a heading or the top, or reload it at the reading position), and
+/// What the page gets when it asks for its document: the showing the window is at, the
+/// document's file, what to do with the render (show it at a heading or the top, or reload it at the reading position), and
 /// the rendered document or why it can't be read. A read that fails is part of the answer, since
 /// only the answer says whether the page keeps its last render, on a reload, or shows why, on a
 /// show (ticket 23).
 #[derive(serde::Serialize)]
 pub struct DocumentToShow {
     showing: Showing,
+    file: DocumentFile,
     #[serde(flatten)]
     place: Place,
     #[serde(flatten)]
@@ -542,7 +577,7 @@ enum Content {
 
 /// A sample of each answer [`render_document`] gives, by name, which the page's tests read
 /// (`app/src/contract.rs`, ticket 27): the rendered document goes as its HTML, the heading only
-/// with a show, and a read that fails as why.
+/// with a show, a read that fails as why, and the document's file with each.
 #[cfg(test)]
 pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
     // A new place or content stops the build here: give it a sample below, then name it here.
@@ -557,6 +592,12 @@ pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
     let answer = |place: Place, content: Content| {
         serde_json::to_value(Some(DocumentToShow {
             showing: Showing(7),
+            // Written out rather than `DocumentFile::of`, so the samples are the same on every
+            // system the tests run on.
+            file: DocumentFile {
+                name: "a.md".to_owned(),
+                path: r"C:\docs\a.md".to_owned(),
+            },
             place,
             content,
         }))

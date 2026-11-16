@@ -1,6 +1,6 @@
 import { askApp, listenToApp, type MenuEntry } from "./app";
 import { findNext, findPrevious, openFind } from "./find";
-import { showNotice } from "./notice";
+import { showingWhy } from "./notice";
 import { open } from "./open";
 
 /**
@@ -8,7 +8,9 @@ import { open } from "./open";
  * added to the `commands` table below, to the `menu` list beside it if it belongs in the
  * right-click menu, and to the title bar with `commandButton` if it has a button there, and
  * nowhere else in the page or the app. The menu entry, the button's tooltip and the shortcut then
- * all come from the one entry (window design spec).
+ * all come from the one entry (window design spec). The title bar's logo and file name are not
+ * commands: they have no shortcut or menu entry, and their name and tooltip come from the window
+ * and its document (title-bar.ts).
  */
 interface Command {
   /** The command's name, as the right-click menu and its button's tooltip show it. */
@@ -29,13 +31,6 @@ interface Command {
    */
   repeatsWhileHeld?: boolean;
   run(): void;
-}
-
-/** Shows the reader why, if the app couldn't do what it was `asked`. */
-function showingWhy(asked: Promise<unknown>): void {
-  asked.catch((error: unknown) => {
-    showNotice(String(error));
-  });
 }
 
 const commands = {
@@ -62,7 +57,7 @@ const commands = {
     repeatsWhileHeld: true,
     run: findPrevious,
   },
-  open: { label: "Open...", ctrlLetter: "o", run: () => void open() },
+  open: { label: "Open...", ctrlLetter: "o", run: open },
   close: {
     label: "Close",
     ctrlLetter: "w",

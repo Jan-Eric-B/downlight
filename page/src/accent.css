@@ -11,3 +11,30 @@
   --accent-dark-2: #8f5d04;
   --accent-dark-3: #623f06;
 }
+
+/* The accent's roles, one per row of the spec's use-to-shade table, so no other stylesheet of the
+   page picks a shade itself and swapping the scale recolors every use (ticket 03). Each takes its
+   shade in light, then in dark, with light-dark() as document.css pairs the themes; it follows
+   the root's color-scheme, light dark. Base and Dark 1 fail 4.5:1 as text on white, so no role
+   that colors text takes them in light. The emphasis role marks ticked checkboxes, focus rings,
+   switched-on buttons and the copy button's hover. */
+:root {
+  --accent-link: light-dark(var(--accent-dark-2), var(--accent-light-1));
+  --accent-selection: light-dark(var(--accent-light-2), var(--accent-dark-2));
+  --accent-find-match: light-dark(var(--accent-light-3), var(--accent-dark-3));
+  --accent-find-current: light-dark(var(--accent-base), var(--accent-base));
+  --accent-emphasis: light-dark(var(--accent-dark-1), var(--accent-light-1));
+}
+
+/* High contrast: the reader's own system colors instead of the accent, the selection's for the
+   current match so it differs from the other matches in every theme. Last, so it wins over the
+   roles above. */
+@media (forced-colors: active) {
+  :root {
+    --accent-link: LinkText;
+    --accent-selection: Highlight;
+    --accent-find-match: Mark;
+    --accent-find-current: Highlight;
+    --accent-emphasis: Highlight;
+  }
+}

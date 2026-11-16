@@ -25,113 +25,8 @@ body {
   margin: 0;
 }
 
-/* The title bar the page draws in place of the native one (title-bar.ts, ADR 0005), as high as
-   Windows 11's. It draws no background of its own, so it sits on Mica with the document, or on the
-   page's solid background where Mica is off. WebView2 drags the window by it, maximizes and
-   restores it on a double-click, and shows the window menu on a right-click (app-region). */
-:root {
-  --title-bar-height: 0px;
-}
-
-:root:has(> body > .title-bar) {
-  --title-bar-height: 32px;
-}
-
-.title-bar {
-  position: fixed;
-  top: 0;
-  right: 0;
-  left: 0;
-  z-index: 4;
-  display: flex;
-  height: var(--title-bar-height);
-  /* Windows 11's caption colors (WinUI's primary and disabled text fills). */
-  color: light-dark(rgb(0 0 0 / 89.4%), #ffffff);
-  user-select: none;
-  app-region: drag;
-}
-
-.title-bar.inactive {
-  color: light-dark(rgb(0 0 0 / 36.1%), rgb(255 255 255 / 36.3%));
-}
-
-.window-buttons {
-  display: flex;
-  margin-left: auto;
-}
-
-/* Minimize, maximize or restore, and close, at Windows 11's size and in its colors. On Windows
-   the pointer over maximize reaches the app's window behind it, so the app says when it is
-   hovered or pressed (data-state). */
-.window-button {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 46px;
-  height: 100%;
-  padding: 0;
-  border: none;
-  background: transparent;
-  color: inherit;
-  app-region: no-drag;
-}
-
-.window-button svg {
-  width: 16px;
-  height: 16px;
-  fill: currentColor;
-}
-
-.window-button:hover,
-.window-button[data-state="hovered"] {
-  background-color: light-dark(rgb(0 0 0 / 3.73%), rgb(255 255 255 / 6.05%));
-  color: light-dark(rgb(0 0 0 / 89.4%), #ffffff);
-}
-
-.window-button:active,
-.window-button[data-state="pressed"] {
-  background-color: light-dark(rgb(0 0 0 / 2.41%), rgb(255 255 255 / 4.19%));
-  color: light-dark(rgb(0 0 0 / 62%), rgb(255 255 255 / 78.6%));
-}
-
-.window-button.close:hover {
-  background-color: #c42b1c;
-  color: #ffffff;
-}
-
-.window-button.close:active {
-  background-color: rgb(196 43 28 / 90%);
-  color: rgb(255 255 255 / 70%);
-}
-
-/* High contrast: the reader's own colors, with the selection's for a button under the pointer,
-   and the glyphs in them rather than the background color forced colors would give a fill. */
-@media (forced-colors: active) {
-  .title-bar {
-    color: CanvasText;
-  }
-
-  .title-bar.inactive {
-    color: GrayText;
-  }
-
-  .window-button {
-    forced-color-adjust: none;
-  }
-
-  .window-button:hover,
-  .window-button[data-state="hovered"],
-  .window-button:active,
-  .window-button[data-state="pressed"],
-  .window-button.close:hover,
-  .window-button.close:active {
-    background-color: Highlight;
-    color: HighlightText;
-  }
-}
-
-/* The element the document scrolls in (view.ts), below the title bar, so the scroll bar starts
-   below the bar too. It has the keys' focus, and shows no ring for it. */
+/* The element the document scrolls in (view.ts), below the title bar (title-bar.css), so the scroll
+   bar starts below the bar too. It has the keys' focus, and shows no ring for it. */
 .view-scroller {
   position: fixed;
   inset: var(--title-bar-height) 0 0;
@@ -145,6 +40,34 @@ body {
   margin: 0 auto;
   padding: 32px;
   background-color: transparent;
+}
+
+/* The accent color (accent.css) on what Downlight adds to a document: links, ticks, focus rings and
+   the selection. It recolors at these selectors rather than redefining GitHub's --fgColor-accent
+   and --borderColor-accent-emphasis, which GitHub's Note alert uses, so alerts, code, tables and
+   headings keep GitHub's colors. github-markdown-css draws its own focus rings in
+   --focus-outlineColor, so that one variable takes the role. */
+.markdown-body {
+  --focus-outlineColor: var(--accent-emphasis);
+}
+
+.markdown-body a {
+  color: var(--accent-link);
+}
+
+.markdown-body input[type="checkbox"] {
+  accent-color: var(--accent-emphasis);
+}
+
+::selection {
+  background-color: var(--accent-selection);
+}
+
+/* High contrast: the selection's own text color on the selection's background. */
+@media (forced-colors: active) {
+  ::selection {
+    color: HighlightText;
+  }
 }
 
 /* Lays out and paints only the document's blocks near the view, so showing a 1 MB document never
@@ -211,10 +134,11 @@ article.markdown-body > * {
 
 .copy-code:hover {
   background-color: var(--bgColor-neutral-muted);
+  color: var(--accent-emphasis);
 }
 
 .copy-code:focus-visible {
-  outline: 2px solid var(--borderColor-accent-emphasis);
+  outline: 2px solid var(--accent-emphasis);
   outline-offset: -2px;
 }
 
@@ -238,11 +162,16 @@ article.markdown-body > * {
 }
 
 /* High contrast: the icon in the reader's button text color, which forced colors would otherwise
-   replace with the background color it is drawn with. */
+   replace with the background color it is drawn with, and in the emphasis role's system color
+   under the pointer. */
 @media (forced-colors: active) {
   .copy-code::before {
     forced-color-adjust: none;
     background-color: ButtonText;
+  }
+
+  .copy-code:hover::before {
+    background-color: var(--accent-emphasis);
   }
 }
 
@@ -276,7 +205,7 @@ article.markdown-body > * {
 }
 
 .empty-window button:focus-visible {
-  outline: 2px solid var(--borderColor-accent-emphasis);
+  outline: 2px solid var(--accent-emphasis);
   outline-offset: 2px;
 }
 
@@ -407,7 +336,7 @@ article.markdown-body > * {
 }
 
 .find-bar input:focus-visible {
-  outline: 2px solid var(--borderColor-accent-emphasis);
+  outline: 2px solid var(--accent-emphasis);
   outline-offset: -1px;
 }
 
@@ -419,28 +348,26 @@ article.markdown-body > * {
   white-space: nowrap;
 }
 
-/* Find's matches, painted with the CSS Custom Highlight API so the document's DOM never changes.
-   The current match is orange, as in Chromium's own find, and the others yellow; in dark mode both
-   are darker, with dark text on the current one so it stays readable. */
+/* Find's matches, painted with the CSS Custom Highlight API so the document's DOM never changes,
+   in the accent's Find roles (accent.css). The current match is Base in light and dark alike, so
+   its text is dark in both to stay readable. */
 ::highlight(find-match) {
-  background-color: light-dark(#fff2a8, rgb(187 128 9 / 45%));
+  background-color: var(--accent-find-match);
 }
 
 ::highlight(find-current) {
-  background-color: light-dark(#ff9632, #d29922);
+  background-color: var(--accent-find-current);
   color: light-dark(#1f2328, #0d1117);
 }
 
-/* High contrast: the reader's own colors for marked text, and the selection's for the current
-   match, so the two differ in every theme. */
+/* High contrast: the text colors that go with the roles' system colors, Mark's and the
+   selection's. */
 @media (forced-colors: active) {
   ::highlight(find-match) {
-    background-color: Mark;
     color: MarkText;
   }
 
   ::highlight(find-current) {
-    background-color: Highlight;
     color: HighlightText;
   }
 }
