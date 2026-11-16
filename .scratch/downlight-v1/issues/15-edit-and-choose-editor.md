@@ -117,3 +117,8 @@ Built 2026-11-16. `npm run check` passes; the contract samples didn't change (bo
 - `leave_reload_keys_to_the_page` is now `leave_reload_and_find_keys_to_the_page`, and ticket 29 removes it.
 - The `Command` shape note under "Fits with other tickets" is superseded by ticket 29, which widens `Command` to a key with its modifiers. If this ticket lands first, add Ctrl+E in today's shape (`ctrlLetter: "e"`).
 - If ticket 27 has landed, `edit_document` and `choose_editor` are declared in its page module, not called with string names.
+
+**2026-11-16, from the review.** Two changes after the review of this ticket:
+
+- The chosen editor is checked when Edit runs, not only when the reader chooses: `editor_order` (`app/src/edit.rs`) tries it only if it has a full path, is an `.exe` (`is_program`, which `check_choice` uses too) and isn't Downlight. A hand-edited `settings.json` could otherwise name a `.cmd` file, whose argument Rust would quote as a batch file's, or a bare `edit.exe` that would be searched for on the PATH. Such an editor is passed over as if none were chosen.
+- The platform's editor interface is narrower: `platform::launch_editor` is gone, and the platform module offers only the OS calls, `open_as_text_file(&Path)` (ShellExecuteEx with the `.txt` class), `notepad() -> Option<PathBuf>` and `text_file_program()`. `edit::launch` matches on `Editor` and starts a program with `Command`, so the non-Windows fallback no longer repeats that.

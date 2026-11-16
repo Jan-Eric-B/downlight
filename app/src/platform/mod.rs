@@ -7,7 +7,7 @@ mod windows;
 #[cfg(windows)]
 pub use windows::{
     add_maximize_button, custom_scheme_origin, draws_own_title_bar, fold_case, has_backdrop,
-    is_missing, launch_editor, leave_keys_to_the_page, open_folder, open_url,
+    is_missing, leave_keys_to_the_page, notepad, open_as_text_file, open_folder, open_url,
     place_maximize_button, process_start, reveal_file, show_error, show_window_menu,
     text_file_program, with_backdrop,
 };
@@ -18,22 +18,17 @@ pub fn text_file_program() -> Option<std::path::PathBuf> {
     None
 }
 
-/// Other systems start a chosen editor as it is; their text file program and their Notepad come
-/// with their ports.
+/// Other systems open a document with their text file program with their ports; Edit falls back
+/// to the next editor.
 #[cfg(not(windows))]
-pub fn launch_editor(
-    editor: &crate::edit::Editor,
-    document: &std::path::Path,
-) -> std::io::Result<()> {
-    match editor {
-        crate::edit::Editor::Chosen(program) => std::process::Command::new(program)
-            .arg(document)
-            .spawn()
-            .map(drop),
-        crate::edit::Editor::TextFileProgram | crate::edit::Editor::Notepad => {
-            Err(std::io::ErrorKind::Unsupported.into())
-        }
-    }
+pub fn open_as_text_file(_document: &std::path::Path) -> std::io::Result<()> {
+    Err(std::io::ErrorKind::Unsupported.into())
+}
+
+/// Other systems name their Notepad with their ports.
+#[cfg(not(windows))]
+pub fn notepad() -> Option<std::path::PathBuf> {
+    None
 }
 
 /// Other systems keep their native frame and title bar until their ports decide their own

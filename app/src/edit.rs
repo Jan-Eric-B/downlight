@@ -38,7 +38,7 @@ pub async fn edit_document(
             &app.state::<Documents>(),
             window.label(),
             chosen.as_deref(),
-            platform::launch_editor,
+            launch,
         )
     })
     .await
@@ -99,10 +99,33 @@ fn edit(
     })
 }
 
+/// Opens `document` in `editor`, and doesn't wait for it. A program starts with the document's
+/// path as its one argument; the text file program starts the way the OS starts it.
+fn launch(editor: &Editor, document: &Path) -> io::Result<()> {
+    let start = |program: &Path| {
+        std::process::Command::new(program)
+            .arg(document)
+            .spawn()
+            .map(drop)
+    };
+    match editor {
+        Editor::Chosen(program) => start(program),
+        Editor::TextFileProgram => platform::open_as_text_file(document),
+        Editor::Notepad => {
+            let notepad = platform::notepad().ok_or(io::ErrorKind::Unsupported)?;
+            start(&notepad)
+        }
+    }
+}
+
 /// The editors Edit tries, in turn: the chosen editor if it is still a file, then the text file
 /// program, then Notepad, leaving out any that is Downlight. `text_file_program` is the program's
 /// file, or None when the system doesn't say which it is, as for some packaged programs; it is
 /// tried then too, since Downlight is never a packaged program.
+///
+/// The chosen editor is checked again as Choose editor... checks it, since a hand-edited settings
+/// file can name anything, and it needs a full path too: a bare name would be searched for on the
+/// PATH (ticket 15's review).
 fn editor_order(
     chosen: Option<&Path>,
     text_file_program: Option<&Path>,
@@ -110,7 +133,10 @@ fn editor_order(
     is_downlight: impl Fn(&Path) -> bool,
 ) -> Vec<Editor> {
     let mut order = Vec::with_capacity(3);
-    if let Some(chosen) = chosen.filter(|chosen| is_file(chosen) && !is_downlight(chosen)) {
+    let can_start = |chosen: &Path| {
+        chosen.is_absolute() && is_program(chosen) && is_file(chosen) && !is_downlight(chosen)
+    };
+    if let Some(chosen) = chosen.filter(|chosen| can_start(chosen)) {
         order.push(Editor::Chosen(chosen.to_owned()));
     }
     if !text_file_program.is_some_and(&is_downlight) {
@@ -136,19 +162,23 @@ fn keep_choice(settings: &SettingsStore, program: PathBuf) -> Result<(), EditErr
         .map_err(|source| EditError::NotSaved { program, source })
 }
 
-/// Whether `program` can be the reader's editor: a program (`.exe`, which also keeps Rust from
-/// quoting the document's path as a batch file's argument), and never Downlight.
+/// Whether `program` can be the reader's editor: a program, and never Downlight.
 fn check_choice(program: &Path, own_exe: Option<&Path>) -> Result<(), EditError> {
-    let is_exe = program
-        .extension()
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("exe"));
-    if !is_exe {
+    if !is_program(program) {
         return Err(EditError::NotAProgram(program.to_owned()));
     }
     if own_exe.is_some_and(|own| is_downlight(program, own)) {
         return Err(EditError::ChoseDownlight);
     }
     Ok(())
+}
+
+/// Whether `program` is named as a program, an `.exe`, which also keeps Rust from quoting the
+/// document's path as a batch file's argument.
+fn is_program(program: &Path) -> bool {
+    program
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("exe"))
 }
 
 /// Why Edit or Choose editor... didn't do what the reader asked. The page shows it as a notice.
@@ -274,6 +304,43 @@ mod tests {
         );
     }
 
+    /// The editors Edit tries for a chosen editor that is a file and isn't Downlight, as a
+    /// hand-edited settings file may name it.
+    fn order_for_saved(chosen: &str) -> Vec<Editor> {
+        editor_order(
+            Some(Path::new(chosen)),
+            Some(Path::new(TEXT_FILE_PROGRAM)),
+            |_| true,
+            |_| false,
+        )
+    }
+
+    #[test]
+    fn saved_editor_that_is_not_an_exe_is_not_tried() {
+        // Choose editor... refuses it; a settings file edited by hand may still name it.
+        assert_eq!(
+            order_for_saved(r"C:\Tools\edit.cmd"),
+            [Editor::TextFileProgram, Editor::Notepad]
+        );
+    }
+
+    #[test]
+    fn saved_editor_without_a_full_path_is_not_tried() {
+        // Starting it would search the folders on the PATH for it.
+        for chosen in [
+            "edit.exe",
+            r"Tools\edit.exe",
+            r"\Tools\edit.exe",
+            r"C:edit.exe",
+        ] {
+            assert_eq!(
+                order_for_saved(chosen),
+                [Editor::TextFileProgram, Editor::Notepad],
+                "{chosen}"
+            );
+        }
+    }
+
     #[test]
     fn unknown_text_file_program_is_still_tried() {
         // Some packaged programs, such as Windows 11's Notepad, have no file the system names.
@@ -358,8 +425,13 @@ mod tests {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join(path)
     }
 
-    /// Edits the document a window shows, or none, with a chosen editor that is a real file, and
-    /// gives what Edit gave and the editors it tried, which fail as `starts` says.
+    /// A real program, by its full path, that is never Downlight: the Cargo running the tests.
+    fn chosen_program() -> PathBuf {
+        PathBuf::from(env!("CARGO"))
+    }
+
+    /// Edits the document a window shows, or none, with a chosen editor that is a real program,
+    /// and gives what Edit gave and the editors it tried, which fail as `starts` says.
     fn edit_shown(
         document: Option<&Path>,
         starts: impl Fn(&Editor) -> bool,
@@ -371,7 +443,7 @@ mod tests {
                 .give(DocumentAt::new(document), Target::Window(&window))
                 .unwrap();
         }
-        let chosen = repo_file("app/Cargo.toml");
+        let chosen = chosen_program();
         let tried = RefCell::new(Vec::new());
         let edited = edit(&documents, &window, Some(&chosen), |editor, document| {
             tried
@@ -402,10 +474,7 @@ mod tests {
         let notes = repo_file("core/tests/fixtures/notes.md");
         let (edited, tried) = edit_shown(Some(&notes), |_| true);
         assert!(edited.is_ok(), "{edited:?}");
-        assert_eq!(
-            tried,
-            [(Editor::Chosen(repo_file("app/Cargo.toml")), notes)]
-        );
+        assert_eq!(tried, [(Editor::Chosen(chosen_program()), notes)]);
     }
 
     #[test]

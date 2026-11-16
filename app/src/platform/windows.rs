@@ -31,7 +31,6 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::APP_NAME;
-use crate::edit::Editor;
 
 mod title_bar;
 
@@ -255,34 +254,17 @@ pub fn text_file_program() -> Option<PathBuf> {
     .flatten()
 }
 
-/// Opens `document` in `editor`. The text file program starts through the shell, which follows
-/// the reader's choice of program for `.txt` files and starts a packaged one, such as Windows 11's
-/// Notepad, as no command line can.
-pub fn launch_editor(editor: &Editor, document: &Path) -> io::Result<()> {
-    match editor {
-        Editor::Chosen(program) => start(program, document),
-        Editor::TextFileProgram => open_as_text_file(document),
-        Editor::Notepad => start(&notepad(), document),
-    }
-}
-
-/// Starts `program` with `document` as its one argument, and doesn't wait for it.
-fn start(program: &Path, document: &Path) -> io::Result<()> {
-    std::process::Command::new(program)
-        .arg(document)
-        .spawn()
-        .map(drop)
-}
-
 /// Windows' own Notepad, by its full path, so no `notepad.exe` beside Downlight or on the path
 /// starts in its place.
-fn notepad() -> PathBuf {
+pub fn notepad() -> Option<PathBuf> {
     let windows = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
-    Path::new(&windows).join("System32").join("notepad.exe")
+    Some(Path::new(&windows).join("System32").join("notepad.exe"))
 }
 
-/// Opens `document` with the program for `.txt` files, whatever its own extension.
-fn open_as_text_file(document: &Path) -> io::Result<()> {
+/// Opens `document` with the program for `.txt` files, whatever its own extension. It starts
+/// through the shell, which follows the reader's choice of program for `.txt` files and starts a
+/// packaged one, such as Windows 11's Notepad, as no command line can.
+pub fn open_as_text_file(document: &Path) -> io::Result<()> {
     let (class, file) = (wide(TEXT_FILE), wide(document));
     with_com(|| {
         let mut info = SHELLEXECUTEINFOW {
@@ -489,16 +471,10 @@ mod tests {
     }
 
     #[test]
-    fn text_file_program_is_an_existing_file_or_none() {
-        if let Some(program) = text_file_program() {
-            assert!(program.is_file(), "{}", program.display());
-        }
-    }
-
-    #[test]
     fn notepad_is_windows_own() {
-        assert!(notepad().ends_with(r"System32\notepad.exe"));
-        assert!(notepad().is_absolute());
+        let notepad = notepad().unwrap();
+        assert!(notepad.ends_with(r"System32\notepad.exe"));
+        assert!(notepad.is_absolute());
     }
 
     #[test]

@@ -415,12 +415,22 @@ mod tests {
         let (window, showing) = window_showing_notes(&documents);
         recorder.fail_window("document-1");
         let followed = follow(&documents, &window, showing, "readme.md", true);
-        assert_eq!(
-            followed.err().map(|error| Notice::from(error).to_string()),
-            Some(format!(
-                "Can't show readme.md in {}: its window didn't open: the window can't be changed",
-                fixtures().display()
-            ))
+        assert!(
+            matches!(
+                &followed,
+                Err(FollowError::Show { path, source: ShowError::NotOpened(_) })
+                    if *path == fixtures().join("readme.md")
+            ),
+            "{followed:?}"
+        );
+        // The folder's text isn't compared: see `fixtures`.
+        let notice = Notice::from(followed.unwrap_err()).to_string();
+        assert!(
+            notice.starts_with("Can't show readme.md in ")
+                && notice.ends_with(
+                    r"\core\tests\fixtures: its window didn't open: the window can't be changed"
+                ),
+            "{notice}"
         );
         // Forgotten, so it opens anew.
         assert_eq!(documents.document_path("document-1"), None);
@@ -444,7 +454,9 @@ mod tests {
     /// writes or removes them while the tests run, so the windows' watches start on them.
     fn fixtures() -> PathBuf {
         let folder = Path::new(env!("CARGO_MANIFEST_DIR")).join("../core/tests/fixtures");
-        // Resolves the `..`, as a launch does, so the folder is named as a link names it.
+        // Resolves the `..`, as a launch does. The drive letter keeps the working folder's case,
+        // while a link's path has it upper-cased (Rust's path parsing, written back by the `url`
+        // crate), so tests compare paths, whose `==` ignores the letter's case, not their text.
         std::path::absolute(&folder).unwrap()
     }
 
