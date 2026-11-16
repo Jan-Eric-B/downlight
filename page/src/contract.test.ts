@@ -321,13 +321,17 @@ test("the app's held notice in its answer shows with the document", async () => 
   );
 });
 
-test("the app's message to scroll to a heading scrolls to it", async () => {
+test("the app's message to scroll to a heading in the showing in view scrolls to it", async () => {
   answerWithSamples("showAtTop");
   await startDocumentView(0);
   await settle();
   const scrolledTo = spyOnHeadingScrolls();
+  const scroll = messageSample("scrollToHeading");
+  if (scroll.event !== "scroll-to-heading")
+    throw new Error("The sample is no scroll to a heading.");
 
-  await tellAsSampled(messageSample("scrollToHeading"));
+  expect(scroll.payload.showing).toBe(showingIn("showAtTop"));
+  await tellAsSampled(scroll);
   await vi.waitFor(() => {
     expect(scrolledTo()).toContain("install");
   });

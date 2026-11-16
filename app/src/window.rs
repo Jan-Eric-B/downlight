@@ -102,6 +102,9 @@ impl Windows for AppHandle {
         let Some(window) = self.get_webview_window(window) else {
             return Ok(());
         };
+        // Off the main thread, tauri-runtime-wry 2.12 posts the title to the event loop without
+        // waiting, in the order titles are set, so the documents module's titles lock, held while
+        // this runs, holds up no other thread for long and keeps titles in its order.
         Ok(window.set_title(title)?)
     }
 

@@ -147,6 +147,34 @@ fn after_a_render_could_start() -> SystemTime {
     SystemTime::now()
 }
 
+/// Another handle on the same documents, as each of Tauri's commands gets the app's state, for a
+/// request on another thread.
+fn shared(documents: &Documents) -> Documents {
+    Documents {
+        inner: Arc::clone(&documents.inner),
+    }
+}
+
+/// Long enough for a request on another thread to end if nothing holds it up, so that a test can
+/// tell a request that something holds up, as a lock does, by its ending only later. Only a stalled
+/// machine takes longer.
+const HELD_UP_WAIT: Duration = Duration::from_millis(200);
+
+/// Long enough for a request held up on another thread to end once what held it up has.
+const HELD_UP_END_WAIT: Duration = Duration::from_secs(3);
+
+/// Runs `request` on another thread, as a second request for the same window may run while a
+/// first is carried out, and waits until it ends or [`HELD_UP_WAIT`] has passed.
+fn meanwhile(documents: Documents, request: impl FnOnce(&Documents) + Send + 'static) {
+    let (ended, end) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        request(&documents);
+        // The test may have stopped waiting already.
+        let _ = ended.send(());
+    });
+    let _ = end.recv_timeout(HELD_UP_WAIT);
+}
+
 /// The heading `window`'s page gets with its document when its view shows none yet, or None
 /// while the window shows none.
 #[expect(

@@ -41,6 +41,10 @@ pub struct Documents {
 
 struct Inner {
     table: Mutex<WindowTable>,
+    /// Held while a window is titled ([`Documents::retitle`]), so that titles are set in the order
+    /// their documents were read from the table. Apart from the table's lock, which no OS call is
+    /// made under.
+    titles: Mutex<()>,
     pages: Box<dyn Pages>,
     windows: Box<dyn Windows>,
 }
@@ -133,14 +137,18 @@ struct WindowTable {
     labels_issued: usize,
     /// How many times a window has been given a document, for each to get its own [`Showing`].
     showings_issued: u64,
+    /// How many times a window has been given a document or taken a step, for each to get its own
+    /// claim number ([`ShownDocument::claim`]).
+    claims_issued: u64,
     /// Every open window, with the document it shows now and its history.
     windows: HashMap<String, WindowRecord>,
 }
 
-/// One time a window was given a document, unique while the process runs: a window given the
-/// same document again, after another, has a new one. The page sends the one its view shows when
-/// it asks for its document, so that [`Documents::handover`] can tell whether to show the
-/// document or reload it, whichever message made the page ask (ticket 23).
+/// One time a window was given a document. A window given the same document again, after another,
+/// has a new one, and Back or Forward gives the window back the one it had (ticket 12), so that
+/// its page returns to where it was. The page sends the one its view shows when it asks for its
+/// document, so that [`Documents::handover`] can tell whether to show the document or reload it,
+/// whichever message made the page ask (ticket 23).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Showing(u64);
 
@@ -155,6 +163,10 @@ impl Showing {
 struct ShownDocument {
     /// This time the window was given the document.
     showing: Showing,
+    /// The claim that gave the window the document, unique while the process runs, unlike the
+    /// showing, which a step gives back: a show that fails puts the window back only while it is
+    /// still at this claim ([`Documents::put_back`]).
+    claim: u64,
     /// As the launch, the dialog or the drop named it, for reading and the title.
     path: PathBuf,
     /// For finding the window when the document is opened again. Worked out once, when the window
@@ -195,18 +207,25 @@ enum Arrival {
 }
 
 impl ShownDocument {
-    fn given(document: DocumentAt<'_>, key: PathBuf, showing: Showing) -> Self {
+    fn given(document: DocumentAt<'_>, key: PathBuf, showing: Showing, claim: u64) -> Self {
         let arrival = Arrival::Given {
             heading: document.heading.map(str::to_owned),
         };
-        Self::arrived(document.path.to_owned(), key, showing, arrival)
+        Self::arrived(document.path.to_owned(), key, showing, claim, arrival)
     }
 
-    /// The document at `path`, with `key`, shown as `showing` after `arrival`. Its render starts
-    /// now.
-    fn arrived(path: PathBuf, key: PathBuf, showing: Showing, arrival: Arrival) -> Self {
+    /// The document at `path`, with `key`, shown as `showing` by `claim` after `arrival`. Its
+    /// render starts now.
+    fn arrived(
+        path: PathBuf,
+        key: PathBuf,
+        showing: Showing,
+        claim: u64,
+        arrival: Arrival,
+    ) -> Self {
         Self {
             showing,
+            claim,
             render_ahead: Some(render::start(&path)),
             path,
             key,
@@ -282,20 +301,21 @@ pub enum Given {
 enum Claimed {
     /// A new window with this label is to open.
     NewWindow(String),
-    /// `window` shows the document now as `showing`, and is to be retitled and its page told;
+    /// `window` shows the document now, by `claim`, and is to be retitled and its page told;
     /// `left`, what the window was before, is put back if that fails.
     Changed {
         window: String,
-        showing: Showing,
+        claim: u64,
         left: Box<WindowRecord>,
     },
     /// The document is open already in this window, the one the request came from.
     AlreadyHere(String),
     /// The document is open already in `window`, another than the one the request came from.
-    /// Its page is to scroll to `scroll_to` now, if that is Some.
+    /// Its page is to scroll to `scroll_to` now, if that is Some: the showing the window shows the
+    /// document as, and the heading.
     AlreadyElsewhere {
         window: String,
-        scroll_to: Option<String>,
+        scroll_to: Option<(Showing, String)>,
     },
     /// The target window has closed.
     WindowGone,
@@ -400,6 +420,7 @@ impl Documents {
         Self {
             inner: Arc::new(Inner {
                 table: Mutex::default(),
+                titles: Mutex::default(),
                 pages: Box::new(pages),
                 windows: Box::new(windows),
             }),
@@ -464,10 +485,10 @@ impl Documents {
             }
             Claimed::Changed {
                 window,
-                showing,
+                claim,
                 left,
             } => {
-                self.change(&window, path, showing, *left)
+                self.change(&window, claim, *left)
                     .map_err(ShowError::NotTaken)?;
                 self.watch(&window, path, key);
                 Ok(Given::Changed(window))
@@ -477,11 +498,11 @@ impl Documents {
                 Ok(Given::AlreadyHere(window))
             }
             Claimed::AlreadyElsewhere { window, scroll_to } => {
-                if let Some(heading) = scroll_to {
+                if let Some((showing, heading)) = scroll_to {
                     // The window that shows the document is brought to the front all the same,
                     // and the page that asked shows only what went wrong with its own request, so
                     // a scroll that can't be sent there is nobody's to tell.
-                    let _ = self.send(&window, Message::ScrollToHeading(heading));
+                    let _ = self.send(&window, Message::ScrollToHeading { showing, heading });
                 }
                 self.bring_to_front(&window)?;
                 Ok(Given::AlreadyElsewhere(window))
@@ -498,7 +519,8 @@ impl Documents {
     /// The window of an open document is to scroll to the document's heading, if it has one,
     /// unless the request came from that window. A page that hasn't asked for its document yet
     /// may not be listening, so it gets the heading with its first render instead, the way a
-    /// notice is held (ticket 10).
+    /// notice is held (ticket 10). A page that has asked may still be placing the render, so the
+    /// scroll names the showing, which the page waits to have in view.
     fn claim(&self, document: DocumentAt<'_>, key: PathBuf, target: Target<'_>) -> Claimed {
         let mut table = self.lock();
         if let Some(window) = table.window_showing(&key) {
@@ -506,14 +528,16 @@ impl Documents {
             {
                 return Claimed::AlreadyHere(window);
             }
-            let heading = document.heading.map(str::to_owned);
-            let scroll_to = match table.shown_mut(&window, &key) {
-                Some(shown) if !shown.page_asked && heading.is_some() => {
-                    shown.arrival = Arrival::Given { heading };
-                    None
+            let scroll_to = table.shown_mut(&window, &key).and_then(|shown| {
+                let heading = document.heading?.to_owned();
+                if shown.page_asked {
+                    return Some((shown.showing, heading));
                 }
-                _ => heading,
-            };
+                shown.arrival = Arrival::Given {
+                    heading: Some(heading),
+                };
+                None
+            });
             return Claimed::AlreadyElsewhere { window, scroll_to };
         }
         // Made only once a window takes the document, so that an open document or a closed
@@ -521,7 +545,8 @@ impl Documents {
         match target {
             Target::NewWindow | Target::NewWindowFrom(_) => {
                 let window = table.next_label();
-                let shown = ShownDocument::given(document, key, table.next_showing());
+                let (showing, claim) = (table.next_showing(), table.next_claim());
+                let shown = ShownDocument::given(document, key, showing, claim);
                 let record = WindowRecord {
                     shown: Some(shown),
                     history: History::default(),
@@ -530,14 +555,14 @@ impl Documents {
                 Claimed::NewWindow(window)
             }
             Target::Window(window) => {
-                let showing = table.next_showing();
+                let (showing, claim) = (table.next_showing(), table.next_claim());
                 let Some(record) = table.windows.get_mut(window) else {
                     return Claimed::WindowGone;
                 };
-                let left = record.given(ShownDocument::given(document, key, showing));
+                let left = record.given(ShownDocument::given(document, key, showing, claim));
                 Claimed::Changed {
                     window: window.to_owned(),
-                    showing,
+                    claim,
                     left: Box::new(left),
                 }
             }
@@ -556,34 +581,55 @@ impl Documents {
             .inspect_err(|_| self.forget(window))
     }
 
-    /// Titles `window` after `document`, which it was just given as `showing`, and tells its page
-    /// to ask for it. The title goes first, so that a page told can't show the new document under
-    /// the old title. If either fails, the window is `left` again, what it was before, with its
-    /// title, so the table, the title and the page agree again.
-    fn change(
-        &self,
-        window: &str,
-        document: &Path,
-        showing: Showing,
-        left: WindowRecord,
-    ) -> Result<(), WindowError> {
-        let windows = &self.inner.windows;
-        let changed = windows
-            .set_title(window, &title_of(Some(document)))
+    /// Titles `window` after the document it was just given by `claim`, and tells its page to ask
+    /// for it. The title goes first, so that a page told can't show the new document under the
+    /// old title. If either fails, the window is `left` again, what it was before, and titled
+    /// after it, so the table, the title and the page agree again.
+    fn change(&self, window: &str, claim: u64, left: WindowRecord) -> Result<(), WindowError> {
+        let changed = self
+            .retitle(window)
             .and_then(|()| self.send(window, Message::AskForDocument));
         if changed.is_err() {
+            self.put_back(window, claim, left);
             // The error that failed the change is the one the reader is told; a title that can't
             // be put back either stays as wrong as the failure left it.
-            let left_path = left.shown.as_ref().map(|left| left.path.as_path());
-            let _ = windows.set_title(window, &title_of(left_path));
-            self.put_back(window, showing, left);
+            let _ = self.retitle(window);
         }
         changed
     }
 
-    /// Makes `window` `left` again, what it was before it was given a document as `showing`: the
-    /// document it showed and its history. Unless it has been given another since, or closed.
-    fn put_back(&self, window: &str, showing: Showing, left: WindowRecord) {
+    /// Titles `window` after the document it shows now, or `Downlight` while it shows none; a
+    /// closed window gets nothing. Every change of a window's document is followed by this, rather
+    /// than by a title for the document it was given: two shows into one window, as two quick
+    /// Back presses or a link followed during Ctrl+O, are carried out side by side, and a title
+    /// worked out ahead could land after the other show's. Under the titles lock, each titling
+    /// reads the window's document and sets its title before the next one reads, and the last
+    /// titling comes after the last change, so the title the window is left with names the
+    /// document it shows.
+    fn retitle(&self, window: &str) -> Result<(), WindowError> {
+        let _titling = self
+            .inner
+            .titles
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let Some(document) = self
+            .lock()
+            .windows
+            .get(window)
+            .map(|record| record.shown.as_ref().map(|shown| shown.path.clone()))
+        else {
+            return Ok(());
+        };
+        self.inner
+            .windows
+            .set_title(window, &title_of(document.as_deref()))
+    }
+
+    /// Makes `window` `left` again, what it was before `claim` gave it a document: the document it
+    /// showed and its history. Unless another claim has changed it since, or it closed. By the
+    /// claim rather than the showing, since a step gives a window back a showing it had, so a
+    /// later step could have given it the same one.
+    fn put_back(&self, window: &str, claim: u64, left: WindowRecord) {
         // Dropped after the lock, since dropping a watch stops it.
         let _dropped = {
             let mut table = self.lock();
@@ -592,7 +638,7 @@ impl Documents {
                     if record
                         .shown
                         .as_ref()
-                        .is_some_and(|shown| shown.showing == showing) =>
+                        .is_some_and(|shown| shown.claim == claim) =>
                 {
                     std::mem::replace(record, left)
                 }
@@ -985,6 +1031,12 @@ impl WindowTable {
         let showing = Showing(self.showings_issued);
         self.showings_issued += 1;
         showing
+    }
+
+    fn next_claim(&mut self) -> u64 {
+        let claim = self.claims_issued;
+        self.claims_issued += 1;
+        claim
     }
 }
 

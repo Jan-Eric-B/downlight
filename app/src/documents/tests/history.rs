@@ -204,6 +204,31 @@ fn back_that_cannot_change_the_window_keeps_its_document_and_its_history() {
 }
 
 #[test]
+fn back_that_fails_after_forward_and_back_again_keeps_where_they_took_the_window() {
+    // From the review of ticket 12: a step gives the window back the showing it had, so a failed
+    // Back that found its own showing in the window again, after a Forward and a Back on another
+    // thread, took that for its own and put back the document Back had left, with its history.
+    let (documents, recorder) = documents();
+    let (label, _, _) = window_that_moved_on(&documents);
+    let (other, window) = (shared(&documents), label.clone());
+    recorder.before_next_title(move || {
+        meanwhile(other, move |documents| {
+            step(documents, &window, Step::Forward);
+            step(documents, &window, Step::Back);
+        });
+        Err(WindowError::new("the window can't be titled"))
+    });
+    assert!(documents.step(&label, Step::Back).is_err());
+    recorder.wait_until(HELD_UP_END_WAIT, |sent| sent.len() == 3);
+    assert_eq!(documents.document_path(&label), Some(manifest()));
+    assert_eq!(
+        step(&documents, &label, Step::Forward),
+        Some(Given::Changed(label.clone()))
+    );
+    assert_eq!(documents.document_path(&label), Some(app_file("build.rs")));
+}
+
+#[test]
 fn a_link_from_the_document_a_step_left_does_nothing() {
     // Ticket 26's rule holds for a step too: only the showing in view has links.
     let (documents, _) = documents();

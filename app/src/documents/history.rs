@@ -171,6 +171,8 @@ impl Documents {
             };
             return Ok(Some((claimed, to)));
         }
+        // Before the record is borrowed, since it is issued by the table.
+        let claim = table.next_claim();
         // Looked up again, since finding the window that shows the document reads the table.
         let record = table
             .windows
@@ -180,12 +182,13 @@ impl Documents {
             to.path.clone(),
             to.key.clone(),
             to.showing,
+            claim,
             Arrival::Stepped,
         );
         let left = record.stepped(step, arrived);
         let claimed = Claimed::Changed {
             window: window.to_owned(),
-            showing: to.showing,
+            claim,
             left: Box::new(left),
         };
         Ok(Some((claimed, to)))

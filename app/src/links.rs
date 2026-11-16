@@ -390,14 +390,17 @@ mod tests {
         let Given::NewWindow(other) = other else {
             panic!("expected a new window, got {other:?}");
         };
-        documents.page_asks(&other);
+        let other_showing = documents.page_asks(&other);
         let followed = follow(&documents, &window, showing, "readme.md#install", false);
         assert_eq!(followed.ok(), Some(Followed::Nothing));
         assert_eq!(
             recorder.sent(),
             [(
                 other.clone(),
-                Message::ScrollToHeading("install".to_owned())
+                Message::ScrollToHeading {
+                    showing: other_showing.unwrap(),
+                    heading: "install".to_owned()
+                }
             )]
         );
         assert_eq!(

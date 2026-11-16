@@ -44,6 +44,10 @@ _Avoid_: Toast, alert, popup
 The block at the top of the view, kept as the line number it starts on. Reload, and Back and Forward, return to it, and Find's first current match is the first one from it on.
 _Avoid_: Scroll position, anchor
 
+**Showing**:
+One time a window was given a document. Given the same document again after another, the window has a new showing; Back and Forward give it back the showing it had, so it returns to where it was. The page names the showing its view shows when it asks for its document or follows a link, and the app names the showing a message about the document is for, so that one about a document the window has left changes nothing.
+_Avoid_: Visit, session, generation
+
 **Rendered document**:
 A document's file turned into the sanitized HTML the page shows. Only the core makes one.
 _Avoid_: Output, HTML string

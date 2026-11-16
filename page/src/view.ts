@@ -3,6 +3,7 @@ import {
   listenToApp,
   type DocumentFile,
   type DocumentToShow,
+  type Messages,
   type Notice,
   type Step,
   type Steps,
@@ -191,15 +192,6 @@ interface ReaderState {
   ticks: Ticks;
 }
 
-/** The ticks a request's content takes, given the reader's state from before the swap. */
-type TicksTaken = (before: ReaderState) => Ticks;
-
-/** A reload keeps the ticks, which `restoreTicks` drops if the number of task items changed. */
-const ticksFromBefore: TicksTaken = ({ ticks }) => ticks;
-
-/** A show, the empty state and an error take no ticks. */
-const noTicks: TicksTaken = () => NO_TICKS;
-
 /**
  * Puts the view where a request lands once its content is in place, given the reader's state
  * from before the swap. Returns false if a later request overtook it on the way.
@@ -262,7 +254,12 @@ interface Placement {
   file: DocumentFile | null;
   /** The core's rendered HTML, why the document can't be shown, or null for the empty state. */
   content: { html: string } | { why: Notice } | null;
-  ticks: TicksTaken;
+  /**
+   * The ticks the content takes: the view's own from just before the swap for a reload ("keep"),
+   * those it had when it left the showing for a return, and none for a show, the empty state or
+   * an error. `restoreTicks` drops them if the number of task items changed since.
+   */
+  ticks: Ticks | "keep";
   land: Landing;
   /**
    * Whether the app has a document to go back or forward to, or null when the app couldn't be
@@ -294,7 +291,7 @@ function placeError(
     showing: null,
     file,
     content: { why },
-    ticks: noTicks,
+    ticks: NO_TICKS,
     land: atTop,
     steps,
   };
@@ -315,7 +312,7 @@ function placementFor(
       showing: null,
       file: null,
       content: null,
-      ticks: noTicks,
+      ticks: NO_TICKS,
       land: atTop,
       steps: NO_STEPS,
     };
@@ -328,7 +325,7 @@ function placementFor(
         showing,
         file,
         content: { html: answer.document },
-        ticks: ticksFromBefore,
+        ticks: "keep",
         land: atReadingPosition,
         steps,
       };
@@ -342,7 +339,7 @@ function placementFor(
         content: { html: answer.document },
         // As a reload does, the ticks are dropped if the file's number of task items changed
         // since the view left it, so a tick never lands on the wrong item.
-        ticks: () => history.ticksOf(showing),
+        ticks: history.ticksOf(showing),
         land: atReturn(history, showing),
         steps,
       };
@@ -354,7 +351,7 @@ function placementFor(
         showing,
         file,
         content: { html: answer.document },
-        ticks: noTicks,
+        ticks: NO_TICKS,
         land: atHeading(answer.heading),
         steps,
       };
@@ -436,7 +433,8 @@ function keepTheKeysOn(scroller: HTMLElement): void {
  * app's answer says whether to show it, at its heading or top, reload it at the same reading
  * position (ticket 23), or return to where the view was in it after Back or Forward (ticket 12);
  * the page never decides that by which message made it ask. When the app says the file of the
- * showing in view is gone, it says so over the last render (ticket 26). `scriptStart` is when the
+ * showing in view is gone, it says so over the last render (ticket 26), and when a link in another
+ * window names a heading in it, it scrolls there once that showing is in view. `scriptStart` is when the
  * page's script started, for the first paint report.
  */
 export async function startDocumentView(scriptStart: number): Promise<void> {
@@ -471,6 +469,17 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
   const showGoneBar = () => {
     goneBar.hidden = showing === null || showing !== goneShowing;
   };
+  /** Whether a request is on its way, from its start until the latest one ends. */
+  let requesting = false;
+  /**
+   * A heading another window's link named in a showing the view doesn't show, which came while a
+   * request was on its way, or null. The app sends it once the page has asked for that showing,
+   * whose render may still be on its way, so it waits for the latest request to end, and scrolls
+   * then if the view shows that showing, as a `document-gone` waits for its showing (ticket 26).
+   * One that comes while no request is on its way names a showing the view has left, and is
+   * dropped.
+   */
+  let headingAwaited: Messages["scroll-to-heading"] | null = null;
   /**
    * Why the view's content changed since the `whenDocumentShown` listeners last ran, or
    * undefined if it didn't.
@@ -530,7 +539,10 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
     else view.replaceChildren(content);
     // Before the landing and the listeners, so neither sees the file's ticks in place of the
     // reader's.
-    restoreTicks(view, placement.ticks(before));
+    restoreTicks(
+      view,
+      placement.ticks === "keep" ? before.ticks : placement.ticks,
+    );
     // Listeners that haven't heard of a show or a return yet hear it, even if a reload came after
     // it.
     if (unannounced === undefined || placement.reason !== "reload")
@@ -635,11 +647,18 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
     // The file is read for this request, so only a "gone" after this keeps the bar. A reload that
     // can't read the file leaves the bar as it is.
     goneShowing = null;
+    requesting = true;
     const thisRequest = ++latestRequest;
     const isLatest = () => thisRequest === latestRequest;
     const outcome = await ask();
     if (isLatest()) await place(outcome, isLatest);
-    if (isLatest()) settle();
+    if (!isLatest()) return;
+    requesting = false;
+    settle();
+    const awaited = headingAwaited;
+    headingAwaited = null;
+    if (awaited !== null && awaited.showing === showing)
+      await visitHeadingInView(awaited.heading);
   };
   theView = {
     request,
@@ -653,8 +672,9 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
   listenToApp("ask-for-document", () => {
     void request();
   });
-  listenToApp("scroll-to-heading", (heading) => {
-    void visitHeadingInView(heading);
+  listenToApp("scroll-to-heading", (scroll) => {
+    if (scroll.showing === showing) void visitHeadingInView(scroll.heading);
+    else if (requesting) headingAwaited = scroll;
   });
   listenToApp("document-gone", (gone) => {
     goneShowing = gone;

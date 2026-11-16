@@ -19,6 +19,7 @@ import {
   settle,
   forgetForwardAsTheApp,
   stepAsTheApp,
+  scrollAsTheApp,
   tell,
   type Read,
 } from "./test-support";
@@ -258,7 +259,7 @@ test("a heading another window's link scrolled to is a step Back returns from", 
   await startDocumentView(0);
   await landed();
   layOut(8.5);
-  await tell("scroll-to-heading", "options");
+  await scrollAsTheApp("options");
   await landed();
   layOut(15.5);
   const scrolledTo = spyOnScrolls();
@@ -274,7 +275,7 @@ test("a link to a heading the document doesn't have is no step", async () => {
   showInTurn(readme);
   await startDocumentView(0);
   await landed();
-  await tell("scroll-to-heading", "nowhere");
+  await scrollAsTheApp("nowhere");
   await landed();
 
   expect(await offered()).toEqual({ back: false, forward: false });
@@ -284,7 +285,7 @@ test("Back past the first heading visited goes to the document before", async ()
   await readmeLeftAt(15.5);
   documents = [() => Promise.resolve(readme)];
   layOut(1.5);
-  await tell("scroll-to-heading", "field-notes");
+  await scrollAsTheApp("field-notes");
   await landed();
   back();
   await landed();

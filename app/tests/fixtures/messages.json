@@ -49,6 +49,9 @@
   },
   "scrollToHeading": {
     "event": "scroll-to-heading",
-    "payload": "install"
+    "payload": {
+      "heading": "install",
+      "showing": 7
+    }
   }
 }

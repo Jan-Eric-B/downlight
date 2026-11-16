@@ -288,8 +288,11 @@ export type Messages = {
   "ask-for-document": null;
   /** The file of the document the window shows as this showing was deleted or moved. */
   "document-gone": number;
-  /** The heading a link in another window named, to scroll to. */
-  "scroll-to-heading": string;
+  /**
+   * The heading a link in another window named in the document the window shows as this showing,
+   * to scroll to once the view shows that showing.
+   */
+  "scroll-to-heading": { showing: number; heading: string };
   /** A notice to show the reader. */
   notice: Notice;
   /** The id of the command the reader chose in the right-click menu. */

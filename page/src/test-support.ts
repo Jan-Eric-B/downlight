@@ -315,6 +315,17 @@ export async function deleteTheFile(
 }
 
 /**
+ * Tells the page to scroll the document the window shows as `showing` to `heading`, as the app
+ * does for a link in another window; by default the showing the window is at now.
+ */
+export async function scrollAsTheApp(
+  heading: string,
+  showing: number = currentShowing,
+): Promise<void> {
+  await tell("scroll-to-heading", { showing, heading });
+}
+
+/**
  * The file of every document `answerAsTheApp` hands over; the title bar's tests answer with
  * files of their own.
  */

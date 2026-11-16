@@ -444,17 +444,23 @@ fn ctrl_click_on_a_heading_in_the_document_its_own_window_shows_sends_that_windo
 fn ctrl_click_on_a_heading_in_a_document_open_in_another_window_scrolls_that_window() {
     let (documents, pages) = documents();
     let first = open_new(&documents, &manifest());
-    let _ = documents.handover(&first, None);
+    let showing = handover(&documents, &first, None).showing;
     let second = open_new(&documents, &app_file("build.rs"));
     give(
         &documents,
         at(&manifest(), "install"),
         Target::NewWindowFrom(&second),
     );
-    assert_eq!(
-        pages.sent(),
-        [to(&first, Message::ScrollToHeading("install".to_owned()))]
-    );
+    assert_eq!(pages.sent(), [to(&first, scroll_to_install_in(showing))]);
+}
+
+/// The message that scrolls a page whose view shows `showing` to `install`. It names the showing,
+/// since the page may still be placing the document when it comes (from the review of ticket 12).
+fn scroll_to_install_in(showing: Showing) -> Message {
+    Message::ScrollToHeading {
+        showing,
+        heading: "install".to_owned(),
+    }
 }
 
 #[test]
@@ -492,7 +498,7 @@ fn link_to_a_document_open_in_another_window_scrolls_it_only_with_a_heading() {
     // Without a heading, that window keeps its reading position (ticket 11's decisions).
     let (documents, pages) = documents();
     let first = open_new(&documents, &manifest());
-    let _ = documents.handover(&first, None);
+    let showing = handover(&documents, &first, None).showing;
     let second = open_new(&documents, &app_file("build.rs"));
     let at_install = DocumentAt {
         path: &manifest(),
@@ -504,10 +510,7 @@ fn link_to_a_document_open_in_another_window_scrolls_it_only_with_a_heading() {
         DocumentAt::new(&manifest()),
         Target::Window(&second),
     );
-    assert_eq!(
-        pages.sent(),
-        [to(&first, Message::ScrollToHeading("install".to_owned()))]
-    );
+    assert_eq!(pages.sent(), [to(&first, scroll_to_install_in(showing))]);
 }
 
 #[test]
@@ -529,6 +532,75 @@ fn heading_for_an_open_window_whose_page_has_not_asked_is_held_for_its_first_ren
     assert_eq!(
         heading_of(&documents, &first),
         Some(Some("install".to_owned()))
+    );
+}
+
+/// `main.rs`, the document a second show gives a window while a first one is carried out.
+fn main_rs() -> PathBuf {
+    app_file("src").join("main.rs")
+}
+
+/// While the next title is set, `window` is given `main.rs` on another thread, as a link followed
+/// during Ctrl+O or a second quick Alt+Left gives it; the title then fails if `title_fails`.
+fn give_main_rs_while_titling(
+    documents: &Documents,
+    recorder: &Recorder,
+    window: &str,
+    title_fails: bool,
+) {
+    let (other, window) = (shared(documents), window.to_owned());
+    recorder.before_next_title(move || {
+        meanwhile(other, move |documents| {
+            let _ = documents.give(DocumentAt::new(&main_rs()), Target::Window(&window));
+        });
+        if title_fails {
+            Err(WindowError::new("the window can't be titled"))
+        } else {
+            Ok(())
+        }
+    });
+}
+
+#[test]
+fn of_two_documents_given_one_window_at_once_the_title_names_the_one_it_shows() {
+    // From the review of ticket 28: each show titled the window after its own document, outside
+    // the table's lock, so the first show's title could land after the second's. The second show
+    // runs while the first sets its title; it ends then if nothing holds it up, and the first
+    // title lands last. Titling the window after the document it shows, one titling at a time,
+    // makes the last title the right one in any order.
+    let (documents, recorder) = documents();
+    let label = open_new(&documents, &manifest());
+    give_main_rs_while_titling(&documents, &recorder, &label, false);
+    give(
+        &documents,
+        DocumentAt::new(&app_file("build.rs")),
+        Target::Window(&label),
+    );
+    recorder.wait_until(HELD_UP_END_WAIT, |sent| sent.len() == 2);
+    assert_eq!(documents.document_path(&label), Some(main_rs()));
+    assert_eq!(
+        recorder.done().last(),
+        Some(&to(&label, titled("main.rs - src - Downlight")))
+    );
+}
+
+#[test]
+fn a_change_that_fails_after_the_window_was_given_another_document_keeps_that_one_s_title() {
+    // From the review of ticket 28: the failed change put back the title of the document it left,
+    // though the window had been given another since and kept that one.
+    let (documents, recorder) = documents();
+    let label = open_new(&documents, &manifest());
+    give_main_rs_while_titling(&documents, &recorder, &label, true);
+    let given = documents.give(
+        DocumentAt::new(&app_file("build.rs")),
+        Target::Window(&label),
+    );
+    assert!(matches!(given, Err(ShowError::NotTaken(_))), "{given:?}");
+    recorder.wait_until(HELD_UP_END_WAIT, |sent| sent.len() == 1);
+    assert_eq!(documents.document_path(&label), Some(main_rs()));
+    assert_eq!(
+        recorder.done().last(),
+        Some(&to(&label, titled("main.rs - src - Downlight")))
     );
 }
 

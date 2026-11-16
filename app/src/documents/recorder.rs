@@ -40,9 +40,24 @@ pub struct Recorder {
     failing_pages: Arc<Mutex<Vec<String>>>,
     /// Windows that can't be opened, titled or brought to the front.
     failing_windows: Arc<Mutex<Vec<String>>>,
+    /// What runs the next time a window is titled, before the title is set.
+    before_next_title: Arc<Mutex<Option<BeforeTitle>>>,
 }
 
+/// What another thread does while a window is being titled, for [`Recorder::before_next_title`].
+type BeforeTitle = Box<dyn FnOnce() -> Result<(), WindowError> + Send>;
+
 impl Recorder {
+    /// The next time any window is titled, `meanwhile` runs first, as what another thread does
+    /// while the title is being set, and the title fails, and isn't kept, if `meanwhile` fails.
+    /// So a test puts a second show into the middle of a first one at a moment of its choosing.
+    pub fn before_next_title(
+        &self,
+        meanwhile: impl FnOnce() -> Result<(), WindowError> + Send + 'static,
+    ) {
+        *lock(&self.before_next_title) = Some(Box::new(meanwhile));
+    }
+
     /// From now on, every message to `window`'s page fails to send, and isn't kept.
     pub fn fail_sends_to(&self, window: &str) {
         lock(&self.failing_pages).push(window.to_owned());
@@ -101,6 +116,11 @@ impl Windows for Recorder {
     }
 
     fn set_title(&self, window: &str, title: &str) -> Result<(), WindowError> {
+        // Taken out of its lock before it runs, since what it does may title a window too.
+        let meanwhile = lock(&self.before_next_title).take();
+        if let Some(meanwhile) = meanwhile {
+            meanwhile()?;
+        }
         self.do_to(window, ToWindow::Titled(title.to_owned()))
     }
 

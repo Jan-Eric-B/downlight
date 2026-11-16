@@ -16,6 +16,7 @@ import {
   nextInTurn,
   nextShown,
   saveTheFile,
+  scrollAsTheApp,
   settle,
   spyOnHeadingScrolls,
   spyOnScrollsToTop,
@@ -640,11 +641,53 @@ test("scroll-to-heading from the app scrolls an open document to that heading", 
   await settle();
   const scrolledTo = spyOnHeadingScrolls();
 
-  await tell("scroll-to-heading", "before-a-release");
+  await scrollAsTheApp("before-a-release");
   await vi.waitFor(() => {
     expect(scrolledTo()).toContain("before-a-release");
   });
   expect(heading()).toBe("Lamplighter");
+});
+
+test("scroll-to-heading for the document the window was just given, arriving before it is in view, scrolls it once it is", async () => {
+  // From the review of ticket 12: the app sends it once the page has asked for that document, and
+  // a large render can still be on its way then, so it was looked up in the old document.
+  let sendShown: (html: string) => void = () => {};
+  documents = [
+    () => Promise.resolve(notes),
+    () =>
+      new Promise((resolve) => {
+        sendShown = resolve;
+      }),
+  ];
+  await startDocumentView(0);
+  await settle();
+  const scrolledTo = spyOnHeadingScrolls();
+
+  const shown = nextShown();
+  await giveAnotherDocument();
+  await scrollAsTheApp("options");
+  expect(scrolledTo()).toEqual([]);
+  sendShown(readme);
+  await shown;
+  await vi.waitFor(() => {
+    expect(scrolledTo()).toContain("options");
+  });
+  expect(heading()).toBe("Lamplighter");
+});
+
+test("scroll-to-heading for the document the window left, arriving once another is in view, scrolls nothing", async () => {
+  // From the review of ticket 12: it was looked up in the document in view instead.
+  documents = [() => Promise.resolve(notes), () => Promise.resolve(readme)];
+  await startDocumentView(0);
+  await settle();
+  const shown = nextShown();
+  const left = await giveAnotherDocument();
+  await shown;
+  const scrolledTo = spyOnHeadingScrolls();
+
+  await scrollAsTheApp("options", left);
+  await settle();
+  expect(scrolledTo()).toEqual([]);
 });
 
 /** A document with a heading in a closed section and one in that section's summary. */
@@ -662,7 +705,7 @@ test("scroll-to-heading into a closed section opens it", async () => {
   const section = document.querySelector("details");
   expect(section?.open).toBe(false);
 
-  await tell("scroll-to-heading", "hidden-step");
+  await scrollAsTheApp("hidden-step");
   await vi.waitFor(() => {
     expect(scrolledTo()).toContain("hidden-step");
   });
@@ -684,7 +727,7 @@ test("scroll-to-heading into a closed section's summary leaves it closed", async
   await settle();
   const scrolledTo = spyOnHeadingScrolls();
 
-  await tell("scroll-to-heading", "more");
+  await scrollAsTheApp("more");
   await vi.waitFor(() => {
     expect(scrolledTo()).toContain("more");
   });
