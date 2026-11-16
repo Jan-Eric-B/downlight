@@ -46,11 +46,12 @@ export type Notice =
 /**
  * The app's answer when the page asks for its document (`DocumentToShow` in
  * `app/src/documents.rs`), or null while the window shows no document: the showing the window is
- * at, for the next request, the document's file, what to do with the render, and the rendered
- * document as its HTML or why it can't be read.
+ * at, for the next request, the document's file, what to do with the render, the rendered
+ * document as its HTML or why it can't be read, and a notice the app held until the page first
+ * asked, or null.
  */
 export type DocumentToShow =
-  | ({ showing: number; file: DocumentFile } & Place &
+  | ({ showing: number; file: DocumentFile; notice: Notice | null } & Place &
       ({ document: string } | { error: Notice }))
   | null;
 
@@ -145,11 +146,13 @@ export type Commands = {
     args: { showing: number | null };
     answer: DocumentToShow;
   };
-  /** Until ticket 26 removes it. */
-  reload_document: { args: undefined; answer: null };
   follow_link: {
-    /** The link target as the document wrote it; Ctrl+click opens a new window. */
-    args: { target: string; newWindow: boolean };
+    /**
+     * The showing whose document the link is in, the link target as the document wrote it, and
+     * whether to open a new window (Ctrl+click). A link from a showing the window has left does
+     * nothing.
+     */
+    args: { showing: number; target: string; newWindow: boolean };
     answer: Followed;
   };
   open_document: { args: undefined; answer: null };
@@ -203,10 +206,13 @@ export function askApp<C extends Command>(
  * it goes as, with its payload.
  */
 export type Messages = {
-  /** The window shows another document now; the page asks for it. */
-  "document-shown": null;
-  /** The document's file changed: its new render is ready to ask for, or the file is gone. */
-  "document-changed": "reload" | "gone";
+  /**
+   * The window shows another document now, or the document's file changed: the page asks for it,
+   * and the answer says whether to show it or reload it.
+   */
+  "ask-for-document": null;
+  /** The file of the document the window shows as this showing was deleted or moved. */
+  "document-gone": number;
   /** The heading a link in another window named, to scroll to. */
   "scroll-to-heading": string;
   /** A notice to show the reader. */

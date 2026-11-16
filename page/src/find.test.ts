@@ -12,7 +12,7 @@ import {
   nextInTurn,
   nextShown,
   settle,
-  tell,
+  saveTheFile,
   TITLE_BAR_HEIGHT,
 } from "./test-support";
 import { afterNextFrame } from "./reading-position";
@@ -437,7 +437,7 @@ test("a reload while the bar is open is counted again", async () => {
   expect(status()).toBe("No results");
 
   const shown = nextShown();
-  await tell("document-changed", "reload");
+  await saveTheFile();
   await shown;
   expect(status()).toBe("1 of 2");
 });
@@ -452,10 +452,10 @@ test("a reload overtaken by a reload that can't read the file is counted again",
   vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(() => {
     if (overtaken) return;
     overtaken = true;
-    void tell("document-changed", "reload");
+    void saveTheFile();
   });
 
-  await tell("document-changed", "reload");
+  await saveTheFile();
   await vi.waitFor(() => {
     expect(status()).toBe("1 of 2");
   });

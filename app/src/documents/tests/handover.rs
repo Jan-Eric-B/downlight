@@ -153,10 +153,39 @@ fn stale_reload_after_another_document_is_answered_with_a_show_at_its_heading() 
     assert_eq!(
         pages.sent(),
         [
-            to(&label, Message::Reload),
-            to(&label, Message::DocumentShown)
+            to(&label, Message::AskForDocument),
+            to(&label, Message::AskForDocument)
         ]
     );
+}
+
+#[test]
+fn request_by_hand_reads_the_file_again_as_a_reload_and_tells_the_page_nothing() {
+    // F5, Ctrl+R and the menu's Reload ask with the showing the view shows (ticket 26), rather
+    // than going through the app and back.
+    let path = document("by-hand", "# First");
+    let (documents, pages) = documents();
+    let label = open_new(&documents, &path);
+    let page_shows = handover(&documents, &label, None).showing;
+    std::fs::write(&path, "# Second").unwrap();
+    let reloaded = handover(&documents, &label, Some(page_shows));
+    let shown = html_of(reloaded.render);
+    std::fs::remove_file(&path).unwrap();
+    assert_eq!(reloaded.place, Place::Reload);
+    assert!(shown.contains("Second"), "{shown}");
+    assert_eq!(pages.sent(), []);
+}
+
+#[test]
+fn render_is_timed_as_the_place_the_page_gets() {
+    // A reload by hand reads the file anew on the page's request, which isn't a render started
+    // for a reload, and is still timed as one (ticket 26).
+    let (documents, _) = documents();
+    let label = open_new(&documents, &manifest());
+    let shown = handover(&documents, &label, None);
+    let reloaded = handover(&documents, &label, Some(shown.showing));
+    assert_eq!(shown.place.reported_as(), "read-and-render");
+    assert_eq!(reloaded.place.reported_as(), "reload");
 }
 
 #[test]

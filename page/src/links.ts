@@ -1,6 +1,6 @@
 import { askApp } from "./app";
 import { showingWhy } from "./notice";
-import { DOCUMENT_VIEW_SELECTOR, scrollToHeading } from "./view";
+import { DOCUMENT_VIEW_SELECTOR, scrollToHeading, showingInView } from "./view";
 
 /** The document's link under `target`, the element an event happened on, if there is one. */
 function linkAt(target: EventTarget | null): HTMLAnchorElement | null {
@@ -10,13 +10,21 @@ function linkAt(target: EventTarget | null): HTMLAnchorElement | null {
 
 /**
  * Follows a link through the app, which resolves it with the core's link resolution (ticket 11),
- * and does what is left for the page. The target goes as the document wrote it.
+ * and does what is left for the page. The target goes as the document wrote it, with the showing
+ * whose document it is in, so the app does nothing for a link in a document the window has left
+ * while the next one renders (ticket 26).
  */
 function follow(target: string, newWindow: boolean): void {
+  // Links are only in a rendered document, which the view always shows with its showing.
+  const showing = showingInView();
+  if (showing === null) return;
   showingWhy(
-    askApp("follow_link", { target, newWindow }).then(async (followed) => {
-      if (followed.kind === "scrollTo") await scrollToHeading(followed.heading);
-    }),
+    askApp("follow_link", { showing, target, newWindow }).then(
+      async (followed) => {
+        if (followed.kind === "scrollTo")
+          await scrollToHeading(followed.heading);
+      },
+    ),
   );
 }
 

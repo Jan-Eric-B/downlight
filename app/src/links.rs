@@ -8,27 +8,30 @@ use std::{fmt, io};
 use downlight_core::{LinkAction, LinkError, PathKind, resolve_link};
 use tauri::{AppHandle, Manager as _, WebviewWindow};
 
-use crate::documents::{DocumentAt, Documents, Target};
+use crate::documents::{DocumentAt, Documents, Showing, Target};
 use crate::notice::{NamedFile, Notice};
 use crate::platform;
 use crate::window::{self, Shown};
 
-/// Follows the link `target`, as written in the calling window's document, and tells the page
-/// what is left for it to do. With `new_window` (Ctrl+click), a Markdown document opens in a new
-/// window instead of this one.
+/// Follows the link `target`, as written in the calling window's document as `showing`, and tells
+/// the page what is left for it to do. With `new_window` (Ctrl+click), a Markdown document opens
+/// in a new window instead of this one. A link in a document the window has left since does
+/// nothing (ticket 26): the old document stays in view while the next one renders, and its link
+/// would otherwise resolve against the new document's folder.
 ///
-/// The page passes only the target: the document comes from the app's own state. Resolving looks
-/// at the file system, and a network share connects only now, on a blocking thread, so the window
-/// keeps answering.
+/// The page passes only the showing and the target: the document comes from the app's own state.
+/// Resolving looks at the file system, and a network share connects only now, on a blocking
+/// thread, so the window keeps answering.
 #[tauri::command]
 pub async fn follow_link(
     window: WebviewWindow,
+    showing: Showing,
     target: String,
     new_window: bool,
 ) -> Result<Followed, FollowError> {
     let app = window.app_handle().clone();
     let label = window.label().to_owned();
-    tauri::async_runtime::spawn_blocking(move || follow(&app, &label, &target, new_window))
+    tauri::async_runtime::spawn_blocking(move || follow(&app, &label, showing, &target, new_window))
         .await
         .map_err(|source| FollowError::Stopped { source })?
 }
@@ -39,8 +42,9 @@ pub async fn follow_link(
 pub enum Followed {
     /// Scroll the shown document to the heading with this id, or to its top without one.
     ScrollTo { heading: Option<String> },
-    /// Nothing is left for the page: the link showed a document, which its window's page renders
-    /// when told (`document-shown`), opened something else, or does nothing.
+    /// Nothing is left for the page: the link showed a document, which its window's page asks for
+    /// when told (`ask-for-document`), opened something else, came from a document the window has
+    /// left, or does nothing.
     Nothing,
 }
 
@@ -67,11 +71,16 @@ pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
 fn follow(
     app: &AppHandle,
     label: &str,
+    showing: Showing,
     target: &str,
     new_window: bool,
 ) -> Result<Followed, FollowError> {
-    // A window that shows no document has no links.
-    let Some(document) = app.state::<Documents>().document_path(label) else {
+    // A window that shows no document has no links, and one that has left the link's has none
+    // of that document's.
+    let Some(document) = app
+        .state::<Documents>()
+        .document_path_shown_as(label, showing)
+    else {
         return Ok(Followed::Nothing);
     };
     match resolve_link(&document, target, path_kind)? {

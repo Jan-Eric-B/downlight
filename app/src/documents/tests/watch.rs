@@ -1,36 +1,10 @@
 //! Watching a window's document: a change to its file reloads it or tells the page it is gone,
 //! a watch or change for a document the window has left is dropped, and a notice waits until the
-//! page first asks. The reload by hand sits here beside the watch's own.
+//! page first asks.
 
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 
 use super::*;
-
-#[test]
-fn reload_by_hand_tells_the_page_and_reads_the_file_again() {
-    let path = document("reload", "# First");
-    let (documents, pages) = documents();
-    let label = open_new(&documents, &path);
-    rendered_html(&documents, &label);
-    std::fs::write(&path, "# Second").unwrap();
-    documents.reload(&label).unwrap();
-    wait_for_render_ahead(&documents, &label);
-    // Written after the reload's read, so only a read on the page's request would see it.
-    std::fs::write(&path, "# Third").unwrap();
-    let shown = rendered_html(&documents, &label);
-    std::fs::remove_file(&path).unwrap();
-    assert!(shown.contains("Second"), "{shown}");
-    assert_eq!(pages.sent(), [to(&label, Message::Reload)]);
-}
-
-#[test]
-fn window_without_a_document_has_nothing_to_reload() {
-    let (documents, pages) = documents();
-    let label = documents.open_empty();
-    documents.reload(&label).unwrap();
-    documents.reload("document-99").unwrap();
-    assert_eq!(pages.sent(), []);
-}
 
 #[test]
 fn reload_for_the_shown_document_tells_the_page_and_reads_the_file_again() {
@@ -47,7 +21,7 @@ fn reload_for_the_shown_document_tells_the_page_and_reads_the_file_again() {
     let shown = rendered_html(&documents, &label);
     std::fs::remove_file(&path).unwrap();
     assert!(shown.contains("Second"), "{shown}");
-    assert_eq!(pages.sent(), [to(&label, Message::Reload)]);
+    assert_eq!(pages.sent(), [to(&label, Message::AskForDocument)]);
 }
 
 #[test]
@@ -56,16 +30,40 @@ fn file_of_the_shown_document_back_again_reloads_it() {
     let label = open_new(&documents, &manifest());
     let mut on_change = watch_callback(&documents, &label, &manifest());
     on_change(Change::Back);
-    assert_eq!(pages.sent(), [to(&label, Message::Reload)]);
+    assert_eq!(pages.sent(), [to(&label, Message::AskForDocument)]);
 }
 
 #[test]
-fn file_of_the_shown_document_gone_tells_the_page() {
+fn file_of_the_shown_document_gone_tells_the_page_with_its_showing() {
     let (documents, pages) = documents();
     let label = open_new(&documents, &manifest());
+    let showing = handover(&documents, &label, None).showing;
     let mut on_change = watch_callback(&documents, &label, &manifest());
     on_change(Change::Gone);
-    assert_eq!(pages.sent(), [to(&label, Message::Gone)]);
+    assert_eq!(pages.sent(), [to(&label, Message::Gone(showing))]);
+}
+
+#[test]
+fn gone_names_the_showing_of_the_document_the_window_was_given_since() {
+    // Ticket 26: the page shows the bar only for the showing its view shows, so a `gone` for the
+    // new document, which reaches the page while its view still shows the old one, is told apart
+    // from a stale one by its showing.
+    let (documents, pages) = documents();
+    let label = open_new(&documents, &manifest());
+    let page_shows = handover(&documents, &label, None).showing;
+    let other = app_file("build.rs");
+    give(&documents, DocumentAt::new(&other), Target::Window(&label));
+    let mut on_other_change = watch_callback(&documents, &label, &other);
+    on_other_change(Change::Gone);
+    let given = handover(&documents, &label, Some(page_shows)).showing;
+    assert_ne!(given, page_shows);
+    assert_eq!(
+        pages.sent(),
+        [
+            to(&label, Message::AskForDocument),
+            to(&label, Message::Gone(given))
+        ]
+    );
 }
 
 #[test]
@@ -87,7 +85,7 @@ fn reload_overtaken_by_another_document_sends_nothing() {
     std::fs::remove_file(&first).unwrap();
     std::fs::remove_file(&second).unwrap();
     assert!(shown.contains("Second document"), "{shown}");
-    assert_eq!(pages.sent(), [to(&label, Message::DocumentShown)]);
+    assert_eq!(pages.sent(), [to(&label, Message::AskForDocument)]);
 }
 
 /// A watch on `path` whose callback holds the sender of the returned receiver. A dropped watch
@@ -137,7 +135,7 @@ fn change_to_a_document_the_window_has_left_is_ignored() {
     for change in [Change::Changed, Change::Gone, Change::Back] {
         on_change(change);
     }
-    assert_eq!(pages.sent(), [to(&label, Message::DocumentShown)]);
+    assert_eq!(pages.sent(), [to(&label, Message::AskForDocument)]);
 }
 
 #[test]
@@ -185,7 +183,7 @@ fn document_given_and_then_saved_reloads_with_the_saved_text() {
     let sent = save_until_reported(&pages, &label, &path);
     let shown = rendered_html(&documents, &label);
     std::fs::remove_file(&path).unwrap();
-    assert_eq!(sent.first(), Some(&to(&label, Message::Reload)));
+    assert_eq!(sent.first(), Some(&to(&label, Message::AskForDocument)));
     assert!(shown.contains("Saved"), "{shown}");
 }
 
@@ -194,9 +192,10 @@ fn document_given_and_then_deleted_tells_the_page_it_is_gone() {
     let path = document("deleted", "# First");
     let (documents, pages) = documents();
     let label = open_new(&documents, &path);
+    let showing = handover(&documents, &label, None).showing;
     save_until_reported(&pages, &label, &path);
     std::fs::remove_file(&path).unwrap();
-    let gone = to(&label, Message::Gone);
+    let gone = to(&label, Message::Gone(showing));
     let sent = pages.wait_until(REPORT_WAIT, |sent| sent.contains(&gone));
     assert_eq!(sent.last(), Some(&gone));
 }
@@ -236,32 +235,39 @@ fn watch_that_cannot_start_is_noticed_once_the_page_asks() {
     let (documents, pages) = documents();
     let label = open_new(&documents, &unwatchable());
     let before_asking = pages.wait_until(WATCH_START_WAIT, |sent| !sent.is_empty());
-    let _ = documents.handover(&label, None);
-    let sent = pages.wait_until(REPORT_WAIT, |sent| !sent.is_empty());
+    // With the first answer if the watch failed by then, as it does within the wait on any
+    // machine but a stalled one; sent once it fails otherwise.
+    let answered = handover(&documents, &label, None).notice;
+    let notice = answered.or_else(|| {
+        match pages
+            .wait_until(REPORT_WAIT, |sent| !sent.is_empty())
+            .as_slice()
+        {
+            [(window, Message::Notice(notice))] if *window == label => Some(notice.clone()),
+            _ => None,
+        }
+    });
     assert_eq!(before_asking, []);
     assert!(
-        matches!(
-            sent.as_slice(),
-            [(window, Message::Notice(notice))]
-                if *window == label && notice.to_string().starts_with("Can't watch")
-        ),
-        "{sent:?}"
+        notice
+            .as_ref()
+            .is_some_and(|notice| notice.to_string().starts_with("Can't watch")),
+        "{notice:?}"
     );
 }
 
 #[test]
-fn notice_held_before_the_page_asks_is_sent_when_it_first_asks() {
+fn notice_held_before_the_page_asks_comes_with_its_first_answer() {
+    // In the answer rather than as a message: the page's listener for notices may not be
+    // registered yet when it first asks, and a message with no listener is dropped (ticket 26).
     let (documents, pages) = documents();
     let label = open_new(&documents, &manifest());
     documents.notice(&label, &document_key(&manifest()), "Can't watch".into());
-    let before_asking = pages.sent();
-    let _ = documents.handover(&label, None);
-    let _ = documents.handover(&label, None);
-    assert_eq!(before_asking, []);
-    assert_eq!(
-        pages.sent(),
-        [to(&label, Message::Notice("Can't watch".into()))]
-    );
+    let first = handover(&documents, &label, None);
+    let next = handover(&documents, &label, Some(first.showing));
+    assert_eq!(first.notice, Some("Can't watch".into()));
+    assert_eq!(next.notice, None);
+    assert_eq!(pages.sent(), []);
 }
 
 #[test]
@@ -286,8 +292,9 @@ fn notice_for_a_document_the_window_has_left_is_dropped() {
         Target::Window(&label),
     );
     documents.notice(&label, &document_key(&manifest()), "Can't watch".into());
-    let _ = documents.handover(&label, None);
-    assert_eq!(pages.sent(), [to(&label, Message::DocumentShown)]);
+    let answered = handover(&documents, &label, None).notice;
+    assert_eq!(answered, None);
+    assert_eq!(pages.sent(), [to(&label, Message::AskForDocument)]);
 }
 
 #[test]
@@ -300,6 +307,7 @@ fn notice_for_a_document_the_window_had_before_is_not_sent_with_the_new_one() {
         DocumentAt::new(&app_file("build.rs")),
         Target::Window(&label),
     );
-    let _ = documents.handover(&label, None);
-    assert_eq!(pages.sent(), [to(&label, Message::DocumentShown)]);
+    let answered = handover(&documents, &label, None).notice;
+    assert_eq!(answered, None);
+    assert_eq!(pages.sent(), [to(&label, Message::AskForDocument)]);
 }

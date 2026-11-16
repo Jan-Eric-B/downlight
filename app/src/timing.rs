@@ -29,19 +29,19 @@ pub struct Timing {
 /// started, and how long each stage took. [`Timing::report`] reports it as one line.
 ///
 /// It runs whether the switch is on or not, since the work may start before the window's
-/// `Timing` is at hand (a render ahead starts when the window is given its document).
+/// `Timing` is at hand (a render ahead starts when the window is given its document). What the
+/// work is reported as is decided when it is reported, since a render started for one reason can
+/// be handed over for another (ticket 26).
 pub struct Stages {
-    event: &'static str,
     started: SystemTime,
     last_lap: Instant,
     laps: Vec<(&'static str, Duration)>,
 }
 
 impl Stages {
-    /// Starts the clock for the work the report names `event`, such as `reload`.
-    pub fn start(event: &'static str) -> Self {
+    /// Starts the clock for a piece of work.
+    pub fn start() -> Self {
         Self {
-            event,
             started: SystemTime::now(),
             last_lap: Instant::now(),
             laps: Vec::new(),
@@ -82,14 +82,15 @@ impl Timing {
         self.report_now(window, "window-shown");
     }
 
-    /// Reports `window`'s work in stages: when it started, then each stage's duration.
-    pub fn report(&self, window: &str, stages: &Stages) {
-        if let Some(line) = self.line(window, stages) {
+    /// Reports `window`'s work in stages as `event`, such as `reload`: when it started, then each
+    /// stage's duration.
+    pub fn report(&self, window: &str, event: &str, stages: &Stages) {
+        if let Some(line) = self.line(window, event, stages) {
             write_line(&line);
         }
     }
 
-    fn line(&self, window: &str, stages: &Stages) -> Option<String> {
+    fn line(&self, window: &str, event: &str, stages: &Stages) -> Option<String> {
         let start = self.process_start_ms?;
         let at = ("at", epoch_ms_of(stages.started) - start);
         let laps = stages
@@ -98,7 +99,7 @@ impl Timing {
             .map(|&(stage, duration)| (stage, duration.as_secs_f64() * 1000.0));
         Some(line_of(
             window,
-            stages.event,
+            event,
             &std::iter::once(at).chain(laps).collect::<Vec<_>>(),
         ))
     }
@@ -305,16 +306,15 @@ mod tests {
             process_start_ms: Some(1000.0),
         };
         let stages = Stages {
-            event: "reload",
             started: SystemTime::UNIX_EPOCH + Duration::from_millis(1001),
             laps: vec![
                 ("read", Duration::from_millis(2)),
                 ("render", Duration::from_millis(3)),
             ],
-            ..Stages::start("reload")
+            ..Stages::start()
         };
         assert_eq!(
-            timing.line("document-0", &stages).as_deref(),
+            timing.line("document-0", "reload", &stages).as_deref(),
             Some("timing document-0 reload at=1.0 read=2.0 render=3.0")
         );
     }
@@ -324,12 +324,12 @@ mod tests {
         let timing = Timing {
             process_start_ms: None,
         };
-        assert_eq!(timing.line("document-0", &Stages::start("reload")), None);
+        assert_eq!(timing.line("document-0", "reload", &Stages::start()), None);
     }
 
     #[test]
     fn stages_lap_the_time_since_the_lap_before() {
-        let mut stages = Stages::start("read-and-render");
+        let mut stages = Stages::start();
         std::thread::sleep(Duration::from_millis(20));
         stages.lap("read");
         stages.lap("render");

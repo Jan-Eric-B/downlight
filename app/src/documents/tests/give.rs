@@ -109,7 +109,7 @@ fn empty_window_shows_the_document_it_is_given_and_its_page_is_told() {
         Given::Changed(label.clone())
     );
     assert_eq!(documents.document_path(&label), Some(manifest()));
-    assert_eq!(pages.sent(), [to(&label, Message::DocumentShown)]);
+    assert_eq!(pages.sent(), [to(&label, Message::AskForDocument)]);
 }
 
 #[test]
@@ -133,7 +133,7 @@ fn window_shows_another_document_in_place_of_its_own() {
         Given::Changed(label.clone())
     );
     assert_eq!(documents.document_path(&label), Some(other));
-    assert_eq!(pages.sent(), [to(&label, Message::DocumentShown)]);
+    assert_eq!(pages.sent(), [to(&label, Message::AskForDocument)]);
 }
 
 #[test]
@@ -210,6 +210,22 @@ fn window_without_a_document_has_no_document_path() {
     let label = documents.open_empty();
     assert_eq!(documents.document_path(&label), None);
     assert_eq!(documents.document_path("document-99"), None);
+}
+
+#[test]
+fn link_from_a_showing_the_window_has_left_has_no_document() {
+    // Ticket 26: a link clicked in the old document while the next one renders would otherwise
+    // resolve against the new document's folder.
+    let (documents, _) = documents();
+    let label = open_new(&documents, &manifest());
+    let left = handover(&documents, &label, None).showing;
+    let other = app_file("build.rs");
+    give(&documents, DocumentAt::new(&other), Target::Window(&label));
+    let given = handover(&documents, &label, Some(left)).showing;
+    assert_eq!(documents.document_path_shown_as(&label, left), None);
+    assert_eq!(documents.document_path_shown_as(&label, given), Some(other));
+    documents.forget(&label);
+    assert_eq!(documents.document_path_shown_as(&label, given), None);
 }
 
 #[test]

@@ -1,11 +1,11 @@
 {
-  "documentShown": {
-    "event": "document-shown",
+  "askForDocument": {
+    "event": "ask-for-document",
     "payload": null
   },
   "gone": {
-    "event": "document-changed",
-    "payload": "gone"
+    "event": "document-gone",
+    "payload": 7
   },
   "maximizeButtonHovered": {
     "event": "maximize-button",
@@ -42,10 +42,6 @@
         "name": "a.md"
       }
     }
-  },
-  "reload": {
-    "event": "document-changed",
-    "payload": "reload"
   },
   "restored": {
     "event": "window-state",

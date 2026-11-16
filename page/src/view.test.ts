@@ -4,6 +4,7 @@ import notes from "../../core/tests/fixtures/notes.html?raw";
 import readme from "../../core/tests/fixtures/readme.html?raw";
 import {
   answerAsTheApp,
+  deleteTheFile,
   askedOfTheApp,
   emptyWindow,
   giveAnotherDocument,
@@ -14,6 +15,7 @@ import {
   fakeTheApp,
   nextInTurn,
   nextShown,
+  saveTheFile,
   settle,
   spyOnHeadingScrolls,
   spyOnScrollsToTop,
@@ -250,7 +252,7 @@ async function reload(
   layOut(topLine);
   const scrolledTo = spyOnScrolls();
   const shown = nextShown();
-  await tell("document-changed", "reload");
+  await saveTheFile();
   await shown;
   return scrolledTo;
 }
@@ -338,7 +340,7 @@ test("a reload that can't read the file keeps the last render and says why", asy
   await startDocumentView(0);
   await settle();
 
-  await tell("document-changed", "reload");
+  await saveTheFile();
   await vi.waitFor(() => {
     expect(document.querySelector(".notice")?.textContent).toContain(
       "Can't read C:\\docs\\readme.md",
@@ -352,7 +354,7 @@ test("a deleted file leaves the last render under a 'File deleted or moved' bar"
   await startDocumentView(0);
   await settle();
 
-  await tell("document-changed", "gone");
+  await deleteTheFile();
   const bar = goneBar();
   expect(bar?.hidden).toBe(false);
   expect(bar?.textContent).toBe("File deleted or moved");
@@ -364,10 +366,10 @@ test("a file that comes back reloads and the bar goes away", async () => {
   documents = [() => Promise.resolve(readme), () => Promise.resolve(notes)];
   await startDocumentView(0);
   await settle();
-  await tell("document-changed", "gone");
+  await deleteTheFile();
 
   const shown = nextShown();
-  await tell("document-changed", "reload");
+  await saveTheFile();
   await shown;
   expect(heading()).toBe("Field notes");
   expect(goneBar()?.hidden).toBe(true);
@@ -386,8 +388,8 @@ test("a file deleted while its reload is on the way keeps the bar", async () => 
   await settle();
 
   const shown = nextShown();
-  await tell("document-changed", "reload");
-  await tell("document-changed", "gone");
+  await saveTheFile();
+  await deleteTheFile();
   sendReload(notes);
   await shown;
   expect(heading()).toBe("Field notes");
@@ -398,7 +400,7 @@ test("showing another document removes the bar", async () => {
   documents = [() => Promise.resolve(readme), () => Promise.resolve(notes)];
   await startDocumentView(0);
   await settle();
-  await tell("document-changed", "gone");
+  await deleteTheFile();
 
   const shown = nextShown();
   await giveAnotherDocument();
@@ -418,7 +420,7 @@ test("a reload runs the whenDocumentShown listeners once its render is in place 
     seen.push({ heading: heading(), scrolls: scrolledTo().length });
   });
 
-  await tell("document-changed", "reload");
+  await saveTheFile();
   await vi.waitFor(() => {
     expect(seen).toHaveLength(1);
   });
@@ -460,14 +462,14 @@ test("a reload overtaken by a reload that can't read the file still runs the whe
   vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(() => {
     if (overtaken) return;
     overtaken = true;
-    void tell("document-changed", "reload");
+    void saveTheFile();
   });
   const headings: (string | null | undefined)[] = [];
   const stop = whenDocumentShown(() => {
     headings.push(heading());
   });
 
-  await tell("document-changed", "reload");
+  await saveTheFile();
   await vi.waitFor(() => {
     expect(document.querySelector(".notice")?.textContent).toContain(
       "Can't read C:\\docs\\readme.md",
@@ -492,7 +494,7 @@ test("a reload overtaken by a newer document-shown shows the newer document", as
   await startDocumentView(0);
   await settle();
 
-  await tell("document-changed", "reload");
+  await saveTheFile();
   await giveAnotherDocument();
   await vi.waitFor(() => {
     expect(heading()).toBe("Field notes");
@@ -523,7 +525,7 @@ test("a reload for the document the window left, arriving after another was show
 
   const shown = nextShown();
   await giveAnotherDocument();
-  await tell("document-changed", "reload");
+  await saveTheFile();
   sendShown(atOptions);
   await shown;
   await settle();
@@ -545,12 +547,51 @@ test("a 'gone' for the document the window left, arriving after another was show
   await settle();
 
   const shown = nextShown();
-  await giveAnotherDocument();
-  await tell("document-changed", "gone");
+  const left = await giveAnotherDocument();
+  await deleteTheFile(left);
   sendShown(readme);
   await shown;
   expect(heading()).toBe("Lamplighter");
   expect(goneBar()?.hidden).toBe(true);
+});
+
+test("a 'gone' for the document the window left, arriving once the new one is in view, leaves no bar", async () => {
+  // Ticket 26: the `gone` names the showing it is about, so the page needs no clearing on each
+  // show to drop a stale one, however late it comes.
+  documents = [() => Promise.resolve(notes), () => Promise.resolve(readme)];
+  await startDocumentView(0);
+  await settle();
+
+  const shown = nextShown();
+  const left = await giveAnotherDocument();
+  await shown;
+  await deleteTheFile(left);
+  expect(heading()).toBe("Lamplighter");
+  expect(goneBar()?.hidden).toBe(true);
+});
+
+test("a 'gone' for the document the window was just given, arriving before it is in view, puts the bar over it", async () => {
+  // Ticket 26: the file was deleted just after its read, and the `gone` reached the page while its
+  // view still showed the old document.
+  let sendShown: (html: string) => void = () => {};
+  documents = [
+    () => Promise.resolve(notes),
+    () =>
+      new Promise((resolve) => {
+        sendShown = resolve;
+      }),
+  ];
+  await startDocumentView(0);
+  await settle();
+
+  const shown = nextShown();
+  await giveAnotherDocument();
+  await deleteTheFile();
+  expect(goneBar()?.hidden).toBe(true);
+  sendShown(readme);
+  await shown;
+  expect(heading()).toBe("Lamplighter");
+  expect(goneBar()?.hidden).toBe(false);
 });
 
 test("document shown at a heading scrolls to that heading", async () => {
@@ -660,7 +701,7 @@ test("a reload of a document shown at a heading keeps the reading position", asy
   const scrolledTo = spyOnScrolls();
 
   const shown = nextShown();
-  await tell("document-changed", "reload");
+  await saveTheFile();
   await shown;
   expect(new Set(scrolledTo())).toEqual(new Set([8]));
 });
@@ -702,7 +743,7 @@ test("a shown document stays when the app gives no answer, and a notice says why
   await startDocumentView(0);
   await settle();
 
-  await tell("document-changed", "reload");
+  await saveTheFile();
   await vi.waitFor(() => {
     expect(document.querySelector(".notice")?.textContent).toBe(NOT_ALLOWED);
   });
@@ -723,14 +764,14 @@ test("a reload overtaken by a request the app gives no answer to still runs the 
   vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(() => {
     if (overtaken) return;
     overtaken = true;
-    void tell("document-changed", "reload");
+    void saveTheFile();
   });
   const headings: (string | null | undefined)[] = [];
   const stop = whenDocumentShown(() => {
     headings.push(heading());
   });
 
-  await tell("document-changed", "reload");
+  await saveTheFile();
   await vi.waitFor(() => {
     expect(document.querySelector(".notice")?.textContent).toBe(NOT_ALLOWED);
   });
@@ -754,7 +795,7 @@ test("the whenDocumentShown listeners hear whether another document was shown or
   });
 
   let shown = nextShown();
-  await tell("document-changed", "reload");
+  await saveTheFile();
   await shown;
   shown = nextShown();
   await giveAnotherDocument();
@@ -776,14 +817,14 @@ test("a reload overtaken after its swap by a reload that can't read the file is 
   vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(() => {
     if (overtaken) return;
     overtaken = true;
-    void tell("document-changed", "reload");
+    void saveTheFile();
   });
   const reasons: ShownReason[] = [];
   const stop = whenDocumentShown(({ reason }) => {
     reasons.push(reason);
   });
 
-  await tell("document-changed", "reload");
+  await saveTheFile();
   await vi.waitFor(() => {
     expect(reasons).toEqual(["reload"]);
   });
@@ -824,7 +865,7 @@ test("the window shows with its document when a save overtakes its first request
   const started = startDocumentView(0);
   await settle();
 
-  await tell("document-changed", "reload");
+  await saveTheFile();
   sendFirst(notes);
   // Long enough for a window shown on the overtaken answer to be shown before the next arrives.
   await afterNextFrame();
@@ -839,7 +880,7 @@ test("a reload under the 'File deleted or moved' bar keeps the block just below 
   documents = [() => Promise.resolve(readme), () => Promise.resolve(readme)];
   await startDocumentView(0);
   await settle();
-  await tell("document-changed", "gone");
+  await deleteTheFile();
   // The page's stylesheet, which the tests don't load, sets this on the document's scroller while
   // the bar shows.
   scroller()?.style.setProperty("scroll-padding-top", "41px");
@@ -849,7 +890,7 @@ test("a reload under the 'File deleted or moved' bar keeps the block just below 
   const scrolledTo = spyOnScrolls();
 
   const shown = nextShown();
-  await tell("document-changed", "reload");
+  await saveTheFile();
   await shown;
   expect(new Set(scrolledTo())).toEqual(new Set([15]));
 });

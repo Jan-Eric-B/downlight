@@ -23,3 +23,5 @@ Spec: [Downlight v1](../spec.md)
 - Reload's page tests (the tests named "a reload ..." in `page/src/view.test.ts`) show how to drive a reload in a test: queue the next `render_document` answer, then `emit("document-changed", "reload")`.
 
 **2026-11-13, from the architecture review.** Ticket 25 gives the view one pipeline, with one place that prepares the content (make the task checkboxes tickable there; the core writes them `disabled`) and one snapshot read before the swap and restored after it. Ticks go into that snapshot. Ticket 12 keys history entries by their `Showing`, so key the saved ticks the same way. The `whenDocumentShown` listeners get a reason after ticket 25, which says whether a swap was a reload.
+
+**2026-11-16, from ticket 26.** The page's tests no longer send `document-changed`: a save is `saveTheFile()` in `page/src/test-support.ts` (the app's `ask-for-document`), and a reload by hand is `requestDocument()` from `page/src/view.ts`, which F5 now calls directly. Either way the app's answer says `reload`, and the listeners hear the reason `reload`.

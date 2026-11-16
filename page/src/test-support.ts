@@ -230,11 +230,31 @@ export function titleBarSample<N extends keyof TitleBarArguments>(
 
 /**
  * Gives the fake app's window another document, as Ctrl+O, a drop or a link does, and tells the
- * page, which then asks for it.
+ * page, which then asks for it. Returns the showing the window left.
  */
-export async function giveAnotherDocument(): Promise<void> {
+export async function giveAnotherDocument(): Promise<number> {
+  const left = currentShowing;
   currentShowing += 1;
-  await tell("document-shown", null);
+  await tell("ask-for-document", null);
+  return left;
+}
+
+/**
+ * Tells the page that the document's file was saved, as the app's watch does: its new render is
+ * ready to ask for.
+ */
+export async function saveTheFile(): Promise<void> {
+  await tell("ask-for-document", null);
+}
+
+/**
+ * Tells the page that the file of the document the window shows as `showing` is gone, as the
+ * app's watch does; by default the showing the window is at now.
+ */
+export async function deleteTheFile(
+  showing: number = currentShowing,
+): Promise<void> {
+  await tell("document-gone", showing);
 }
 
 /**
@@ -256,7 +276,7 @@ export async function answerAsTheApp(
   const reloads = args.showing === showing;
   const placeAt = (heading: string | null): Place =>
     reloads ? { place: "reload" } : { place: "show", heading };
-  const handedOver = { showing, file: SHOWN_FILE };
+  const handedOver = { showing, file: SHOWN_FILE, notice: null };
   let content: Awaited<ReturnType<Read>>;
   try {
     content = await read();

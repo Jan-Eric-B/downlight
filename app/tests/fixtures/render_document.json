@@ -6,6 +6,7 @@
       "name": "a.md",
       "path": "C:\\docs\\a.md"
     },
+    "notice": null,
     "place": "reload",
     "showing": 7
   },
@@ -16,6 +17,7 @@
       "path": "C:\\docs\\a.md"
     },
     "heading": "install",
+    "notice": null,
     "place": "show",
     "showing": 7
   },
@@ -26,6 +28,26 @@
       "path": "C:\\docs\\a.md"
     },
     "heading": null,
+    "notice": null,
+    "place": "show",
+    "showing": 7
+  },
+  "showWithHeldNotice": {
+    "document": "<h1 id=\"install\" data-sourcepos=\"1:1-1:9\">Install<a href=\"#install\" aria-label=\"Link to heading 'Install'\" data-heading-content=\"Install\" class=\"anchor\"></a></h1>\n<p data-sourcepos=\"3:1-3:18\">Run the installer.</p>\n",
+    "file": {
+      "name": "a.md",
+      "path": "C:\\docs\\a.md"
+    },
+    "heading": null,
+    "notice": {
+      "after": " for changes, so only F5 reloads it: Access is denied.",
+      "before": "Can't watch ",
+      "file": {
+        "folder": "C:\\docs",
+        "folderOpens": false,
+        "name": "a.md"
+      }
+    },
     "place": "show",
     "showing": 7
   },
@@ -43,6 +65,7 @@
       "name": "a.md",
       "path": "C:\\docs\\a.md"
     },
+    "notice": null,
     "place": "reload",
     "showing": 7
   },
@@ -61,6 +84,7 @@
       "path": "C:\\docs\\a.md"
     },
     "heading": null,
+    "notice": null,
     "place": "show",
     "showing": 7
   }

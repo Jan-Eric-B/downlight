@@ -52,7 +52,6 @@ fn main() -> ExitCode {
         .manage(timing)
         .invoke_handler(tauri::generate_handler![
             documents::render_document,
-            documents::reload_document,
             links::follow_link,
             open::open_document,
             menu::show_document_menu,

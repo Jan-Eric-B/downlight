@@ -20,15 +20,15 @@ pub type ReadAndRender = Result<(RenderedDocument, Stages), DocumentError>;
 pub type RenderTask = JoinHandle<ReadAndRender>;
 
 /// Starts reading and rendering `path` on a blocking thread, off the main thread and the async
-/// runtime's workers. The timing switch reports it as `event`: `read-and-render` for a document
-/// a window was given, `reload` for reading it again.
-pub fn start(path: &Path, event: &'static str) -> RenderTask {
+/// runtime's workers. The timing switch reports it by the place the page gets (`Place` in
+/// `documents.rs`).
+pub fn start(path: &Path) -> RenderTask {
     let path = path.to_owned();
-    tauri::async_runtime::spawn_blocking(move || read_and_render(&path, event))
+    tauri::async_runtime::spawn_blocking(move || read_and_render(&path))
 }
 
-fn read_and_render(path: &Path, event: &'static str) -> ReadAndRender {
-    let mut stages = Stages::start(event);
+fn read_and_render(path: &Path) -> ReadAndRender {
+    let mut stages = Stages::start();
     let bytes = std::fs::read(path).map_err(|source| unread(path, source))?;
     stages.lap("read");
     let document = downlight_core::render(&bytes, path, &image::origin());
@@ -108,7 +108,7 @@ mod tests {
     #[test]
     fn folder_is_told_apart_from_a_document() {
         let folder = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let Err(error) = read_and_render(folder, "read-and-render") else {
+        let Err(error) = read_and_render(folder) else {
             panic!("a folder rendered as a document");
         };
         assert_eq!(
@@ -127,7 +127,7 @@ mod tests {
         if folder_gone {
             std::fs::remove_dir_all(&folder).unwrap();
         }
-        let read = read_and_render(&folder.join("missing.md"), "read-and-render");
+        let read = read_and_render(&folder.join("missing.md"));
         let _ = std::fs::remove_dir_all(&folder);
         let Err(error) = read else {
             panic!("a missing file rendered as a document");

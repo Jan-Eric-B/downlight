@@ -226,26 +226,41 @@ test.each(["showAtTop", "unreadShow"])(
 
 // `messages.json`
 
-test.each(["documentShown", "reload"])(
-  "the app's %s message makes the page ask for its document",
-  async (name) => {
-    answerWithSamples("showAtTop");
-    await startDocumentView(0);
-    await settle();
-    const before = requests();
-
-    await tellAsSampled(messageSample(name));
-    expect(requests()).toBe(before + 1);
-  },
-);
-
-test("the app's message that the file is gone shows the bar", async () => {
+test("the app's askForDocument message makes the page ask for its document", async () => {
   answerWithSamples("showAtTop");
   await startDocumentView(0);
   await settle();
+  const before = requests();
 
-  await tellAsSampled(messageSample("gone"));
+  await tellAsSampled(messageSample("askForDocument"));
+  expect(requests()).toBe(before + 1);
+});
+
+test("the app's message that the file of the showing in view is gone shows the bar", async () => {
+  answerWithSamples("showAtTop");
+  await startDocumentView(0);
+  await settle();
+  const gone = messageSample("gone");
+
+  await tellAsSampled(gone);
+  expect(gone.payload).toBe(showingIn("showAtTop"));
   expect(goneBar()?.hidden).toBe(false);
+});
+
+test("the app's held notice in its answer shows with the document", async () => {
+  // Ticket 26: in the answer, since a notice sent before the page's listener is registered is
+  // dropped.
+  answerWithSamples("showWithHeldNotice");
+  const sample = renderDocumentSample("showWithHeldNotice");
+  if (sample?.notice == null || typeof sample.notice === "string")
+    throw new Error("The sample holds no notice naming a file.");
+  const { before, file, after } = sample.notice;
+
+  await startDocumentView(0);
+  expect(heading()).toBe("Install");
+  expect(document.querySelector(".notice")?.textContent).toBe(
+    `${before}${file.name} in ${file.folder ?? ""}${after}`,
+  );
 });
 
 test("the app's message to scroll to a heading scrolls to it", async () => {
@@ -382,6 +397,16 @@ test("the app's nothing left to do leaves the view where it is", async () => {
   expect(follows).toHaveLength(1);
   expect(scrolledTo()).toEqual([]);
   expect(scrollsToTop()).toBe(0);
+});
+
+test("a link names the showing of the app's answer its document came in", async () => {
+  const link = await showLinkFollowedAs("nothing");
+
+  link.click();
+  await settle();
+  expect(follows).toEqual([
+    { showing: showingIn("showAtTop"), target: "#install", newWindow: false },
+  ]);
 });
 
 /** Follows the sampled document's link, which fails as the `follow_link` failure sample `name`. */
@@ -600,7 +625,7 @@ test("the page's reload report has the marks the app takes", async () => {
   await view.startDocumentView(0);
   await settle();
 
-  await tellAsSampled(messageSample("reload"));
+  await tellAsSampled(messageSample("askForDocument"));
   await vi.waitFor(() => {
     expect(reports.reload.map(({ marks }) => keysSent(marks))).toEqual([
       keysSent(timingReportSample("reload")),

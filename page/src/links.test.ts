@@ -1,16 +1,22 @@
 import { clearMocks, mockWindows } from "@tauri-apps/api/mocks";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import github from "../../core/tests/fixtures/github.html?raw";
+import notes from "../../core/tests/fixtures/notes.html?raw";
 import readme from "../../core/tests/fixtures/readme.html?raw";
 import type { ArgsOf, Followed } from "./app";
 import { startLinks } from "./links";
 import {
+  answerAsTheApp,
   fakeTheApp,
+  giveAnotherDocument,
+  nextInTurn,
+  nextShown,
   settle,
   spyOnHeadingScrolls,
   spyOnScrollsToTop,
+  type Read,
 } from "./test-support";
-import { SCROLLER_SELECTOR } from "./view";
+import { DOCUMENT_VIEW_SELECTOR, startDocumentView } from "./view";
 
 /** Each `follow_link` call's arguments, in turn. */
 let follows: ArgsOf<"follow_link">[] = [];
@@ -19,13 +25,21 @@ let follows: ArgsOf<"follow_link">[] = [];
 let answer: () => Promise<Followed> = () =>
   Promise.resolve({ kind: "nothing" });
 
+/** What reading the window's document gives `render_document`, in turn; the last one repeats. */
+let documents: Read[] = [];
+
 let stopLinks: AbortController;
 
 beforeEach(() => {
   mockWindows("document-0");
   follows = [];
   answer = () => Promise.resolve({ kind: "nothing" });
+  documents = [];
   fakeTheApp({
+    render_document: (args) => {
+      const next = nextInTurn(documents);
+      return next ? answerAsTheApp(args, next) : null;
+    },
     follow_link: (args) => {
       follows.push(args);
       return answer();
@@ -42,18 +56,15 @@ afterEach(() => {
 });
 
 /**
- * Shows `html` as the document, in its scroller, as the document view does, and starts following
- * its links.
+ * Starts following links and shows `html` as the window's document in the document view, whose
+ * showing a link names (ticket 26). Returns the view.
  */
-function showDocument(html: string): HTMLElement {
-  const view = document.createElement("article");
-  view.className = "markdown-body";
-  view.innerHTML = html;
-  const scroller = document.createElement("div");
-  scroller.className = SCROLLER_SELECTOR.slice(1);
-  scroller.append(view);
-  document.body.append(scroller);
+async function showDocument(html: string): Promise<HTMLElement> {
+  documents = [() => Promise.resolve(html)];
   startLinks(stopLinks.signal);
+  await startDocumentView(0);
+  const view = document.querySelector<HTMLElement>(DOCUMENT_VIEW_SELECTOR);
+  if (!view) throw new Error("The document view didn't start.");
   return view;
 }
 
@@ -77,7 +88,7 @@ function bubble(): HTMLElement | null {
 }
 
 test("clicking a link follows its target and never navigates the webview", async () => {
-  const view = showDocument(
+  const view = await showDocument(
     '<p><a href="docs/my%20guide.md#install">Guide</a></p>',
   );
 
@@ -86,23 +97,47 @@ test("clicking a link follows its target and never navigates the webview", async
 
   expect(navigates).toBe(false);
   expect(follows).toEqual([
-    { target: "docs/my%20guide.md#install", newWindow: false },
+    { showing: 0, target: "docs/my%20guide.md#install", newWindow: false },
   ]);
 });
 
 test("ctrl+click asks for a new window", async () => {
-  const view = showDocument('<p><a href="guide.md">Guide</a></p>');
+  const view = await showDocument('<p><a href="guide.md">Guide</a></p>');
 
   const navigates = click(link(view, "guide.md"), { ctrlKey: true });
   await settle();
 
   expect(navigates).toBe(false);
-  expect(follows).toEqual([{ target: "guide.md", newWindow: true }]);
+  expect(follows).toEqual([
+    { showing: 0, target: "guide.md", newWindow: true },
+  ]);
+});
+
+test("a link names the showing whose document it is in, also while the next one renders", async () => {
+  // Ticket 26: the app does nothing for a link from a showing the window has left, which would
+  // otherwise resolve against the new document's folder.
+  let sendNext: (html: string) => void = () => {};
+  const view = await showDocument(readme);
+  documents = [
+    () =>
+      new Promise((resolve) => {
+        sendNext = resolve;
+      }),
+  ];
+  const shown = nextShown();
+  const left = await giveAnotherDocument();
+
+  click(link(view, "#options"));
+  sendNext(notes);
+  await shown;
+  click(view.querySelector("a[href]") ?? view);
+  await settle();
+  expect(follows.map(({ showing }) => showing)).toEqual([left, left + 1]);
 });
 
 test("heading outcome scrolls to the element with that id in the document", async () => {
   answer = () => Promise.resolve({ kind: "scrollTo", heading: "options" });
-  const view = showDocument(readme);
+  const view = await showDocument(readme);
   const scrolledTo = spyOnHeadingScrolls();
 
   click(link(view, "#options"));
@@ -114,7 +149,7 @@ test("heading outcome scrolls to the element with that id in the document", asyn
 
 test("heading outcome scrolls to a footnote", async () => {
   answer = () => Promise.resolve({ kind: "scrollTo", heading: "fn-paper" });
-  const view = showDocument(github);
+  const view = await showDocument(github);
   const scrolledTo = spyOnHeadingScrolls();
 
   click(link(view, "#fn-paper"));
@@ -125,7 +160,7 @@ test("heading outcome scrolls to a footnote", async () => {
 
 test("heading outcome finds an anchor by its name", async () => {
   answer = () => Promise.resolve({ kind: "scrollTo", heading: "old anchor" });
-  const view = showDocument(
+  const view = await showDocument(
     '<p><a href="#old%20anchor">Up</a></p><p><a name="old anchor">Here</a></p>',
   );
   const scrolls = vi
@@ -144,7 +179,7 @@ test("heading outcome looks for the heading in the document only", async () => {
   const outside = document.createElement("div");
   outside.id = "outside";
   document.body.append(outside);
-  const view = showDocument('<p><a href="#outside">Out</a></p>');
+  const view = await showDocument('<p><a href="#outside">Out</a></p>');
   const scrolledTo = spyOnHeadingScrolls();
 
   click(link(view, "#outside"));
@@ -155,7 +190,7 @@ test("heading outcome looks for the heading in the document only", async () => {
 
 test("heading outcome without a heading scrolls to the top", async () => {
   answer = () => Promise.resolve({ kind: "scrollTo", heading: null });
-  const view = showDocument('<p><a href="#">Top</a></p>');
+  const view = await showDocument('<p><a href="#">Top</a></p>');
   const scrollsToTop = spyOnScrollsToTop();
 
   click(link(view, "#"));
@@ -166,7 +201,7 @@ test("heading outcome without a heading scrolls to the top", async () => {
 
 test("link to a missing file shows the app's message", async () => {
   answer = () => Promise.reject(new Error("Can't find C:\\docs\\gone.md."));
-  const view = showDocument('<p><a href="gone.md">Gone</a></p>');
+  const view = await showDocument('<p><a href="gone.md">Gone</a></p>');
 
   click(link(view, "gone.md"));
   await vi.waitFor(() => {
@@ -176,8 +211,8 @@ test("link to a missing file shows the app's message", async () => {
   });
 });
 
-test("hovering or focusing a link shows its target, leaving hides it", () => {
-  const view = showDocument(
+test("hovering or focusing a link shows its target, leaving hides it", async () => {
+  const view = await showDocument(
     '<p><a href="docs/my%20guide.md#install">Guide</a> <a href="https://example.com/">Web</a></p>',
   );
   const guide = link(view, "docs/my%20guide.md#install");
@@ -199,8 +234,8 @@ test("hovering or focusing a link shows its target, leaving hides it", () => {
 });
 
 /** The target the bubble shows while the pointer is over a link to `href`. */
-function shownTargetOf(href: string): string | null | undefined {
-  const view = showDocument("<p><a>Link</a></p>");
+async function shownTargetOf(href: string): Promise<string | null | undefined> {
+  const view = await showDocument("<p><a>Link</a></p>");
   const anchor = view.querySelector("a");
   if (!anchor) throw new Error("no link");
   anchor.setAttribute("href", href);
@@ -210,8 +245,8 @@ function shownTargetOf(href: string): string | null | undefined {
 
 // The reader's browser goes to the punycode host, so a look-alike letter must not pass for the
 // real one.
-test("the target of a web link with a look-alike letter in its host shows the host in punycode", () => {
-  const shown = shownTargetOf("https://ex\u0430mple.com/");
+test("the target of a web link with a look-alike letter in its host shows the host in punycode", async () => {
+  const shown = await shownTargetOf("https://ex\u0430mple.com/");
   expect(shown).toMatch(/^https:\/\/xn--[a-z0-9-]+\.com\/$/);
 });
 
@@ -230,8 +265,8 @@ test.each([
   ["capitals", "HTTPS://Example.COM", "https://example.com/"],
 ])(
   "the target of a web link with %s shows as the URL that is opened",
-  (_what, href, shown) => {
-    expect(shownTargetOf(href)).toBe(shown);
+  async (_what, href, shown) => {
+    expect(await shownTargetOf(href)).toBe(shown);
   },
 );
 
@@ -242,12 +277,12 @@ test.each([
   "file:///C:/docs/\u00e4.md",
   "#\u00fcber",
   "https://[not a host/",
-])("the target %s shows as the document wrote it", (href) => {
-  expect(shownTargetOf(href)).toBe(href);
+])("the target %s shows as the document wrote it", async (href) => {
+  expect(await shownTargetOf(href)).toBe(href);
 });
 
-test("moving within a link keeps its target shown", () => {
-  const view = showDocument(
+test("moving within a link keeps its target shown", async () => {
+  const view = await showDocument(
     '<p><a href="guide.md"><em>Guide</em> here</a></p>',
   );
   const guide = link(view, "guide.md");
@@ -261,7 +296,7 @@ test("moving within a link keeps its target shown", () => {
 });
 
 test("hovering a link asks the app nothing", async () => {
-  const view = showDocument(
+  const view = await showDocument(
     '<p><a href="\\\\server\\share\\a.md">Share</a></p>',
   );
 
@@ -274,7 +309,7 @@ test("hovering a link asks the app nothing", async () => {
 });
 
 test("link without a target does nothing", async () => {
-  const view = showDocument("<p><a>Link</a></p>");
+  const view = await showDocument("<p><a>Link</a></p>");
 
   const anchor = view.querySelector("a");
   if (!anchor) throw new Error("no link");
@@ -287,7 +322,9 @@ test("link without a target does nothing", async () => {
 });
 
 test("middle and shift clicks are stopped", async () => {
-  const view = showDocument('<p><a href="https://example.com/">Web</a></p>');
+  const view = await showDocument(
+    '<p><a href="https://example.com/">Web</a></p>',
+  );
   const web = link(view, "https://example.com/");
 
   const middle = web.dispatchEvent(
@@ -302,7 +339,7 @@ test("middle and shift clicks are stopped", async () => {
 });
 
 test("clicks outside the document's links are left alone", async () => {
-  const view = showDocument("<p>Text</p>");
+  const view = await showDocument("<p>Text</p>");
   const outside = document.createElement("a");
   outside.href = "#elsewhere";
   document.body.append(outside);

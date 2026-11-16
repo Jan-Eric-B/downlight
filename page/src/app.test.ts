@@ -16,12 +16,12 @@ test("listens to what the app sends this window", async () => {
     return 0;
   });
 
-  listenToApp("document-shown", () => {});
+  listenToApp("ask-for-document", () => {});
 
   await vi.waitFor(() => {
     expect(listens).toEqual([
       expect.objectContaining({
-        event: "document-shown",
+        event: "ask-for-document",
         target: { kind: "WebviewWindow", label: "document-3" },
       }),
     ]);

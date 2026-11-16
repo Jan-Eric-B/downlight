@@ -7,6 +7,7 @@ import {
   askedOfTheApp,
   fakeTheApp,
   fakeTitleBarLayout,
+  giveAnotherDocument,
   nextInTurn,
   nextShown,
   openPageWith,
@@ -48,7 +49,7 @@ beforeEach(() => {
     reveal_document: () => reveal(),
     // A link shows another document in this window: the app tells the page, which asks for it.
     follow_link: async () => {
-      await tell("document-shown", null);
+      await giveAnotherDocument();
       return { kind: "nothing" };
     },
   });
@@ -220,6 +221,7 @@ function shownFrom(file: DocumentFile, showing = 0): DocumentToShow {
   return {
     showing,
     file,
+    notice: null,
     place: "show",
     heading: null,
     document: `<h1>${file.name}</h1>\n<p><a href="guide.md">The guide</a></p>\n`,

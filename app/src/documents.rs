@@ -49,6 +49,14 @@ struct WindowTable {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Showing(u64);
 
+impl Showing {
+    /// The showing the contract samples name, the same in every sample that has one.
+    #[cfg(test)]
+    pub fn sample() -> Self {
+        Self(7)
+    }
+}
+
 struct ShownDocument {
     /// This time the window was given the document.
     showing: Showing,
@@ -87,7 +95,7 @@ impl ShownDocument {
             showing,
             path: document.path.to_owned(),
             key,
-            render_ahead: Some(render::start(document.path, "read-and-render")),
+            render_ahead: Some(render::start(document.path)),
             watch: None,
             page_asked: false,
             held_notice: None,
@@ -96,7 +104,7 @@ impl ShownDocument {
     }
 
     fn start_reload(&mut self) {
-        self.render_ahead = Some(render::start(&self.path, "reload"));
+        self.render_ahead = Some(render::start(&self.path));
     }
 }
 
@@ -179,6 +187,8 @@ struct Handover {
     file: DocumentFile,
     /// What the page does with the render.
     place: Place,
+    /// A notice about the document held until the page first asked for it.
+    notice: Option<Notice>,
 }
 
 /// The file of the document a window shows, as the page's title bar shows it (window design
@@ -222,6 +232,18 @@ enum Place {
     Show { heading: Option<String> },
     /// The page's view shows this showing already: show the new render at the reading position.
     Reload,
+}
+
+impl Place {
+    /// What the timing switch reports the render as: by the place the page gets rather than by
+    /// why the render started, so a reload by hand, which reads the file on the page's request,
+    /// is reported as a reload too (ticket 26). `npm run measure` reads both.
+    fn reported_as(&self) -> &'static str {
+        match self {
+            Self::Show { .. } => "read-and-render",
+            Self::Reload => "reload",
+        }
+    }
 }
 
 impl Documents {
@@ -277,7 +299,7 @@ impl Documents {
             Given::NewWindow(window) => self.watch(window, document.path, key),
             Given::Changed(window) => {
                 self.watch(window, document.path, key);
-                self.send(window, Message::DocumentShown)?;
+                self.send(window, Message::AskForDocument)?;
             }
             Given::AlreadyHere(_) | Given::AlreadyElsewhere(_) | Given::WindowGone => {}
         }
@@ -333,61 +355,32 @@ impl Documents {
 
     /// Hands `window`'s document over to its page, which has asked for it while its view shows
     /// `page_shows` (None while it shows no document), or gives None while the window shows none:
-    /// the render started when the window was given the document, the first time, and a new read
-    /// of its file after that. The page shows the document when its view shows another showing,
-    /// and reloads it when its view shows this one. A notice held until the page asked is sent
-    /// now, since the page listens for notices before it first asks.
+    /// the render started when the window was given the document or its file changed, if the page
+    /// hasn't taken it yet, and a new read of its file otherwise, as for F5. The page shows the
+    /// document when its view shows another showing, and reloads it when its view shows this one.
+    /// A notice held until the page asked goes with the answer rather than as a message, since
+    /// the page's listener for notices may not be registered yet (ticket 26).
     fn handover(&self, window: &str, page_shows: Option<Showing>) -> Option<Handover> {
-        let (path, ahead, notice, showing, place) = {
-            let mut table = self.lock();
-            let shown = table.shown.get_mut(window)?.as_mut()?;
-            shown.page_asked = true;
-            let place = if page_shows == Some(shown.showing) {
-                Place::Reload
-            } else {
-                Place::Show {
-                    heading: shown.heading.clone(),
-                }
-            };
-            (
-                shown.path.clone(),
-                shown.render_ahead.take(),
-                shown.held_notice.take(),
-                shown.showing,
-                place,
-            )
+        let mut table = self.lock();
+        let shown = table.shown.get_mut(window)?.as_mut()?;
+        shown.page_asked = true;
+        let place = if page_shows == Some(shown.showing) {
+            Place::Reload
+        } else {
+            Place::Show {
+                heading: shown.heading.clone(),
+            }
         };
-        if let Some(notice) = notice {
-            // The page asked for its document, not for the notice, and gets its document either
-            // way; a notice that can't reach it has nobody left to tell.
-            let _ = self.send(window, Message::Notice(notice));
-        }
         Some(Handover {
-            render: ahead.unwrap_or_else(|| render::start(&path, "read-and-render")),
-            showing,
-            file: DocumentFile::of(&path),
+            render: shown
+                .render_ahead
+                .take()
+                .unwrap_or_else(|| render::start(&shown.path)),
+            showing: shown.showing,
+            file: DocumentFile::of(&shown.path),
             place,
+            notice: shown.held_notice.take(),
         })
-    }
-
-    /// Reloads `window`'s document by hand (F5, Ctrl+R and the right-click menu), the way a save
-    /// to its file does: its new render starts, and the page is told, and then asks for it. A
-    /// window that shows no document has nothing to reload. Fails when the page can't be told.
-    ///
-    /// The page is told after the table's lock is released, so the window may have been given
-    /// another document by the time the page asks; [`Documents::handover`] then answers a show.
-    pub fn reload(&self, window: &str) -> tauri::Result<()> {
-        let reloading = self
-            .lock()
-            .shown
-            .get_mut(window)
-            .and_then(Option::as_mut)
-            .map(ShownDocument::start_reload)
-            .is_some();
-        if reloading {
-            self.send(window, Message::Reload)?;
-        }
-        Ok(())
     }
 
     /// The file of the document `window` shows, as the launch, the dialog, the drop or the link
@@ -398,6 +391,19 @@ impl Documents {
             .shown
             .get(window)?
             .as_ref()
+            .map(|shown| shown.path.clone())
+    }
+
+    /// The file of the document `window` shows, while it still shows it as `showing`; None once
+    /// the window has been given another document, or closed. For a link, which comes from the
+    /// showing its page's view showed when it was clicked (ticket 26): a link in a document the
+    /// window has left would resolve against the new document's folder.
+    pub fn document_path_shown_as(&self, window: &str, showing: Showing) -> Option<PathBuf> {
+        self.lock()
+            .shown
+            .get(window)?
+            .as_ref()
+            .filter(|shown| shown.showing == showing)
             .map(|shown| shown.path.clone())
     }
 
@@ -456,9 +462,10 @@ impl Documents {
     /// or closed: a watch can report a change after that, and a document the window has left is
     /// never reloaded. Checked and acted on under one lock (ticket 21): a document the window is
     /// given after a separate check would have its render ahead replaced by one for the window's
-    /// new document. The page is told after the lock, never under it, so a `reload` can still
-    /// reach it after the `document-shown` of a document given in between; the page then asks
-    /// with the showing its view still shows, and is answered a show (ticket 23).
+    /// new document. The page is told after the lock, never under it, so the message can still
+    /// reach it after the one for a document given in between; the page then asks with the
+    /// showing its view still shows, and is answered a show (ticket 23), or, for a `gone`, sees
+    /// that it names another showing than its view's (ticket 26).
     fn changed(&self, window: &str, key: &Path, change: Change) {
         let message = {
             let mut table = self.lock();
@@ -468,9 +475,9 @@ impl Documents {
             match change {
                 Change::Changed | Change::Back => {
                     shown.start_reload();
-                    Message::Reload
+                    Message::AskForDocument
                 }
-                Change::Gone => Message::Gone,
+                Change::Gone => Message::Gone(shown.showing),
             }
         };
         // Sent from the watch's thread, which nobody waits on, so nobody is left to tell.
@@ -540,7 +547,7 @@ pub async fn render_document(
     };
     let content = match handover.render.await {
         Ok(Ok((document, stages))) => {
-            timing.report(window.label(), &stages);
+            timing.report(window.label(), handover.place.reported_as(), &stages);
             Content::Document(document)
         }
         Ok(Err(error)) => Content::Error(error),
@@ -551,14 +558,15 @@ pub async fn render_document(
         file: handover.file,
         place: handover.place,
         content,
+        notice: handover.notice,
     }))
 }
 
 /// What the page gets when it asks for its document: the showing the window is at, the
-/// document's file, what to do with the render (show it at a heading or the top, or reload it at the reading position), and
-/// the rendered document or why it can't be read. A read that fails is part of the answer, since
-/// only the answer says whether the page keeps its last render, on a reload, or shows why, on a
-/// show (ticket 23).
+/// document's file, what to do with the render (show it at a heading or the top, or reload it at
+/// the reading position), the rendered document or why it can't be read, and a notice held until
+/// the page first asked, or null. A read that fails is part of the answer, since only the answer
+/// says whether the page keeps its last render, on a reload, or shows why, on a show (ticket 23).
 #[derive(serde::Serialize)]
 pub struct DocumentToShow {
     showing: Showing,
@@ -567,6 +575,7 @@ pub struct DocumentToShow {
     place: Place,
     #[serde(flatten)]
     content: Content,
+    notice: Option<Notice>,
 }
 
 /// The rendered document, which goes as its HTML, or why it can't be read.
@@ -579,7 +588,8 @@ enum Content {
 
 /// A sample of each answer [`render_document`] gives, by name, which the page's tests read
 /// (`app/src/contract.rs`, ticket 27): the rendered document goes as its HTML, the heading only
-/// with a show, a read that fails as why, and the document's file with each.
+/// with a show, a read that fails as why, the document's file with each, and a held notice with
+/// the first (ticket 26).
 #[cfg(test)]
 pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
     // A new place or content stops the build here: give it a sample below, then name it here.
@@ -588,12 +598,13 @@ pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
         | Some(DocumentToShow {
             place: Place::Show { .. } | Place::Reload,
             content: Content::Document(_) | Content::Error(_),
+            notice: None | Some(_),
             ..
         }) => {}
     };
-    let answer = |place: Place, content: Content| {
+    let answer_with = |place: Place, content: Content, notice: Option<Notice>| {
         serde_json::to_value(Some(DocumentToShow {
-            showing: Showing(7),
+            showing: Showing::sample(),
             // Written out rather than `DocumentFile::of`, so the samples are the same on every
             // system the tests run on.
             file: DocumentFile {
@@ -602,8 +613,15 @@ pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
             },
             place,
             content,
+            notice,
         }))
     };
+    let answer = |place: Place, content: Content| answer_with(place, content, None);
+    let held_notice = Notice::naming(
+        "Can't watch ",
+        NamedFile::sample(false),
+        " for changes, so only F5 reloads it: Access is denied.",
+    );
     let rendered = || {
         Content::Document(downlight_core::render(
             b"# Install\n\nRun the installer.\n",
@@ -623,20 +641,12 @@ pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
     Ok(serde_json::json!({
         "showAtHeading": answer(Place::Show { heading: Some("install".to_owned()) }, rendered())?,
         "showAtTop": answer(at_top(), rendered())?,
+        "showWithHeldNotice": answer_with(at_top(), rendered(), Some(held_notice))?,
         "reload": answer(Place::Reload, rendered())?,
         "unreadShow": answer(at_top(), unread())?,
         "unreadReload": answer(Place::Reload, unread())?,
         "noDocument": serde_json::to_value(None::<DocumentToShow>)?,
     }))
-}
-
-/// Reloads the calling window's document by hand (F5, Ctrl+R and the right-click menu).
-#[tauri::command]
-pub fn reload_document(
-    window: WebviewWindow,
-    documents: State<'_, Documents>,
-) -> tauri::Result<()> {
-    documents.reload(window.label())
 }
 
 /// What two paths to the same document have in common: the path with links, `..` and short names

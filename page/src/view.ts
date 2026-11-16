@@ -109,16 +109,31 @@ export function whenDocumentShown(listener: ShownListener): () => void {
   };
 }
 
-/** The started view's request, until a view starts. */
-let requestOfTheView: (() => Promise<void>) | undefined;
+/** What the rest of the page asks of the started view. */
+interface StartedView {
+  request: () => Promise<void>;
+  showing: () => number | null;
+}
+
+/** The started view, until a view starts. */
+let theView: StartedView | undefined;
 
 /**
- * Asks the app for the window's document and places the answer as it says, as the app's messages
- * make the view do; F5 is to call it (ticket 26). Resolves once the answer is in place, or once a
- * later request overtook it. Does nothing until the view has started.
+ * Asks the app for the window's document and places the answer as it says, as the app's
+ * `ask-for-document` message makes the view do, and as F5 does (ticket 26). Resolves once the
+ * answer is in place, or once a later request overtook it. Does nothing until the view has
+ * started.
  */
 export function requestDocument(): Promise<void> {
-  return requestOfTheView?.() ?? Promise.resolve();
+  return theView?.request() ?? Promise.resolve();
+}
+
+/**
+ * The showing whose render the view shows, which a link in it names (ticket 26), or null while
+ * it shows the empty state, an error or nothing yet, or hasn't started.
+ */
+export function showingInView(): number | null {
+  return theView?.showing() ?? null;
 }
 
 /**
@@ -296,7 +311,8 @@ function keepTheKeysOn(scroller: HTMLElement): void {
  * whenever the app says the window shows another document or the document's file changed. The
  * app's answer says whether to show it, at its heading or top, or reload it at the same reading
  * position (ticket 23); the page never decides that by which message made it ask. When the app
- * says the file is gone, it says so over the last render. `scriptStart` is when the page's script
+ * says the file of the showing in view is gone, it says so over the last render (ticket 26).
+ * `scriptStart` is when the page's script
  * started, for the first paint report.
  */
 export async function startDocumentView(scriptStart: number): Promise<void> {
@@ -320,8 +336,16 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
   let showing: number | null = null;
   /** The file of the document the view shows, for the `whenDocumentShown` listeners. */
   let file: DocumentFile | null = null;
-  /** Whether the document's file went away since the window last asked for its render. */
-  let fileGone = false;
+  /**
+   * The showing whose file the app said went away since the window last asked for its render, or
+   * null. The bar shows only while the view shows that showing (ticket 26), so a `gone` for a
+   * document the window has left never shows it, and one for the document the window was just
+   * given shows it once that document is in view.
+   */
+  let goneShowing: number | null = null;
+  const showGoneBar = () => {
+    goneBar.hidden = showing === null || showing !== goneShowing;
+  };
   /**
    * Why the view's content changed since the `whenDocumentShown` listeners last ran, or
    * undefined if it didn't.
@@ -351,19 +375,19 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
         ? placeError(String(error), null)
         : { notice: String(error) };
     }
+    // Shown as soon as it comes, even if a later request overtakes this one: the app hands a held
+    // notice over once, with the first answer (ticket 26).
+    if (answer?.notice) showNotice(answer.notice);
     return placementFor(answer);
   };
 
   /** Replaces the view's content with `content`, or shows the empty state for null. */
   const replaceContent = (placement: Placement, content: Node | null) => {
-    // A "gone" that came while a show was on the way was for the document the window has left,
-    // as the app sends it after `document-shown` at times (ticket 23). A reload keeps the bar.
-    if (placement.reason === "shown") fileGone = false;
     showing = placement.showing;
     file = placement.file;
     view.hidden = content === null;
     empty.hidden = content !== null;
-    goneBar.hidden = !fileGone;
+    showGoneBar();
     if (content === null) view.replaceChildren();
     else view.replaceChildren(content);
     // Listeners that haven't heard of a show yet hear "shown", even if a reload came after it.
@@ -431,28 +455,25 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
   const request = async (): Promise<void> => {
     // The file is read for this request, so only a "gone" after this keeps the bar. A reload that
     // can't read the file leaves the bar as it is.
-    fileGone = false;
+    goneShowing = null;
     const thisRequest = ++latestRequest;
     const isLatest = () => thisRequest === latestRequest;
     const outcome = await ask();
     if (isLatest()) await place(outcome, isLatest);
     if (isLatest()) settle();
   };
-  requestOfTheView = request;
+  theView = { request, showing: () => showing };
 
   // The listeners only start: waiting for them would hold up first paint.
-  listenToApp("document-shown", () => {
+  listenToApp("ask-for-document", () => {
     void request();
   });
   listenToApp("scroll-to-heading", (heading) => {
     void scrollToHeading(heading);
   });
-  listenToApp("document-changed", (change) => {
-    if (change === "gone") {
-      fileGone = true;
-      goneBar.hidden = false;
-    }
-    if (change === "reload") void request();
+  listenToApp("document-gone", (gone) => {
+    goneShowing = gone;
+    showGoneBar();
   });
   listenToApp("notice", showNotice);
 

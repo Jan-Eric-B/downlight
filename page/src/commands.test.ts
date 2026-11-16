@@ -1,15 +1,18 @@
 import { clearMocks, mockWindows } from "@tauri-apps/api/mocks";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import type { MenuEntry } from "./app";
+import readme from "../../core/tests/fixtures/readme.html?raw";
+import type { ArgsOf, MenuEntry } from "./app";
 import { startCommands } from "./commands";
 import { startFind } from "./find";
 import {
+  answerAsTheApp,
   askedOfTheApp,
   fakeTheApp,
   settle,
   tell,
   type FakeApp,
 } from "./test-support";
+import { startDocumentView } from "./view";
 
 let stop: AbortController;
 
@@ -155,35 +158,50 @@ describe("Ctrl+O opens a document", () => {
   });
 });
 
+// A reload asks the document view for the window's document directly, with the showing the view
+// shows, so the app answers it with a reload (ticket 26).
 describe("Reload", () => {
+  /** Each `render_document` request's arguments since the view showed its document. */
+  let requested: ArgsOf<"render_document">[];
+
+  beforeEach(async () => {
+    app.render_document = (args) => {
+      requested.push(args);
+      return answerAsTheApp(args, () => Promise.resolve(readme));
+    };
+    requested = [];
+    await startDocumentView(0);
+    requested = [];
+  });
+
   test("F5 reloads", () => {
     const event = press({ key: "F5", code: "F5" });
-    expect(askedOfTheApp()).toEqual(["reload_document"]);
+    expect(requested).toEqual([{ showing: 0 }]);
     expect(event.defaultPrevented).toBe(true);
   });
 
   test("Ctrl+R reloads on a QWERTY layout", () => {
     const event = press({ ctrlKey: true, key: "r", code: "KeyR" });
-    expect(askedOfTheApp()).toEqual(["reload_document"]);
+    expect(requested).toEqual([{ showing: 0 }]);
     expect(event.defaultPrevented).toBe(true);
   });
 
   test("Ctrl+R reloads on a Cyrillic layout, by the key in R's place", () => {
     press({ ctrlKey: true, key: "к", code: "KeyR" });
-    expect(askedOfTheApp()).toEqual(["reload_document"]);
+    expect(requested).toEqual([{ showing: 0 }]);
   });
 
   test("F5 held down reloads once", () => {
     press({ key: "F5", code: "F5" });
     const repeat = press({ key: "F5", code: "F5", repeat: true });
     press({ key: "F5", code: "F5", repeat: true });
-    expect(askedOfTheApp()).toEqual(["reload_document"]);
+    expect(requested).toEqual([{ showing: 0 }]);
     // The webview never gets the repeats either, so it doesn't reload the page itself.
     expect(repeat.defaultPrevented).toBe(true);
   });
 
-  test("a reload the app can't start shows why", async () => {
-    app.reload_document = () => {
+  test("a reload the app can't answer keeps the document and shows why", async () => {
+    app.render_document = () => {
       throw new Error("Can't reload: window not found");
     };
     press({ key: "F5", code: "F5" });
@@ -192,6 +210,15 @@ describe("Reload", () => {
         "Can't reload: window not found",
       );
     });
+    expect(document.querySelector("article h1")?.textContent).toBe(
+      "Lamplighter",
+    );
+  });
+
+  test("runs Reload chosen in the menu", async () => {
+    await settle();
+    await tell("menu-command", "reload");
+    expect(requested).toEqual([{ showing: 0 }]);
   });
 
   // WebView2's own reloads on these keys are off with all its browser keys (ticket 29), and the
@@ -202,13 +229,13 @@ describe("Reload", () => {
     ["Ctrl+Shift+R", { ctrlKey: true, shiftKey: true, key: "R", code: "KeyR" }],
   ])("%s does nothing", (_keys, keys) => {
     const event = press(keys);
-    expect(askedOfTheApp()).toEqual([]);
+    expect(requested).toEqual([]);
     expect(event.defaultPrevented).toBe(false);
   });
 
   test("F5 with Alt held does nothing", () => {
     const event = press({ altKey: true, key: "F5", code: "F5" });
-    expect(askedOfTheApp()).toEqual([]);
+    expect(requested).toEqual([]);
     expect(event.defaultPrevented).toBe(false);
   });
 });
@@ -260,12 +287,6 @@ describe("the right-click menu", () => {
     await settle();
     await tell("menu-command", "open");
     expect(askedOfTheApp()).toEqual(["open_document"]);
-  });
-
-  test("runs Reload chosen in the menu", async () => {
-    await settle();
-    await tell("menu-command", "reload");
-    expect(askedOfTheApp()).toEqual(["reload_document"]);
   });
 
   test("runs Find chosen in the menu", async () => {

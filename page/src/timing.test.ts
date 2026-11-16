@@ -3,7 +3,11 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import notes from "../../core/tests/fixtures/notes.html?raw";
 import readme from "../../core/tests/fixtures/readme.html?raw";
 import type { ArgsOf } from "./app";
-import { openPageWith, type Read, type tell as Tell } from "./test-support";
+import {
+  openPageWith,
+  type Read,
+  type saveTheFile as SaveTheFile,
+} from "./test-support";
 
 // The timing switch is read once, when `timing.ts` loads, so each test loads the page's modules
 // afresh after turning the switch on, as the app does by opening the page with the `timing` flag.
@@ -16,13 +20,14 @@ let documents: Read[] = [];
 
 /**
  * Loads the document view with the timing switch on and a fresh fake app, and returns its start
- * and the fake app's way to send the page a message.
+ * and the fake app's way to tell the page its file was saved.
  */
 async function loadTimedView(): Promise<{
   start: (scriptStart: number) => Promise<void>;
-  tell: typeof Tell;
+  saveTheFile: typeof SaveTheFile;
 }> {
-  const { answerAsTheApp, fakeTheApp, tell } = await import("./test-support");
+  const { answerAsTheApp, fakeTheApp, saveTheFile } =
+    await import("./test-support");
   const { startDocumentView } = await import("./view");
   fakeTheApp({
     report_first_paint: (args) => {
@@ -34,7 +39,7 @@ async function loadTimedView(): Promise<{
       return next ? answerAsTheApp(args, next) : null;
     },
   });
-  return { start: startDocumentView, tell };
+  return { start: startDocumentView, saveTheFile };
 }
 
 /** Lets the page's pending IPC calls, such as starting to listen, finish. */
@@ -77,11 +82,11 @@ test("a first request that a save overtakes still reports first paint", async ()
         sendSecond = resolve;
       }),
   ];
-  const { start, tell } = await loadTimedView();
+  const { start, saveTheFile } = await loadTimedView();
   const started = start(0);
   await settle();
 
-  await tell("document-changed", "reload");
+  await saveTheFile();
   sendFirst(notes);
   await settle();
   sendSecond(readme);

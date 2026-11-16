@@ -4,23 +4,23 @@
 
 use tauri::{AppHandle, Emitter as _};
 
+use crate::documents::Showing;
 use crate::notice::Notice;
 use crate::title_bar::MaximizeButtonState;
 
 /// A message for one window's page. Each goes as the event the page listens for, with a string
-/// payload, a notice or none (`Messages` in `page/src/app.ts`).
+/// payload, a showing, a notice or none (`Messages` in `page/src/app.ts`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Message {
-    /// The window shows another document now, and the page is to ask for it.
-    DocumentShown,
-    /// The document's file was saved or came back, or the reader asked for a reload, and its new
-    /// render has started for the page to ask for. Both this and [`Message::DocumentShown`] only
-    /// make the page ask: whether it shows the document or reloads it comes with the answer
-    /// (`Documents::handover`), since this can reach the page after the `DocumentShown` of a
-    /// document the window was given since (ticket 23).
-    Reload,
-    /// The document's file was deleted or moved away.
-    Gone,
+    /// The page is to ask for its document: the window shows another document now, or the
+    /// document's file was saved or came back and its new render has started. One message for
+    /// both (ticket 26), since whether the page shows the document or reloads it comes with the
+    /// answer (`Documents::handover`): a save to the document the window has just left can reach
+    /// the page after the message for the document it was given since (ticket 23).
+    AskForDocument,
+    /// The file of the document the window shows as this showing was deleted or moved away. It
+    /// names the showing, so a page whose view shows another one tells it apart (ticket 26).
+    Gone(Showing),
     /// A link in another window named a heading in this window's document, to scroll to now.
     ScrollToHeading(String),
     /// A short message to show the reader for a few seconds, such as why a dropped file didn't
@@ -41,6 +41,7 @@ pub enum Message {
 #[serde(untagged)]
 enum Payload<'a> {
     Text(&'a str),
+    Showing(Showing),
     Notice(&'a Notice),
 }
 
@@ -49,9 +50,8 @@ impl Message {
     fn event(&self) -> (&'static str, Option<Payload<'_>>) {
         let text = |text| Some(Payload::Text(text));
         match self {
-            Self::DocumentShown => ("document-shown", None),
-            Self::Reload => ("document-changed", text("reload")),
-            Self::Gone => ("document-changed", text("gone")),
+            Self::AskForDocument => ("ask-for-document", None),
+            Self::Gone(showing) => ("document-gone", Some(Payload::Showing(*showing))),
             Self::ScrollToHeading(heading) => ("scroll-to-heading", text(heading)),
             Self::Notice(notice) => ("notice", Some(Payload::Notice(notice))),
             Self::MenuCommand(id) => ("menu-command", text(id)),
@@ -79,9 +79,8 @@ pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
 
     // A new message stops the build here: give it a sample below, then name it here.
     let _sampled = |message: &Message| match message {
-        Message::DocumentShown
-        | Message::Reload
-        | Message::Gone
+        Message::AskForDocument
+        | Message::Gone(_)
         | Message::ScrollToHeading(_)
         | Message::Notice(_)
         | Message::MenuCommand(_)
@@ -98,9 +97,10 @@ pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
         " for changes, so only F5 reloads it: Access is denied.",
     );
     Ok(serde_json::json!({
-        "documentShown": sample(Message::DocumentShown),
-        "reload": sample(Message::Reload),
-        "gone": sample(Message::Gone),
+        "askForDocument": sample(Message::AskForDocument),
+        // The showing of the `render_document` samples, so the page's tests can tell a `gone`
+        // for the showing its view shows.
+        "gone": sample(Message::Gone(Showing::sample())),
         "scrollToHeading": sample(Message::ScrollToHeading("install".to_owned())),
         "notice": sample(Message::Notice("Can't watch the document's file".into())),
         "noticeNamingFile": sample(Message::Notice(naming_file)),

@@ -2,6 +2,7 @@ import { askApp, listenToApp, type MenuEntry } from "./app";
 import { findNext, findPrevious, openFind } from "./find";
 import { showingWhy } from "./notice";
 import { open } from "./open";
+import { requestDocument } from "./view";
 
 /**
  * The reader's commands: each one's name, keyboard shortcut and what it does. A new command is
@@ -46,9 +47,10 @@ const commands = {
   reload: {
     label: "Reload",
     shortcuts: [{ key: "F5" }, { ctrl: true, key: "r" }],
-    // The app tells the page to reload, and the page shows why if the file can't be read.
+    // Asks for the document with the showing the view shows, which the app answers with a reload
+    // (ticket 26); the view shows why if the file can't be read.
     run: () => {
-      showingWhy(askApp("reload_document"));
+      void requestDocument();
     },
   },
   find: {
