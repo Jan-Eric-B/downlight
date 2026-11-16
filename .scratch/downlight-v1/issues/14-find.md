@@ -6,15 +6,15 @@ Spec: [Downlight v1](../spec.md)
 
 **Blocked by:** 03 (Page test harness), 09 (Opening from inside a window)
 
-**Status:** ready-for-agent
+**Status:** ready-for-human
 
 - [x] Ctrl+F opens the find bar with the focus in its box; pressing it again while open selects the text in the box.
-- [ ] Matches are highlighted as the reader types, ignoring case, without changing the document's DOM.
+- [x] Matches are highlighted as the reader types, ignoring case, without changing the document's DOM.
 - [x] The bar shows "N of M", or "No results" when nothing matches.
-- [ ] Enter and F3 go to the next match, Shift+Enter and Shift+F3 to the previous one, wrapping at the ends. The current match scrolls into view and is highlighted differently from the rest.
-- [ ] Esc closes the bar and clears the highlights.
-- [ ] The bar has a previous and a next button (up and down arrows, as in Edge and VS Code) beside the count. A click steps like Shift+Enter and Enter, wrapping at the ends; each has a tooltip with its key ("Previous match (Shift+Enter)", "Next match (Enter)"), and both are unavailable when nothing matches.
-- [ ] The bar has a close button (an X, after the arrow buttons) with the tooltip "Close (Esc)". A click does what Esc does: it closes the bar and clears the highlights, and the box keeps its text for the next Ctrl+F.
+- [x] Enter and F3 go to the next match, Shift+Enter and Shift+F3 to the previous one, wrapping at the ends. The current match scrolls into view and is highlighted differently from the rest.
+- [x] Esc closes the bar and clears the highlights.
+- [x] The bar has a previous and a next button (up and down arrows, as in Edge and VS Code) beside the count. A click steps like Shift+Enter and Enter, wrapping at the ends; each has a tooltip with its key ("Previous match (Shift+Enter)", "Next match (Enter)"), and both are unavailable when nothing matches.
+- [x] The bar has a close button (an X, after the arrow buttons) with the tooltip "Close (Esc)". A click does what Esc does: it closes the bar and clears the highlights, and the box keeps its text for the next Ctrl+F.
 - [x] After a reload while the bar is open, the matches are counted again.
 - [x] Find is in the right-click menu.
 - [x] Page tests cover the count, the current match, next and previous, wrapping, Esc and the count after a reload.
@@ -133,6 +133,24 @@ No task or frame over 100 ms while typing: the target is met. The first count st
 - An IME's Enter that ends a composition doesn't step.
 - The bar over the "File deleted or moved" bar, and in a narrow window.
 - F5 and Ctrl+R still reload, and Ctrl+plus, Ctrl+minus and Ctrl+0 still zoom (the key handler changed).
+
+**2026-11-16, the bar's buttons, and the older boxes.** `npm run check` passes.
+
+The three older open boxes (highlights as the reader types, Enter/F3 and Shift+Enter/Shift+F3 with the current match told apart, Esc) were already built on 2026-11-12 and covered by page tests; they were open only for want of a hand check, since happy-dom has no CSS Custom Highlights and the painting (`paint`, `paintCurrent`) runs only in the webview. Nothing was missing in code, so they are ticked now, and what still needs eyes is in the hand checks below. Since then ticket 29 turned WebView2's browser keys off (`leave_keys_to_the_page`), so `leave_reload_and_find_keys_to_the_page` above is gone, and F3 and Shift+F3 stay the `findNext` and `findPrevious` commands in `page/src/commands.ts`.
+
+Built now, in `page/src/find.ts`: a previous and a next button (Fluent's `arrow_up_16_regular` and `arrow_down_16_regular`) after the count, and a close button (`dismiss_16_regular`, the window's X) after them. Their clicks call the same `step(-1)`, `step(1)` and `close()` that Shift+Enter, Enter and Esc call, so a click also wraps, scrolls the current match into view and opens its sections, and closing cancels a scroll still waiting for its frame. Tooltips "Previous match (Shift+Enter)", "Next match (Enter)" and "Close (Esc)"; screen readers hear "Previous match", "Next match" and "Close Find" (not "Close", which is the window's button), with `aria-keyshortcuts`. The arrows are `disabled` whenever there is no current match: an empty box, "No results", and a long document's count still waiting for its index; the close button is always available. A press on any of them keeps the focus where it was (`mousedown` default prevented, as the title bar does), so the reader can click and go on typing or press Enter; they stay in the Tab order for the keyboard.
+
+The look, in `page/src/document.css` (`.find-button`): the title bar's, as the 2026-11-16 notes ask: a 16 px glyph in the bar's text color on a 28 px button with a 4 px radius, Windows 11's subtle fills under the pointer and while pressed, Windows 11's disabled text fill when unavailable, and the accent's focus ring (`--accent-emphasis`, Dark 1 in light and Light 1 in dark, per the window design spec's focus-ring row). The subtle fills moved from `.title-bar` to `:root` in `page/src/title-bar.css`, renamed `--subtle-fill-hover` and `--subtle-fill-pressed`, so both bars share them. High contrast: `ButtonText`, `Highlight` and `HighlightText` under the pointer, `GrayText` when unavailable, as on the title bar. The buttons sit 2 px apart, close together as in Edge's and VS Code's find bars. The window design spec says nothing else about the find bar beyond its colors (ticket 03, done) and that it keeps its size under zoom. `vite.config.ts`'s Fluent notice comment now names the find bar too.
+
+**Tests:** seven new page tests in `page/src/find.test.ts`, written first and seen failing: "the arrow buttons sit beside the count and the close button after them", "each of the bar's buttons names its key in its tooltip", "the next and previous buttons step like Enter and Shift+Enter, wrapping at the ends", "a step with a button scrolls the current match into view", "the arrow buttons are unavailable when nothing matches", "pressing a bar's button leaves the focus in the box" and "the close button closes the bar and clears the matches, as Esc does". One existing test changed: `ROLE_USES` in `page/src/accent.test.ts`, which lists every use of an accent role in the stylesheets, gets the new `.find-button:focus-visible` outline as an emphasis use; it failed because the stylesheet gained a use, not because of a bug.
+
+**Not measured:** matching, indexing and painting are unchanged; each count now also sets two buttons' `disabled`, which doesn't grow with the document. The 2026-11-12 numbers stand.
+
+**Not yet checked by hand** (release build), besides the list above:
+
+- The arrow and close buttons in light, dark and high contrast: hover and pressed fills, the amber focus ring when tabbing to them, the arrows dimmed with an empty box and with "No results".
+- A click on next and previous steps and wraps with the current match centred, and the focus stays in the box (typing goes on, Enter steps); the close button clears the highlights, and Ctrl+F shows them again with the box's text kept.
+- The tooltips' wording, and that the bar still fits in a narrow window with the three buttons.
 
 ## Comments
 

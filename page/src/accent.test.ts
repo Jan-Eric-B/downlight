@@ -222,6 +222,8 @@ const ROLE_USES: Record<string, string> = {
   ".copy-code:focus-visible / outline": "emphasis",
   ".empty-window button:focus-visible / outline": "emphasis",
   ".find-bar input:focus-visible / outline": "emphasis",
+  // The find bar's arrow and close buttons (v1 ticket 14).
+  ".find-button:focus-visible / outline": "emphasis",
 };
 
 /**

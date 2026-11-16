@@ -371,6 +371,69 @@ article.markdown-body > * {
   white-space: nowrap;
 }
 
+/* The previous, next and close buttons (find.ts), in the title bar's look (title-bar.css): a glyph
+   in the bar's text color, Windows 11's subtle fills under the pointer and while pressed, and the
+   accent's focus ring. Close together, as in Edge's and VS Code's find bars. */
+.find-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fgColor-default);
+}
+
+.find-button + .find-button {
+  margin-left: -6px;
+}
+
+.find-button svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+}
+
+.find-button:hover:enabled {
+  background-color: var(--subtle-fill-hover);
+}
+
+.find-button:active:enabled {
+  background-color: var(--subtle-fill-pressed);
+}
+
+/* With nothing to step to: Windows 11's disabled text fill, as on an inactive title bar. */
+.find-button:disabled {
+  color: light-dark(rgb(0 0 0 / 36.1%), rgb(255 255 255 / 36.3%));
+}
+
+.find-button:focus-visible {
+  outline: 2px solid var(--accent-emphasis);
+  outline-offset: -2px;
+}
+
+/* High contrast: the reader's button colors, with the selection's under the pointer, as on the
+   title bar. */
+@media (forced-colors: active) {
+  .find-button {
+    forced-color-adjust: none;
+    color: ButtonText;
+  }
+
+  .find-button:hover:enabled,
+  .find-button:active:enabled {
+    background-color: Highlight;
+    color: HighlightText;
+  }
+
+  .find-button:disabled {
+    color: GrayText;
+  }
+}
+
 /* Find's matches, painted with the CSS Custom Highlight API so the document's DOM never changes,
    in the accent's Find roles (accent.css). The current match is Base in light and dark alike, so
    its text is dark in both to stay readable. */

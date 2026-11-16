@@ -418,6 +418,105 @@ test("Esc with the focus outside the box closes the bar", () => {
   expect(bar().hidden).toBe(true);
 });
 
+/** The find bar's button that a screen reader names `label`. */
+function barButton(label: string): HTMLButtonElement {
+  const found = bar().querySelector<HTMLButtonElement>(
+    `button[aria-label="${label}"]`,
+  );
+  if (!found) throw new Error(`no ${label} button`);
+  return found;
+}
+
+const previousButton = () => barButton("Previous match");
+const nextButton = () => barButton("Next match");
+const closeButton = () => barButton("Close Find");
+
+test("the arrow buttons sit beside the count and the close button after them", () => {
+  expect([...bar().children]).toEqual([
+    box(),
+    bar().querySelector('[role="status"]'),
+    previousButton(),
+    nextButton(),
+    closeButton(),
+  ]);
+});
+
+test("each of the bar's buttons names its key in its tooltip", () => {
+  expect(previousButton().title).toBe("Previous match (Shift+Enter)");
+  expect(nextButton().title).toBe("Next match (Enter)");
+  expect(closeButton().title).toBe("Close (Esc)");
+});
+
+test("the next and previous buttons step like Enter and Shift+Enter, wrapping at the ends", () => {
+  type("lamp");
+  nextButton().click();
+  expect(findMatches().current).toBe(1);
+  expect(status()).toBe(`2 of ${String(LAMPS)}`);
+  previousButton().click();
+  previousButton().click();
+  expect(findMatches().current).toBe(LAMPS - 1);
+  nextButton().click();
+  expect(findMatches().current).toBe(0);
+});
+
+test("a step with a button scrolls the current match into view", () => {
+  const scrolled = spyOnScrolls();
+  type("lamp");
+  nextButton().click();
+  expect(scrolled().at(-1)).toEqual([currentHolder(), { block: "center" }]);
+});
+
+test("the arrow buttons are unavailable when nothing matches", () => {
+  ctrlF();
+  expect([previousButton().disabled, nextButton().disabled]).toEqual([
+    true,
+    true,
+  ]);
+  type("lamp");
+  expect([previousButton().disabled, nextButton().disabled]).toEqual([
+    false,
+    false,
+  ]);
+  type("lantern");
+  expect([previousButton().disabled, nextButton().disabled]).toEqual([
+    true,
+    true,
+  ]);
+  nextButton().click();
+  expect(status()).toBe("No results");
+  // The close button stays available.
+  expect(closeButton().disabled).toBe(false);
+});
+
+test("pressing a bar's button leaves the focus in the box", () => {
+  type("lamp");
+  for (const button of [previousButton(), nextButton(), closeButton()]) {
+    const press = new MouseEvent("mousedown", {
+      bubbles: true,
+      cancelable: true,
+    });
+    button.dispatchEvent(press);
+    expect(press.defaultPrevented).toBe(true);
+  }
+});
+
+test("the close button closes the bar and clears the matches, as Esc does", async () => {
+  layOut(60);
+  spyOnScrolls();
+  const scrollBy = spyOnScrollBy();
+  type("lamp");
+  closeButton().click();
+  expect(bar().hidden).toBe(true);
+  expect(findMatches()).toEqual({ matches: [], current: undefined });
+  // As with Esc, the match's scroll after its frame is cancelled.
+  await afterNextFrame();
+  expect(scrollBy).not.toHaveBeenCalled();
+  // The box keeps its text for the next Find.
+  expect(box().value).toBe("lamp");
+  ctrlF();
+  expect(findMatches().matches).toHaveLength(LAMPS);
+});
+
 test("a document shown while the bar is open is counted again", async () => {
   documents = [notes];
   type("document");

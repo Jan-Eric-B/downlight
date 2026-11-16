@@ -1,3 +1,8 @@
+// Microsoft's Fluent UI System Icons, as on the title bar (title-bar.ts): up and down arrows, as
+// Edge's and VS Code's find bars have, and the same X as the window's close button.
+import nextGlyph from "@fluentui/svg-icons/icons/arrow_down_16_regular.svg?raw";
+import previousGlyph from "@fluentui/svg-icons/icons/arrow_up_16_regular.svg?raw";
+import closeGlyph from "@fluentui/svg-icons/icons/dismiss_16_regular.svg?raw";
 import {
   atOrAfterReadingPosition,
   openSectionsAround,
@@ -259,11 +264,40 @@ function firstAfterReadingPosition(
   return low < matches.length ? low : 0;
 }
 
+/**
+ * One of the find bar's buttons, showing `glyph`. Its tooltip names the key that does the same, as
+ * the title bar's buttons name their shortcuts. A press keeps the focus where it was, in the box
+ * while the reader types, so Enter and typing go on working after a click.
+ */
+function findBarButton(
+  label: string,
+  tooltip: string,
+  keys: string,
+  glyph: string,
+): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "find-button";
+  button.setAttribute("aria-label", label);
+  button.setAttribute("aria-keyshortcuts", keys);
+  button.title = tooltip;
+  // The SVG is one of the page's own bundled glyphs.
+  button.innerHTML = glyph;
+  button.addEventListener("mousedown", (event) => {
+    event.preventDefault();
+  });
+  return button;
+}
+
 /** The find bar, the query and its matches. */
 class Find {
   readonly bar: HTMLElement;
   readonly box: HTMLInputElement;
   private readonly status: HTMLElement;
+  /** The arrow buttons, which step like Shift+Enter and Enter, and the close button, like Esc. */
+  readonly previous: HTMLButtonElement;
+  readonly next: HTMLButtonElement;
+  readonly closer: HTMLButtonElement;
   /**
    * The view and its scroller, once Find has heard of them: before that there is no document to
    * find in.
@@ -295,8 +329,34 @@ class Find {
     this.box.spellcheck = false;
     this.status = document.createElement("span");
     this.status.setAttribute("role", "status");
-    this.bar.append(this.box, this.status);
+    this.previous = findBarButton(
+      "Previous match",
+      "Previous match (Shift+Enter)",
+      "Shift+Enter",
+      previousGlyph,
+    );
+    this.next = findBarButton(
+      "Next match",
+      "Next match (Enter)",
+      "Enter",
+      nextGlyph,
+    );
+    // Named apart from the window's own Close for a screen reader.
+    this.closer = findBarButton(
+      "Close Find",
+      "Close (Esc)",
+      "Escape",
+      closeGlyph,
+    );
+    this.bar.append(
+      this.box,
+      this.status,
+      this.previous,
+      this.next,
+      this.closer,
+    );
     document.body.append(this.bar);
+    this.showCount();
   }
 
   get isOpen(): boolean {
@@ -428,7 +488,11 @@ class Find {
     this.showCount();
   }
 
+  /** Shows "N of M" or "No results", and whether the arrow buttons have a match to step to. */
   private showCount(): void {
+    const nothingMatches = this.current === undefined;
+    this.previous.disabled = nothingMatches;
+    this.next.disabled = nothingMatches;
     if (this.current !== undefined) {
       this.status.textContent = `${String(this.current + 1)} of ${String(this.matches.length)}`;
     } else {
@@ -514,14 +578,37 @@ export function findMatches(): {
 /**
  * Starts Find (ticket 14): the find bar, hidden until Find opens it, which looks for the box's
  * text in the shown document only. Enter goes to the next match and Shift+Enter to the previous
- * one (F3 and Shift+F3 are commands, in `commands.ts`), and Esc closes the bar. The signal removes
- * its listeners again, for the tests.
+ * one (F3 and Shift+F3 are commands, in `commands.ts`), and Esc closes the bar; the bar's arrow
+ * and close buttons do the same for the mouse. The signal removes its listeners again, for the
+ * tests.
  */
 export function startFind(signal?: AbortSignal): void {
   const started = new Find();
   find = started;
-  const { box } = started;
+  const { box, previous, next, closer } = started;
 
+  // The buttons do what the keys do, through the same steps, so the two can't disagree.
+  previous.addEventListener(
+    "click",
+    () => {
+      started.step(-1);
+    },
+    { signal },
+  );
+  next.addEventListener(
+    "click",
+    () => {
+      started.step(1);
+    },
+    { signal },
+  );
+  closer.addEventListener(
+    "click",
+    () => {
+      started.close();
+    },
+    { signal },
+  );
   box.addEventListener(
     "input",
     () => {

@@ -4,6 +4,14 @@
    restores it on a double-click, and shows the window menu on a right-click (app-region). */
 :root {
   --title-bar-height: 0px;
+  /* Windows 11's subtle fills under the pointer and while pressed, shared by everything on the bar
+     that takes clicks and shows it, and by the find bar's buttons (document.css), which look like
+     the bar's. */
+  --subtle-fill-hover: light-dark(rgb(0 0 0 / 3.73%), rgb(255 255 255 / 6.05%));
+  --subtle-fill-pressed: light-dark(
+    rgb(0 0 0 / 2.41%),
+    rgb(255 255 255 / 4.19%)
+  );
 }
 
 :root:has(> body > .title-bar) {
@@ -11,11 +19,6 @@
 }
 
 .title-bar {
-  /* Windows 11's subtle fills under the pointer and while pressed, shared by everything on the bar
-     that takes clicks and shows it. */
-  --title-bar-hover: light-dark(rgb(0 0 0 / 3.73%), rgb(255 255 255 / 6.05%));
-  --title-bar-pressed: light-dark(rgb(0 0 0 / 2.41%), rgb(255 255 255 / 4.19%));
-
   position: fixed;
   top: 0;
   right: 0;
@@ -85,11 +88,11 @@
 }
 
 .title-bar .file-name:hover {
-  background-color: var(--title-bar-hover);
+  background-color: var(--subtle-fill-hover);
 }
 
 .title-bar .file-name:active {
-  background-color: var(--title-bar-pressed);
+  background-color: var(--subtle-fill-pressed);
 }
 
 .window-buttons {
@@ -116,13 +119,13 @@
 
 .window-button:hover,
 .window-button[data-state="hovered"] {
-  background-color: var(--title-bar-hover);
+  background-color: var(--subtle-fill-hover);
   color: light-dark(rgb(0 0 0 / 89.4%), #ffffff);
 }
 
 .window-button:active,
 .window-button[data-state="pressed"] {
-  background-color: var(--title-bar-pressed);
+  background-color: var(--subtle-fill-pressed);
   color: light-dark(rgb(0 0 0 / 62%), rgb(255 255 255 / 78.6%));
 }
 

@@ -1,7 +1,8 @@
 /// <reference types="vitest/config" />
 import { defineConfig } from "vite";
 
-/** The license of Fluent UI System Icons, whose glyphs the title bar inlines (title-bar.ts). */
+/** The license of Fluent UI System Icons, whose glyphs the title bar and the find bar inline (title-bar.ts,
+ * find.ts). */
 const FLUENT_ICONS_NOTICE = `/*! Fluent UI System Icons (@fluentui/svg-icons)
  *
  * MIT License
