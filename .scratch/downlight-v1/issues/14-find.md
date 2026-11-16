@@ -13,6 +13,8 @@ Spec: [Downlight v1](../spec.md)
 - [x] The bar shows "N of M", or "No results" when nothing matches.
 - [ ] Enter and F3 go to the next match, Shift+Enter and Shift+F3 to the previous one, wrapping at the ends. The current match scrolls into view and is highlighted differently from the rest.
 - [ ] Esc closes the bar and clears the highlights.
+- [ ] The bar has a previous and a next button (up and down arrows, as in Edge and VS Code) beside the count. A click steps like Shift+Enter and Enter, wrapping at the ends; each has a tooltip with its key ("Previous match (Shift+Enter)", "Next match (Enter)"), and both are unavailable when nothing matches.
+- [ ] The bar has a close button (an X, after the arrow buttons) with the tooltip "Close (Esc)". A click does what Esc does: it closes the bar and clears the highlights, and the box keeps its text for the next Ctrl+F.
 - [x] After a reload while the bar is open, the matches are counted again.
 - [x] Find is in the right-click menu.
 - [x] Page tests cover the count, the current match, next and previous, wrapping, Esc and the count after a reload.
@@ -149,3 +151,7 @@ A lead for later, not worth doing now: happy-dom has no CSS Custom Highlights, s
 **2026-11-13, after the review fixes.** A line break between two inline elements (`**bold**` and `*italic*` on consecutive lines) now matches a space; only whitespace beside a block keeps its line breaks (`isGapBetweenBlocks` in `page/src/find.ts`). Measured again (`npm run measure`, release build, median of 5), 1 MB mixed / prose: keystrokeToCount 15.2 / 14.8, firstKeystrokeToCount 152.8 / 134.9, longestLaterKeystrokeToCount 37.6 / 33.6, longestWhileTyping 0.0 / 0.0 (one run of the mixed document had a 101.2 ms task). Unchanged from 2026-11-12.
 
 **2026-11-13, from the window design grilling.** Find's highlight colors move to the accent color: every match Light 3 in light and Dark 3 in dark, the current match Base. Window design ticket 03 makes that change; this ticket keeps today's colors until then. See [Window design](../../window-design/spec.md).
+
+**2026-11-16, from the reader.** The find bar has no buttons to step back and forth through the matches; only the keys do it. Added as a box above: a previous and a next arrow button beside the count. They step through the page's existing next and previous, so keys and buttons can't disagree, and they take the focus ring and hover of the title bar's buttons.
+
+**2026-11-16, from the reader.** The bar can only be closed with Esc, which a reader using the mouse doesn't know. Added as a box above: a close button after the arrow buttons, doing exactly what Esc does through the same code.
