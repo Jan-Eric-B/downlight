@@ -6,7 +6,7 @@ Spec: [Downlight v1](../spec.md)
 
 **Blocked by:** 25 (One pipeline places every document in the page's view), 27 (One page module speaks to the app)
 
-**Status:** ready-for-human
+**Status:** closed
 
 - [x] F5, Ctrl+R and the right-click menu's Reload call the view's request (ticket 25) with the showing the view shows; `reload_document` and `Documents::reload` are gone, with their tests. `Documents::handover` already starts a new read when no render is ahead (`next_render_after_the_first_reads_the_file_again`).
 - [x] `document-shown` and `document-changed: "reload"`, which since ticket 23 both only make the page ask, are one message.
@@ -41,3 +41,5 @@ Built 2026-11-16. `npm run check` passes.
 **2026-11-13, from the architecture review.** The unhandled rejection of `void invoke("reload_document")` was fixed separately in `page/src/commands.ts`; this ticket removes the command itself. Ticket 22's open item 7 ("nothing tests `Documents::reload` when its send fails") goes with it.
 
 **2026-11-13, from ticket 27.** The contract samples (`app/src/contract.rs`) pin the shapes of answers, messages and the menu and timing arguments, but not the names of a command's parameters: Tauri takes them from the Rust function. This ticket renames or adds some (`follow_link` takes a showing, `reload_document` goes), and a page-side name that no longer matches fails only at run time, so run each changed command once in the app. A new message variant, or a `gone` that carries its showing, gets its sample in `message.rs`'s `contract_samples` and `npm run fixtures`.
+
+**2026-11-16, checked by hand and closed.** The reader went through every hand check above on the release build of commit abed67f, with the hand-check documents in `temp/handcheck/`, and found them all fine.

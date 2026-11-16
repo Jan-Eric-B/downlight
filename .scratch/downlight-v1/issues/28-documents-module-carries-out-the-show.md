@@ -6,7 +6,7 @@ Spec: [Downlight v1](../spec.md)
 
 **Blocked by:** none
 
-**Status:** ready-for-human
+**Status:** closed
 
 - [x] A windows port (roughly: open a window, set its title, bring it to the front) sits beside `Pages`. Tauri's `AppHandle` is the app's adapter and the recorder the tests' adapter, as ticket 22 decided for `Pages`: a trait with two adapters, not code generic over `R: Runtime`, and no mock runtime.
 - [x] `window::show`, `Shown`, `open_or_forget` and `links::left_for_the_page` fold into the documents module, or go; `links::follow` maps what `give` did to `Followed` directly.
@@ -49,3 +49,5 @@ Built 2026-11-16. `npm run check` passes.
 **2026-11-16, from ticket 26.** `Documents::reload` and the `reload_document` command are gone (F5 asks the page's view directly), and `Documents::handover` sends nothing now: a held notice goes in the answer. Every message a page gets from the documents module is `AskForDocument`, `Gone(Showing)`, `ScrollToHeading` or `Notice`. `links::follow` looks the document up with `Documents::document_path_shown_as(window, showing)`, since `follow_link` now takes the showing whose document the link was in; folding `follow` into the documents module keeps that check.
 
 **2026-11-16, from the review.** A window's title could name the wrong document: each change titled the window after the document it was given, outside the table's lock, so of two shows into one window (two quick Alt+Left, or a link during Ctrl+O) the first's title could land last, and a change that failed put back the old title even when the window had been given a newer document since and kept it. Now every change, and every put-back, is followed by `Documents::retitle`, which titles the window after the document the table says it shows, under a titles lock of its own (`Inner::titles`), so the last titling, which comes after the last change, names the document the window shows; `put_back` no longer titles the window itself, and it restores the window only while the window is still at the failed show's claim (`ShownDocument::claim`, see ticket 12's Comments). Tauri's `set_title` off the main thread posts to the event loop without waiting, so the lock is held briefly. The recorder's `before_next_title` runs a second show on another thread in the middle of a first one's titling (the tests' `meanwhile`): `of_two_documents_given_one_window_at_once_the_title_names_the_one_it_shows` and `a_change_that_fails_after_the_window_was_given_another_document_keeps_that_one_s_title` failed before the fix; with it, the second show is held up by the titles lock until the first title is set, and the tests wait for it to end.
+
+**2026-11-16, checked by hand and closed.** The reader went through every hand check above on the release build of commit abed67f, with the hand-check documents in `temp/handcheck/`, and found them all fine.

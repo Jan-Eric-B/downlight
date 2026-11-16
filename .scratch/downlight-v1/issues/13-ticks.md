@@ -6,7 +6,7 @@ Spec: [Downlight v1](../spec.md)
 
 **Blocked by:** 12 (Back and Forward)
 
-**Status:** ready-for-human
+**Status:** closed
 
 - [x] Task items can be ticked and unticked with the mouse and with the keyboard.
 - [x] A reload with the same number of task items keeps the ticks; a reload with a different number clears them.
@@ -51,3 +51,5 @@ Built 2026-11-16. `npm run check` passes. Ticks are the page's alone: a new modu
 - `history.showAnew` starts a showing afresh on a show (Ctrl+O, a drop, a link, and a document given again, which is a new showing): no ticks, as the spec says for another document. A reload keeps its showing and never calls `leave`, so the reload rule (same number of task items) stays the reload's own.
 
 **2026-11-16, decided by the repo owner.** Both choices in Results stay: a tick is kept only where the reader's mark differs from the file, and Back and Forward drop the ticks when the number of task items changed, as a reload does.
+
+**2026-11-16, checked by hand and closed.** The reader went through every hand check above on the release build of commit abed67f, with the hand-check documents in `temp/handcheck/`, and found them all fine.

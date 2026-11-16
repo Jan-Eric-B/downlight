@@ -6,13 +6,13 @@ Spec: [Window design](../spec.md)
 
 **Blocked by:** none
 
-**Status:** ready-for-human
+**Status:** closed
 
 - [x] `app/icons/icon.svg` is the amber icon (from `temp/downlight-1h-amber.svg`) without its embedded C2PA metadata, and `icon.ico` is generated from it with `npx tauri icon`, so the exe, the taskbar, Alt+Tab and the installer show it.
 - [x] The accent scale is one set of CSS variables in the page, seven shades from Light 3 to Dark 3, with amber's values from the spec.
 - [x] The icon's off-white `#FEF9F4` either becomes a shade the scale names or is replaced by Light 3. Choose by looking at the icon at 16 and 32 px, and record the choice here. (Replaced by Light 3; see Comments.)
 - [x] A page test reads `app/icons/icon.svg` and the scale and fails when the icon uses a color that isn't one of the scale's shades.
-- [ ] Checked by hand: the icon at 16, 24, 32 and 48 px on a light and a dark taskbar, and in Alt+Tab.
+- [x] Checked by hand: the icon at 16, 24, 32 and 48 px on a light and a dark taskbar, and in Alt+Tab.
 
 ## Comments
 
@@ -31,3 +31,5 @@ Spec: [Window design](../spec.md)
 3. Alt+Tab shows the amber icon.
 
 **2026-11-16, review fixes.** The icon's test now counts SVG's default black too (a filled shape with no `fill` on itself or an ancestor, a stop without its own `stop-color`), and failed on an unfilled `<rect/>` and on an uncolored `<stop/>`, each added to the icon for the check and removed; the scale's test compares the shade names without their order; the icon's comment holds the exact regeneration recipe; its gradient is `downlight-logo-beam` instead of `gB2`, a rename that leaves the pixels and so `icon.ico` unchanged. Suggestions for the role variables and GitHub's accent variables went to ticket 03, and for applying Windows' shades and their names' one source to ticket 09.
+
+**2026-11-16, checked by hand and closed.** The reader went through every hand check above on the release build of commit abed67f, with the hand-check documents in `temp/handcheck/`, and found them all fine.

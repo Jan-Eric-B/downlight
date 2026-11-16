@@ -6,7 +6,7 @@ Spec: [Downlight v1](../spec.md)
 
 **Blocked by:** 04 (Documents look like GitHub on Mica), 08 (One process, a window per document)
 
-**Status:** ready-for-human
+**Status:** closed
 
 - [x] The core's link resolution takes the document's path and a link target and returns one action: show a document in this window (optionally at a heading), scroll to a heading, reveal a file in the file manager, open a folder, hand a URL to the system, or nothing.
 - [x] A link to a Markdown file (one of the six extensions) shows that document in the same window, at its heading if the link has one.
@@ -115,3 +115,5 @@ Built 2026-11-12. `npm run check` passes.
 - Messages to the reader go through `notice::show_notice`. A message for a window whose page may not be listening yet goes through `OpenWindows::hold_notice`; sent directly, it is lost.
 - `whenDocumentShown` in `page/src/view.ts` already runs for every shown document and every reload, so a document shown by a link needs nothing extra for Find.
 - Two of ticket 10's review findings apply here too: a return value only the tests read, and the same value worked out in two places. Test the effect a caller sees, and pass a value that is computed once.
+
+**2026-11-16, checked by hand and closed.** The reader went through every hand check above on the release build of commit abed67f, with the hand-check documents in `temp/handcheck/`, and found them all fine.

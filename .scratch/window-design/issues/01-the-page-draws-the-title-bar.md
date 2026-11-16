@@ -6,19 +6,19 @@ Spec: [Window design](../spec.md), ADR [0005](../../../docs/adr/0005-the-page-dr
 
 **Blocked by:** none
 
-**Status:** ready-for-human
+**Status:** closed
 
 - [x] Windows open with `decorations: false`. The page draws a title bar of Windows 11's height (32 px) with minimize, maximize (restore when maximized) and close, using Fluent UI System Icons inlined as SVG, with their MIT notice.
-- [ ] Hovering maximize shows Windows' snap layouts flyout. The Windows module answers `WM_NCHITTEST` with `HTMAXBUTTON` over the page's maximize button; the page tells the app where that button is when it lays out. The hit test is a pure function from a point and the button's rectangle to the answer, with `cargo test`s. (Built, and the hit test is tested; the flyout itself is a hand check.)
-- [ ] Dragging the empty part of the bar moves the window, double-clicking it maximizes and restores, and dragging it to the screen's top edge snaps as usual.
-- [ ] The window resizes from all four edges, the top edge included, and keeps Windows 11's rounded corners and shadow.
-- [ ] Alt+Space opens the window menu, and its entries work.
-- [ ] The bar sits on Mica with the document, and is solid where Mica is off (transparency effects off, Windows 10's path). Check that Mica still shows with the native frame off.
-- [ ] The bar's text and glyphs dim when the window isn't active.
+- [x] Hovering maximize shows Windows' snap layouts flyout. The Windows module answers `WM_NCHITTEST` with `HTMAXBUTTON` over the page's maximize button; the page tells the app where that button is when it lays out. The hit test is a pure function from a point and the button's rectangle to the answer, with `cargo test`s. (Built, and the hit test is tested; the flyout itself is a hand check.)
+- [x] Dragging the empty part of the bar moves the window, double-clicking it maximizes and restores, and dragging it to the screen's top edge snaps as usual.
+- [x] The window resizes from all four edges, the top edge included, and keeps Windows 11's rounded corners and shadow.
+- [x] Alt+Space opens the window menu, and its entries work.
+- [x] The bar sits on Mica with the document, and is solid where Mica is off (transparency effects off, Windows 10's path). Check that Mica still shows with the native frame off.
+- [x] The bar's text and glyphs dim when the window isn't active.
 - [x] The scroll bar starts below the title bar, not behind it. If that needs the document view to become its own scroll container, check what it changes in `page/src/reading-position.ts` and ADR 0003's rule, and say so in this ticket. (It does; see Comments.)
 - [x] High contrast (emulated `forced-colors: active`, and a real contrast theme if one is at hand): the bar uses system colors and stays usable. (Emulated in Chromium; a real contrast theme is in the hand checks.)
 - [x] First paint with `npm run measure` stays within the v1 spec's targets, and the window still opens hidden and shows once painted (v1 ticket 04). (On the medians, in two sessions on a busy machine; see Results.)
-- [ ] Checked by hand and recorded here: snap layouts, dragging, double-click, the top edge, Alt+Space, maximized on a second monitor, and 100%, 150% and 200% display scaling.
+- [x] Checked by hand and recorded here: snap layouts, dragging, double-click, the top edge, Alt+Space, maximized on a second monitor, and 100%, 150% and 200% display scaling.
 
 ## Results
 
@@ -66,3 +66,5 @@ Spec: [Window design](../spec.md), ADR [0005](../../../docs/adr/0005-the-page-dr
 7. Page Down, Space and the arrows scroll right after opening, after Ctrl+F then Esc, and after a click on minimize and restoring.
 8. A real contrast theme: the bar stays usable.
 9. Maximized on a second monitor, and at 100 %, 150 % and 200 % scaling: the flyout comes up over the maximize button, also after moving the window between monitors of different scaling.
+
+**2026-11-16, checked by hand and closed.** The reader went through every hand check above on the release build of commit abed67f, with the hand-check documents in `temp/handcheck/`, and found them all fine.

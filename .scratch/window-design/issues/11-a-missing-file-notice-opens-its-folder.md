@@ -6,7 +6,7 @@ Spec: [Window design](../spec.md)
 
 **Blocked by:** 04 (The logo and the file name in the title bar)
 
-**Status:** ready-for-human
+**Status:** closed
 
 - [x] Every notice that names a file shows its name in bold and its folder after it, instead of the whole path as plain text. This covers at least following a link to a missing document (`FollowError::NotFound` in `app/src/links.rs`) and clicking the title bar's file name when the file is gone (`RevealError::NotFound` in `app/src/title_bar.rs`); find the other errors and notices that name a path (open, drop, launch, reload) and give them the same shape.
 - [x] When the file is missing and its folder exists, the folder is a link in the link role's color (`--accent-link`), and a click opens the folder in Explorer. When the folder is gone too, it is plain text and nothing is clickable.
@@ -16,7 +16,7 @@ Spec: [Window design](../spec.md)
 - [x] The notice's shape is typed in `page/src/app.ts`, with contract samples (`npm run fixtures`) for the message and for the errors that carry a file.
 - [x] Page tests: the name is bold and the folder a link when the folder exists, plain when it doesn't; a click on the folder sends the request; the notice stays while hovered or focused.
 - [x] App tests: each missing-file error carries the name, the folder and whether the folder exists; the open-folder command refuses anything that isn't an existing folder.
-- [ ] Checked by hand: follow a link to a deleted document, and click the title bar's name after deleting the shown file; each time the notice's folder opens Explorer there. With the folder deleted too, the folder is plain text.
+- [x] Checked by hand: follow a link to a deleted document, and click the title bar's name after deleting the shown file; each time the notice's folder opens Explorer there. With the folder deleted too, the folder is plain text.
 
 ## Comments
 
@@ -55,3 +55,5 @@ Spec: [Window design](../spec.md)
 - **`Notice::reveal_failed`** in `notice.rs` builds the whole failed reveal's notice, for a link's reveal and the title bar's.
 - **The page checks a rejection's shape.** `isNotice` in `page/src/app.ts` checks `before`, `file` (`name`, `folder`, `folderOpens`) and `after`, and `showingWhy` uses it; anything else shows as text. `notice.test.ts` fails `open_named_folder` with a notice through `failingWith` and checks the bold name; a new test keeps the case of Tauri's own `Error`, shown as text.
 - **Contract sample:** the new `open_named_folder.json` holds `notFound` (`npm run fixtures`, no other sample changed), and `contract.test.ts` shows it after a click on a notice's folder, with its name in bold.
+
+**2026-11-16, checked by hand and closed.** The reader went through every hand check above on the release build of commit abed67f, with the hand-check documents in `temp/handcheck/`, and found them all fine.

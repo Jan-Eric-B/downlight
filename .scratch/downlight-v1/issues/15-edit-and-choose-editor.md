@@ -6,7 +6,7 @@ Spec: [Downlight v1](../spec.md)
 
 **Blocked by:** 09 (Opening from inside a window)
 
-**Status:** ready-for-human
+**Status:** closed
 
 - [x] A settings file in the app's config folder holds the chosen editor. It is created on the first save, and later tickets add their values to it.
 - [x] Ctrl+E opens the document in the chosen editor if one is set and still exists; otherwise in the program the system uses for `.txt` files, started through the shell's handler API so that the packaged Notepad on Windows 11 works; otherwise in Notepad.
@@ -14,7 +14,7 @@ Spec: [Downlight v1](../spec.md)
 - [x] "Choose editor..." opens a file dialog for a program, and the choice is remembered across restarts.
 - [x] Edit and Choose editor... are in the right-click menu.
 - [x] The editor launch lives in the Windows module of the per-OS code.
-- [ ] Checked by hand: the packaged Notepad as the `.txt` default, Notepad++ or VS Code as the `.txt` default, a chosen editor, and a chosen editor that was uninstalled afterwards (Edit falls back).
+- [x] Checked by hand: the packaged Notepad as the `.txt` default, Notepad++ or VS Code as the `.txt` default, a chosen editor, and a chosen editor that was uninstalled afterwards (Edit falls back).
 
 ## Plan
 
@@ -122,3 +122,5 @@ Built 2026-11-16. `npm run check` passes; the contract samples didn't change (bo
 
 - The chosen editor is checked when Edit runs, not only when the reader chooses: `editor_order` (`app/src/edit.rs`) tries it only if it has a full path, is an `.exe` (`is_program`, which `check_choice` uses too) and isn't Downlight. A hand-edited `settings.json` could otherwise name a `.cmd` file, whose argument Rust would quote as a batch file's, or a bare `edit.exe` that would be searched for on the PATH. Such an editor is passed over as if none were chosen.
 - The platform's editor interface is narrower: `platform::launch_editor` is gone, and the platform module offers only the OS calls, `open_as_text_file(&Path)` (ShellExecuteEx with the `.txt` class), `notepad() -> Option<PathBuf>` and `text_file_program()`. `edit::launch` matches on `Editor` and starts a program with `Command`, so the non-Windows fallback no longer repeats that.
+
+**2026-11-16, checked by hand and closed.** The reader went through every hand check above on the release build of commit abed67f, with the hand-check documents in `temp/handcheck/`, and found them all fine. One wish came up while testing Edit: the Editor should open the document at the reading position; it became v1 ticket 35.

@@ -6,7 +6,7 @@ Spec: [Downlight v1](../spec.md)
 
 **Blocked by:** 03 (Page test harness), 09 (Opening from inside a window)
 
-**Status:** ready-for-human
+**Status:** closed
 
 - [x] Ctrl+F opens the find bar with the focus in its box; pressing it again while open selects the text in the box.
 - [x] Matches are highlighted as the reader types, ignoring case, without changing the document's DOM.
@@ -173,3 +173,5 @@ A lead for later, not worth doing now: happy-dom has no CSS Custom Highlights, s
 **2026-11-16, from the reader.** The find bar has no buttons to step back and forth through the matches; only the keys do it. Added as a box above: a previous and a next arrow button beside the count. They step through the page's existing next and previous, so keys and buttons can't disagree, and they take the focus ring and hover of the title bar's buttons.
 
 **2026-11-16, from the reader.** The bar can only be closed with Esc, which a reader using the mouse doesn't know. Added as a box above: a close button after the arrow buttons, doing exactly what Esc does through the same code.
+
+**2026-11-16, checked by hand and closed.** The reader went through every hand check above on the release build of commit abed67f, with the hand-check documents in `temp/handcheck/`, and found them all fine.

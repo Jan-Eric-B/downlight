@@ -6,7 +6,7 @@ Spec: [Downlight v1](../spec.md)
 
 **Blocked by:** 03 (Page test harness), 09 (Opening from inside a window), 10 (Reload), 11 (Links), 22 (One module owns a window's shown document), 23 (The app decides whether a page shows or reloads its document), 24 (The documents module sends a link's scroll where it decides it), 25 (One pipeline places every document in the page's view), 26 (One message makes the page ask, and every request names its showing), 28 (The documents module carries out the whole show), 29 (The page owns every key)
 
-**Status:** ready-for-human
+**Status:** closed
 
 - [x] Following a link to a document or heading, Ctrl+O and dropping a file each add a history entry in the window.
 - [x] Alt+Left and Alt+Right and the mouse's side buttons go back and forward.
@@ -72,3 +72,5 @@ Built 2026-11-16. `npm run check` passes. The history is split by what each side
 **2026-11-16, from the review.** Two fixes after this ticket. A step gives the window back a showing it had, so a show that fails no longer puts the window back by its showing, which a later step could have given it again and whose history the put-back then wiped: each claim, a show's or a step's, gets its own number (`ShownDocument::claim`), and `put_back` restores the window only while it is still at that claim (`back_that_fails_after_forward_and_back_again_keeps_where_they_took_the_window`). And `scroll-to-heading` now names the showing it is for (`Message::ScrollToHeading { showing, heading }`): the app sends it once the page has asked for the document, whose render can still be on its way, so it was looked up in the old document, and dropped or recorded as a visit there. The page scrolls only while its view shows that showing, holds one that comes while a request is on its way until the latest request ends, and drops it if the view doesn't show that showing then (`page/src/view.ts`). **Showing** has its glossary entry, and its doc comment no longer calls it unique, which this ticket made false. In the page, a placement's ticks are a value now (`Ticks | "keep"`) rather than a function of the state before the swap.
 
 **2026-11-16, decided by the repo owner.** Back to a document that another window now shows brings that window to the front and leaves this window and its history as they are, so the entries before it can't be reached while the other window shows that document. That follows ADR 0001 and Ctrl+O; the hand check expects it. A heading link followed after Back clears Forward, as in a browser: kept.
+
+**2026-11-16, checked by hand and closed.** The reader went through every hand check above on the release build of commit abed67f, with the hand-check documents in `temp/handcheck/`, and found them all fine.
