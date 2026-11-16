@@ -15,3 +15,10 @@ Spec: [Window design](../spec.md)
 - [ ] Other OSes report no accent of their own, and the choice is hidden there.
 - [ ] A contract sample for the accent message, and page tests that a scale from the app replaces the variables.
 - [ ] Checked by hand with a light and a dark Windows accent, in light and dark, checking that links stay legible.
+
+## Comments
+
+**2026-11-16, from ticket 02's review.** Suggestions, not decisions:
+
+- Set Windows' seven shades inline on `document.documentElement` only. Custom properties inherit as computed values, so roles declared on `:root` from the shades (ticket 03) won't change if the shades are set on an element lower down. For example an `accent.ts` with `applyAccent(scale | null)`, where `null` removes the inline shades and amber from `accent.css` shows again.
+- Have a test check that the accent message's contract sample keys match the shade names `accent.css` defines, and make `accent.test.ts`'s `SHADES` list come from that one production list, so the names aren't defined in four places (the CSS, the message type, the sample and the test).
