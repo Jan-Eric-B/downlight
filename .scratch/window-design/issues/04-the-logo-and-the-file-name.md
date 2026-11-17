@@ -6,7 +6,7 @@ Spec: [Window design](../spec.md)
 
 **Blocked by:** 01 (Spike: the page draws the title bar), 02 (The amber icon and the accent scale), v1 [16](../../downlight-v1/issues/16-zoom-and-window-size.md) (Zoom and window size)
 
-**Status:** ready-for-human
+**Status:** closed
 
 - [x] The logo is the icon's SVG inlined into the page (the content security policy has no `'self'` in `img-src`). Its tooltip is "Downlight", and a click opens the window menu, as Alt+Space does. (Built, and tested up to the app's `show_window_menu`; the menu itself is hand check 1.)
 - [x] The file name shows the shown document's file name and follows it on links, Back, Forward, Open and drops. The empty window shows only the logo. (Back and Forward don't exist yet, v1 ticket 12; they will show their documents the same way, so the name follows them with no change here.)
@@ -58,3 +58,5 @@ Spec: [Window design](../spec.md)
 7. Ctrl+plus shows "110%" right of the file name, at a quieter shade than the name; Ctrl+0 or a click on it takes it back to 100% and hides it; a second window opened while zoomed shows the level at once. Pressing on it and dragging doesn't move the window. Light, dark and a real contrast theme.
 
 **2026-11-17, review fixes.** The zoom level's CSS shares the name's caption font, margin, padding, corner radius, hidden rule and hover fills (`.title-bar :is(.file-name, .zoom-level)` in `page/src/title-bar.css`) and keeps only its own `flex` and 70% opacity; it looks as before. `createZoomLevel` still makes it with `commandButton("resetZoom", "")`: `commandButton` takes an SVG glyph as markup, and the level's text and name change with every zoom, so `refresh` writes them; a comment says so. No test changed.
+
+**2026-11-17, checked by hand and closed.** The reader went through every hand check above on the release build of commit f325a45 (test documents in `target/hand-checks/`) and found them fine. One thing seen on the way, a window of a multi-document launch once showing white text on a white backdrop, is unrelated to this ticket and became window-design ticket 13.

@@ -6,13 +6,13 @@ Spec: [Window design](../spec.md)
 
 **Blocked by:** 03 (The accent color in the page), 05 (Open and Edit buttons, and the separators)
 
-**Status:** ready-for-human
+**Status:** closed
 
 - [x] The button, Ctrl+Alt+T and the menu entry run one command, and the button shows in the accent color while it is on. (Built and tested up to `aria-pressed`; the color is hand check 4.)
-- [ ] The window stays above other windows while it is on, and only that window. (Built; only a real window shows it, so hand checks 1 to 3 tick it.)
+- [x] The window stays above other windows while it is on, and only that window. (Built; only a real window shows it, so hand checks 1 to 3 tick it.)
 - [x] It is not saved: a new window, or the same document opened again after closing, starts without it. (Tested in the page; hand check 5.)
 - [x] Page tests: the command asks the app to switch it, and the button shows the state the app answers with.
-- [ ] Checked by hand: above other apps, above another Downlight window, and while maximized.
+- [x] Checked by hand: above other apps, above another Downlight window, and while maximized.
 
 ## Comments
 
@@ -41,3 +41,5 @@ Spec: [Window design](../spec.md)
 **2026-11-17, review fixes.** Keep on top's page state gets a start function, as the title bar's and the commands' do: `startKeepOnTop(signal)` in `page/src/keep-on-top.ts` starts the page not kept on top, and the signal starts it so again. `main.ts` runs it before the title bar; the tests run it in their setup, so `keep-on-top.test.ts` no longer clicks the button off through the fake app after each test, and `contract.test.ts` no longer has to switch it off last, which let a failure midway leak into later tests. `switchKeepOnTop` handles a rejection once: `showingWhy` shows it, and the state stays as it was (`await switched.catch(() => keptOnTop)`).
 
 **2026-11-17, review fixes.** A switch answered after the page's state started afresh (`startKeepOnTop`, or its signal aborting) no longer writes its answer into the fresh state: `switchKeepOnTop` notes the start it was asked in and drops an answer from an earlier one, which in the tests leaked Keep on top on into the next test. New test, written first and failing: `keep-on-top.test.ts`, a switch the app answers after the window's page started again leaves Keep on top off.
+
+**2026-11-17, checked by hand and closed.** The reader went through every hand check above on the release build of commit f325a45 (test documents in `target/hand-checks/`) and found them fine. One thing seen on the way, a window of a multi-document launch once showing white text on a white backdrop, is unrelated to this ticket and became window-design ticket 13.

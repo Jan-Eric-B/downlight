@@ -6,7 +6,7 @@ Spec: [Downlight v1](../spec.md)
 
 **Blocked by:** 15 (Edit and Choose editor), 28 (The documents module carries out the whole show), 29 (The page owns every key)
 
-**Status:** ready-for-human
+**Status:** closed
 
 - [x] Ctrl+plus, Ctrl+minus and Ctrl+wheel zoom in and out, and Ctrl+0 resets to 100%.
 - [x] The zoom level is saved in the settings file and used by every new window.
@@ -96,3 +96,5 @@ Built 2026-11-16. `npm run check` passes.
 **2026-11-17, measured after the review fixes.** The fixes add a wait before the page's first request (`startSettings()` resolves once its listener is registered) and a main-screen query on a cold start. `npm run measure` on the release build, medians of 5, against `HEAD` (commit 61d6887) built the same way and measured right before it, on a machine that was slower than on 2026-11-16 for both builds (WebView2's navigation took about 900 to 1000 ms, against about 590 in ticket 02). Cold first paint, this change against `HEAD`: 100 KB 1287 against 1254 ms, 1 MB mixed 1557 against 1743, 1 MB prose 1181 against 1347. From `main.ts` running to the answer received: 65, 50 and 72 ms against 43, 78 and 124. A second window, 100 KB: 407 against 380 ms from the window opening. A reload of 1 MB mixed: 1229 against 1162 ms from the save. All within the runs' spread; the wait costs no measurable time. The absolute numbers miss the targets on both builds that day, so ticket 18's release check should measure again on a quiet machine.
 
 **2026-11-17, from window design ticket 06's review fixes.** `change_zoom` is gone: a zoom step is now the `zoom` variant of `SettingChange` (`app/src/settings/change.rs`), which the one `change_setting` command takes as `{"setting":"zoom","change":"in"}`, and `zoom_changes.json` became `setting_changes.json`. `zoom.rs` keeps `Zoom`, `ZoomChange` and the stepping, and the notice still ends "The zoom holds until Downlight closes." See ticket 06's Comments.
+
+**2026-11-17, checked by hand and closed.** The reader went through every hand check above on the release build of commit f325a45 (test documents in `target/hand-checks/`) and found them fine. One thing seen on the way, a window of a multi-document launch once showing white text on a white backdrop, is unrelated to this ticket and became window-design ticket 13.

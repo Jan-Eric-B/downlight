@@ -6,13 +6,13 @@ Spec: [Downlight v1](../spec.md)
 
 **Blocked by:** 06 (Raw HTML and images, safely)
 
-**Status:** ready-for-human
+**Status:** closed
 
 - [x] Find out whether WebView2 answers an NTLM or Negotiate challenge for an image request without asking, and for which hosts (intranet zone, dotless names, any host). Record the answer and its source in this ticket.
 - [x] If it does, the webview answers no such challenge for any request a document causes, for example through Chromium's `--auth-server-allowlist` browser argument on the WebView2 environment. The image doesn't load, and the page shows its alt text.
 - [x] The change fits ticket 19's handling of browser arguments: a second launch whose `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` differs from the running process's still shows the document, or shows the message box as ticket 19 does.
-- [ ] Remote images on ordinary internet hosts still load.
-- [ ] Checked by hand on the release build against a server that asks for NTLM (for example a local IIS site with Windows authentication): no credentials are sent.
+- [x] Remote images on ordinary internet hosts still load.
+- [x] Checked by hand on the release build against a server that asks for NTLM (for example a local IIS site with Windows authentication): no credentials are sent.
 - [x] From the Comments, links to shares: following a link that leads to a network share asks the reader first, naming the host, and nothing looks at the share before a yes.
 - [x] From the Comments, symlinked local images: no part of a local image's path may be a link off this computer, checked without opening the link's target, and tested with real symbolic links in a temporary folder.
 
@@ -77,3 +77,5 @@ The docs don't say in so many words that WebView2 keeps Chromium's zone rule; it
 - **Hand checks.** Other windows keep taking input while the share question is up; links from a document on a share to its own host and to another.
 
 Open for the owner: a document opened through a local symbolic link to a share counts as on this computer, so its links to that share still ask (the conservative side). Following the document's own links to its host would need the document's path walked on every share link.
+
+**2026-11-17, checked by hand and closed.** The reader went through every hand check above on the release build of commit f325a45 (test documents in `target/hand-checks/`) and found them fine. One thing seen on the way, a window of a multi-document launch once showing white text on a white backdrop, is unrelated to this ticket and became window-design ticket 13.

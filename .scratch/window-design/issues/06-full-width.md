@@ -6,7 +6,7 @@ Spec: [Window design](../spec.md)
 
 **Blocked by:** 03 (The accent color in the page), 05 (Open and Edit buttons, and the separators), 12 (Settings reach every page)
 
-**Status:** ready-for-human
+**Status:** closed
 
 - [x] The button, Ctrl+Alt+W and the menu entry run one command, and the button shows in the accent color while Full width is on. (Built and tested up to `aria-pressed`; the color is hand check 2.)
 - [x] Switching it keeps the reading position. (Tested; hand check 3.)
@@ -62,3 +62,5 @@ Suggestion from the same review: `commandButton` in `page/src/commands.ts` has n
 
 - **One layout follower.** `startFullWidth` was a near-copy of `startZoom`, and a snapshot that changed both re-wrapped the document twice, the view landing once on a layout with only the zoom in place. Both are gone for `startLayout` in the new `page/src/layout.ts`, which compares `{ zoom, fullWidth }` with what it shows and, when either differs, sets the zoom variable and the `full-width` class in one `keepReadingPosition`; `main.ts` starts it. `full-width.ts` keeps `switchFullWidth` and `isFullWidth`, `zoom.ts` keeps `changeZoom` and `ZOOM_VARIABLE`. New test, written first and failing: `layout.test.ts`, a snapshot that changes both keeps the reading position, and the view scrolls back only with both in place. `zoom.test.ts`, `full-width.test.ts` and `contract.test.ts` changed only their start call.
 - **The settings' defaults in one place.** `impl Default for PageSettings` (`Settings::default().page()`, `app/src/settings.rs`); the tests build snapshots as `PageSettings { zoom: ..., ..PageSettings::default() }` (`documents/tests/settings.rs`), and `window/tests.rs`' flags test takes the default snapshot and the settings part of its URLs from the URL without flags, so a new field no longer touches it. `page_url_gives_the_page_the_settings_it_starts_with` still names every field, since its expected URL has to. The page URL's contract samples have a new `defaults` (no flag, the default settings), and a new contract test checks that the settings the page reads from it equal `DEFAULT_SETTINGS`; the "keep them the same" comment in `page/src/app.ts` is gone.
+
+**2026-11-17, checked by hand and closed.** The reader went through every hand check above on the release build of commit f325a45 (test documents in `target/hand-checks/`) and found them fine. One thing seen on the way, a window of a multi-document launch once showing white text on a white backdrop, is unrelated to this ticket and became window-design ticket 13.

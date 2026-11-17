@@ -6,7 +6,7 @@ Spec: [Window design](../spec.md)
 
 **Blocked by:** 01 (Spike: the page draws the title bar), v1 [15](../../downlight-v1/issues/15-edit-and-choose-editor.md) (Edit and Choose editor)
 
-**Status:** ready-for-human
+**Status:** closed
 
 - [x] Open and Edit are buttons with Fluent UI System Icons, and run the commands of the page's command table, not a copy of them.
 - [x] Their tooltips name the command and its shortcut ("Open (Ctrl+O)", "Edit (Ctrl+E)"), taken from the command table.
@@ -40,3 +40,5 @@ Spec: [Window design](../spec.md)
 5. A real contrast theme: the glyphs, the separators and a disabled Edit stay legible.
 
 **2026-11-17, review fixes.** The command table now decides when its buttons show their state again, rather than the title bar: `startCommands` in `page/src/commands.ts` runs the refresh on `whenDocumentShown` and on every settings change, removed when its signal aborts, and `refreshCommands` is private again (Keep on top still runs it after the app's answer, since nothing else tells the page). `startTitleBar` no longer imports it, so a later command with state from elsewhere can't be left out by a title bar that happens not to know what it follows. `startCommands` therefore runs after `startSettings`, as in `main.ts`. The title bar's zoom level no longer mirrors the zoom and whether a document is shown in locals of its own: `createZoomLevel` has a no-argument `refresh` that reads `settingsNow().zoom` and `showsDocument()` from `view.ts`, run from both listeners, and hides at `DEFAULT_SETTINGS.zoom`, the level Reset gives (`UNZOOMED` is gone). Tests changed: `title-bar.test.ts`'s three Edit tests start commands, as the page does, since the refresh moved there; `commands.test.ts`, `find.test.ts`, `history.test.ts`, `ticks.test.ts`, `zoom.test.ts` and four contract tests start the settings before the commands.
+
+**2026-11-17, checked by hand and closed.** The reader went through every hand check above on the release build of commit f325a45 (test documents in `target/hand-checks/`) and found them fine. One thing seen on the way, a window of a multi-document launch once showing white text on a white backdrop, is unrelated to this ticket and became window-design ticket 13.

@@ -6,7 +6,7 @@ Spec: [Downlight v1](../spec.md)
 
 **Blocked by:** 08 (One process, a window per document)
 
-**Status:** ready-for-human
+**Status:** closed
 
 - [x] Tauri's NSIS installer in per-user mode installs without admin rights.
 - [x] `.md`, `.markdown`, `.mdown`, `.mkd`, `.mkdn` and `.mdwn` are associated for the current user, and Downlight appears in "Open with" and in Default apps for them.
@@ -55,3 +55,5 @@ Built 2026-11-16. `npm run check` passes, and `npm run tauri build` writes the i
 **2026-11-16, decided by the repo owner.** The publisher stays `Jan-Eric-B`. The Rust crates' notices and Downlight's own `LICENSE`, which ship nowhere yet, are ticket 36. CLAUDE.md's Commands now name the installer `npm run tauri build` writes.
 
 **2026-11-16, from the review.** The uninstall hook removed the ProgID, the Capabilities, the RegisteredApplications value and the PATH entry even while `$UpdateMode` was 1. It now does all of that only when `$UpdateMode <> 1`, as Tauri's template guards the shortcuts (checked in the template inside `@tauri-apps/cli` 2.12.4, see Updates in the Results), and the `DownlightUpdating` variable, which only kept the PATH message quiet during an update, is gone. `npm run tauri build` still builds the installer; it hasn't been run. The hand checks now list the PATH cases: one that already holds the folder, one ending in `;`, one longer than 1024 characters, uninstalling when Downlight is the only entry, and an update keeping the associations and the PATH entry.
+
+**2026-11-17, checked by hand and closed.** The reader went through every hand check above on the release build of commit f325a45 (test documents in `target/hand-checks/`) and found them fine. One thing seen on the way, a window of a multi-document launch once showing white text on a white backdrop, is unrelated to this ticket and became window-design ticket 13.
