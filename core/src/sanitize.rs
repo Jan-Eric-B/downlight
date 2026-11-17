@@ -240,8 +240,9 @@ fn names_tag(bytes: &[u8], start: usize, tag: &str) -> bool {
 }
 
 /// Sanitizes the HTML that comrak rendered, with its images loading from `images`. Run
-/// [`drop_filtered_tags`] on the document's tree before rendering it.
-pub(crate) fn sanitize<F: FileSystem + Send + 'static>(
+/// [`drop_filtered_tags`] on the document's tree before rendering it. The lookups are `Send`,
+/// `Sync` and `'static` because ammonia asks that of its attribute filter, which holds them.
+pub(crate) fn sanitize<F: FileSystem + Send + Sync + 'static>(
     html: &str,
     images: ImageSources<F>,
 ) -> String {

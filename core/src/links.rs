@@ -458,7 +458,7 @@ mod tests {
             let _ = resolve_link(Path::new(DOCUMENT), target, &files, |path, _| {
                 panic!("asked to connect for {}", path.display())
             });
-            assert!(files.asked.borrow().is_empty(), "{target:?}");
+            assert!(files.asked.lock().unwrap().is_empty(), "{target:?}");
         }
     }
 

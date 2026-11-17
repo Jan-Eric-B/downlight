@@ -163,10 +163,10 @@ pub(crate) fn is_local(path: &Path) -> bool {
 /// asked about is kept, to check what was looked at.
 #[cfg(test)]
 pub(crate) mod fake {
-    use std::cell::RefCell;
     use std::collections::BTreeMap;
     use std::io;
     use std::path::{Path, PathBuf};
+    use std::sync::Mutex;
     use std::time::SystemTime;
 
     use super::{FileSystem, PathKind};
@@ -175,7 +175,7 @@ pub(crate) mod fake {
     pub(crate) struct FakeFiles {
         links: BTreeMap<PathBuf, PathBuf>,
         modified: BTreeMap<PathBuf, SystemTime>,
-        pub(crate) asked: RefCell<Vec<PathBuf>>,
+        pub(crate) asked: Mutex<Vec<PathBuf>>,
     }
 
     impl FakeFiles {
@@ -193,13 +193,14 @@ pub(crate) mod fake {
         }
 
         fn ask(&self, path: &Path) {
-            self.asked.borrow_mut().push(path.to_owned());
+            self.asked.lock().unwrap().push(path.to_owned());
         }
 
         /// Whether any lookup touched a path on a network share.
         pub(crate) fn touched_a_share(&self) -> bool {
             self.asked
-                .borrow()
+                .lock()
+                .unwrap()
                 .iter()
                 .any(|path| path.to_string_lossy().starts_with(r"\\"))
         }
@@ -265,7 +266,7 @@ mod tests {
             Leads::ThisComputer
         );
         assert_eq!(
-            *files.asked.borrow(),
+            *files.asked.lock().unwrap(),
             [r"C:\docs", r"C:\docs\img", r"C:\docs\img\logo.png"].map(PathBuf::from)
         );
     }
@@ -279,7 +280,7 @@ mod tests {
         ] {
             let files = FakeFiles::default();
             assert_eq!(leads_from(path, &files), share("server"), "{path}");
-            assert!(files.asked.borrow().is_empty(), "{path}");
+            assert!(files.asked.lock().unwrap().is_empty(), "{path}");
         }
     }
 

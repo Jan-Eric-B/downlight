@@ -3,13 +3,13 @@
 //! page agree on its shape. After an intended change to rendering, `npm run fixtures` writes the
 //! HTML again; its diff shows what the change does to real documents.
 
+mod common;
+
 use std::error::Error;
 use std::fs;
-use std::io;
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
 
-use downlight_core::{FileSystem, PathKind};
+use common::Nothing;
 
 type TestResult<T = ()> = Result<T, Box<dyn Error>>;
 
@@ -32,26 +32,8 @@ fn fixture_documents() -> TestResult<Vec<PathBuf>> {
     Ok(documents)
 }
 
-/// A file system with nothing in it, so that the HTML doesn't depend on what is on the disk, such
-/// as when an image's file was last saved.
-struct Nothing;
-
-impl FileSystem for Nothing {
-    fn kind_of(&self, _: &Path) -> io::Result<Option<PathKind>> {
-        Ok(None)
-    }
-
-    fn link_target(&self, _: &Path) -> io::Result<Option<PathBuf>> {
-        Ok(None)
-    }
-
-    fn modified(&self, _: &Path) -> io::Result<Option<SystemTime>> {
-        Ok(None)
-    }
-}
-
-/// Renders a fixture document with only its file name as its path, so that the HTML doesn't
-/// depend on where the repository is checked out.
+/// Renders a fixture document with only its file name as its path and [`Nothing`] on the disk, so
+/// that the HTML doesn't depend on where the repository is checked out or what is next to it.
 fn render(document: &Path) -> TestResult<String> {
     let bytes = fs::read(document)?;
     let name = document

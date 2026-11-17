@@ -4,7 +4,6 @@
 //! Render, Images).
 
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, PoisonError};
 use std::time::SystemTime;
 
 use url::Url;
@@ -75,8 +74,8 @@ pub(crate) struct ImageSources<F> {
     folder: Option<Url>,
     /// Where the page loads local images from, such as `http://image.localhost`.
     origin: String,
-    /// The caller's lookups, behind a lock since sanitizing asks for its filter to be `Sync`.
-    files: Mutex<F>,
+    /// The caller's lookups.
+    files: F,
 }
 
 impl<F: FileSystem> ImageSources<F> {
@@ -84,7 +83,7 @@ impl<F: FileSystem> ImageSources<F> {
         Self {
             folder: file_url::folder_of(document),
             origin: origin.to_owned(),
-            files: Mutex::new(files),
+            files,
         }
     }
 
@@ -166,11 +165,10 @@ impl<F: FileSystem> ImageSources<F> {
     /// (ticket 20); one that leads elsewhere keeps a URL without a time, which the image scheme
     /// refuses anyway.
     fn modified(&self, path: &Path) -> Option<u128> {
-        let files = self.files.lock().unwrap_or_else(PoisonError::into_inner);
-        if leads(path, &*files).ok()? != Leads::ThisComputer {
+        if leads(path, &self.files).ok()? != Leads::ThisComputer {
             return None;
         }
-        let modified = files.modified(path).ok()??;
+        let modified = self.files.modified(path).ok()??;
         Some(
             modified
                 .duration_since(SystemTime::UNIX_EPOCH)

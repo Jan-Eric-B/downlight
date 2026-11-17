@@ -53,7 +53,7 @@ pub fn render(
     bytes: &[u8],
     path: &Path,
     image_origin: &str,
-    files: impl FileSystem + Send + 'static,
+    files: impl FileSystem + Send + Sync + 'static,
 ) -> RenderedDocument {
     render_within(bytes, path, image_origin, files, HIGHLIGHT_LIMIT)
 }
@@ -64,7 +64,7 @@ pub(crate) fn render_within(
     bytes: &[u8],
     path: &Path,
     image_origin: &str,
-    files: impl FileSystem + Send + 'static,
+    files: impl FileSystem + Send + Sync + 'static,
     highlight_limit: HighlightLimit,
 ) -> RenderedDocument {
     let text = decode(bytes);

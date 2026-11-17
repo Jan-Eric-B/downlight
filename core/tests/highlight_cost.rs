@@ -7,15 +7,22 @@
 //! It prints the slowest grammars on a block of many lines and on a block of one long line, the
 //! shape of minified code, each as large as the highlight limit lets a block be, so a grammar the
 //! time limit stops shows as plain. Ticket 31 chose the limits from a run with them lifted, on
-//! blocks of 256 KB and a line of 32 KB.
+//! blocks of 256 KB and a line of 32 KB. Nothing here lifts them: for such a run, raise
+//! `HIGHLIGHT_LIMIT`'s `block`, `line` and `time` in `core/src/highlight.rs` past the sizes
+//! measured, set [`LINES_BLOCK_SIZE`] and [`LONG_LINE_SIZE`] to those sizes, and put all of them
+//! back afterwards.
 
-use std::io;
-use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant, SystemTime};
+mod common;
 
-use downlight_core::{FileSystem, PathKind};
+use std::path::Path;
+use std::time::{Duration, Instant};
+
+use common::Nothing;
 
 const KB: usize = 1024;
+
+// The two sizes below must stay just under `HIGHLIGHT_LIMIT`'s `block` and `line` (128 KB and
+// 4 KB), and change with them: an integration test can't read the `pub(crate)` constant.
 
 /// The block of many lines that every grammar is measured on: as large as the highlight limit
 /// lets a block be, less a line, since [`code_of`] can end a line past the size.
@@ -164,21 +171,4 @@ fn slowest_grammars_on_a_large_block() {
         LONG_LINE_SIZE,
         &costs(&grammars, &code_of(LONG_LINE_SIZE, true)),
     );
-}
-
-/// A file system with nothing in it: the blocks measured have no images, so nothing is looked up.
-struct Nothing;
-
-impl FileSystem for Nothing {
-    fn kind_of(&self, _: &Path) -> io::Result<Option<PathKind>> {
-        Ok(None)
-    }
-
-    fn link_target(&self, _: &Path) -> io::Result<Option<PathBuf>> {
-        Ok(None)
-    }
-
-    fn modified(&self, _: &Path) -> io::Result<Option<SystemTime>> {
-        Ok(None)
-    }
 }
