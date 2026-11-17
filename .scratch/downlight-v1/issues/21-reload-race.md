@@ -6,7 +6,7 @@ Spec: [Downlight v1](../spec.md)
 
 **Blocked by:** 10 (Reload)
 
-**Status:** ready-for-agent
+**Status:** closed
 
 - [x] A change reported for a document the window has left starts no render and tells the page nothing, even when the window is given another document between the check and the reload.
 - [x] F5, Ctrl+R and the right-click menu's Reload still reload whatever the window shows.
@@ -21,3 +21,5 @@ Fix: a keyed `reload_ahead(window, key)` that checks and starts the render under
 **2026-11-12, done.** `OpenWindows::reload_ahead_while_shown(window, key)` checks the key and starts the render under one lock, and `on_document_change` uses it for Changed and Back; `reload_document` keeps `reload_ahead(window)`. Tests: `reload_for_a_document_the_window_has_left_keeps_the_new_render_ahead` and `reload_for_the_shown_document_reads_the_file_again`.
 
 A narrower gap remains, outside this ticket's fix: the `reload` event is sent after the lock is released, so a document given to the window between that release and the send gets its own render ahead, but the page can still get `reload` after `document-shown`, and `reload` overtakes `showDocument` as described above. `gone` has the same gap with `shows`. Closing it means sending the event while the table says the window shows the key, or the page telling a stale `reload` from a current one; ticket 22's deeper module is the place for that.
+
+**2026-11-16, closed by the repo owner.**

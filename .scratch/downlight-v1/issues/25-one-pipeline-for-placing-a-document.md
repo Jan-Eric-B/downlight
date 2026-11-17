@@ -6,7 +6,7 @@ Spec: [Downlight v1](../spec.md)
 
 **Blocked by:** none
 
-**Status:** ready-for-agent
+**Status:** closed
 
 - [x] `page/src/view.ts` has one pipeline that every request goes through. It owns "the latest request wins", the swap of the view's content, and a single `announce` that passes the `whenDocumentShown` listeners a reason (`shown`, `reload`). Each kind of request says only how it lands: at the top or a heading, or at the reading position.
 - [x] Content is prepared in one place, for a show and a reload alike. Today copy buttons are added to the view after a show (`addCopyButtons(view)`) and to the parsed template on a reload (`addCopyButtons(parsed.content)`). Ticket 13 adds tickable checkboxes in the same place.
@@ -31,3 +31,5 @@ Tests survive as they are: they drive `startDocumentView` through the fake app (
 
 - A show now parses through the template too, but not a frame apart, which would hold up first paint. `npm run measure` on the release build, against `HEAD` built the same way: the show's insert (HTML received until inserted) is 46 ms for 1 MB mixed (`HEAD`: 47 to 51) and 14 ms for 1 MB prose (`HEAD`: 14); first paint is within the run-to-run spread. A reload: insert 62 ms, anchor 65 ms, nothing over 100 ms after it, no lines moved. One of five 1 MB mixed runs had a 110 ms frame after the document; `HEAD`'s runs had frames over 100 ms before the document in most runs, the gap ticket 02 recorded.
 - New tests: the listeners' reason, a reason kept across an overtaking failed reload, `requestDocument` reloading at the reading position, the window showing its document when a save overtakes the first request, the reading position below the bar (`view.test.ts`), and first paint reported once, after an overtaken first request, and not for an empty window (`timing.test.ts`, which loads the modules afresh with `?timing`, since the switch is read when `timing.ts` loads).
+
+**2026-11-16, closed by the repo owner.**

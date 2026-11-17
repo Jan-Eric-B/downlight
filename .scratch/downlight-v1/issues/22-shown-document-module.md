@@ -6,7 +6,7 @@ Spec: [Downlight v1](../spec.md)
 
 **Blocked by:** 21 (A save never reloads a document the window has just left)
 
-**Status:** ready-for-agent
+**Status:** closed
 
 - [x] One module's small interface (roughly: give, reload, hand over to the page, forget) replaces the eight `OpenWindows` methods that callers chain today with a (label, key) pair, and `app/src/reload.rs` folds into it.
 - [x] Every message the app sends a page (`document-shown`, `document-changed` with `reload` or `gone`, `scroll-to-heading`, `notice`, `menu-command`) goes through one typed set of messages, with Tauri's `emit_to` as the app's adapter and a recorder as the tests' adapter.
@@ -50,3 +50,5 @@ Left open:
 
 - (6) `give` fails halfway when the page can't be told it shows another document: the table and the watch already have the new document, while the window keeps the old title and page, so `document_path` and relative links use the new document's folder. It is rare (a live webview that fails to run an event), and `document_given_to_a_window_whose_page_cannot_be_told_reports_the_failure` checks only that it fails. The remedy, if taken up: `claim` returns the entry it replaced, and `give` restores it when the send fails.
 - (7) Tests that prove less than they could. `wait_for_render_ahead` and `opening_an_open_document_again_starts_no_render_for_its_window` still read the table's internals, since nothing public shows a render ahead finish. `watch_that_cannot_start_is_noticed_once_the_page_asks` waits 500 ms and passes whether the notice was held or sent at once, so it proves less than its name (the hold itself is covered by `notice_held_before_the_page_asks_is_sent_when_it_first_asks`). Nothing tests `Documents::reload` when its send fails.
+
+**2026-11-16, closed by the repo owner.**

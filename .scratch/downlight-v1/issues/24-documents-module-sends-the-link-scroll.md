@@ -6,7 +6,7 @@ Spec: [Downlight v1](../spec.md)
 
 **Blocked by:** 23 (The app decides whether a page shows or reloads its document)
 
-**Status:** ready-for-agent
+**Status:** closed
 
 - [x] `Documents::give` sends `Message::ScrollToHeading` to the window that shows the document already, when the document came with a heading, that window's page has asked for its document, and it isn't the window the request came from. A failure to send it is ignored, with the reason next to the send.
 - [x] `scroll_to` leaves `Given::AlreadyOpen` and `Shown::AlreadyOpen`; `links::for_another_window` and its tests go.
@@ -30,3 +30,5 @@ Spec: [Downlight v1](../spec.md)
 Tests: `link_to_a_document_open_in_another_window_scrolls_it_only_with_a_heading` (now checks the recorder), `link_to_a_heading_in_the_document_its_own_window_shows_sends_that_window_nothing`, `ctrl_click_on_a_heading_in_the_document_its_own_window_shows_sends_that_window_nothing`, `ctrl_click_on_a_heading_in_a_document_open_in_another_window_scrolls_that_window`, `ctrl_click_on_a_document_open_nowhere_opens_a_new_window`, `scroll_that_cannot_be_sent_still_gives_the_window_that_shows_the_document` and `heading_for_an_open_window_whose_page_has_not_asked_is_held_for_its_first_render` (now also checks that nothing is sent) in `app/src/documents/tests.rs`; `ctrl_click_shows_the_document_in_a_new_window` (updated) in `app/src/links.rs`. Removed with `for_another_window`: `link_to_a_heading_in_a_document_open_in_another_window_scrolls_that_window`, `link_to_a_heading_in_this_window_sends_no_window_anything`, `link_without_a_heading_leaves_the_other_window_at_its_reading_position` and `link_that_opened_its_document_sends_no_window_anything`.
 
 **2026-11-13, after the review of tickets 22-24.** The names above and in "What to build" are those of the time. `Given::AlreadyOpen` and `Shown::AlreadyOpen` are now split into `AlreadyHere` (the window the request came from) and `AlreadyElsewhere`, and `Target::from` is gone: `claim` matches on `Target` itself. The `app/src/documents` tests named above are now in `app/src/documents/tests/give.rs`. See ticket 22's comments.
+
+**2026-11-16, closed by the repo owner.**

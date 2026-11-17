@@ -6,7 +6,7 @@ Spec: [Downlight v1](../spec.md)
 
 **Blocked by:** 22 (One module owns a window's shown document)
 
-**Status:** ready-for-agent
+**Status:** closed
 
 - [x] Each document a window is given gets an identifier for that showing, unique within the process. Opening a document that is open already gives no new one.
 - [x] The page sends the identifier of the showing its view shows (or none while it shows none, the empty state or an error) with its `render_document` request.
@@ -35,3 +35,5 @@ Tests: `stale_reload_after_another_document_is_answered_with_a_show_at_its_headi
 The stale `gone`: fixed by clearing the bar when a show is placed, since a newly shown document was just read. That trades one narrow gap for another: a `gone` for the newly shown document that reaches the page after its request went out and before the show is placed is now dropped too, where before it kept the bar. A wrong bar over a readable document seemed worse than a missing one for a document deleted in those few milliseconds. Closing both exactly would need `gone` to carry the showing it is about, which changes the `document-changed` payload from a plain string; left for now.
 
 **2026-11-13, after the review of tickets 22-24.** `render_document` and `DocumentToShow` moved from `app/src/render.rs` into the documents module, so the two serialization tests named above are now in `app/src/documents/tests/handover.rs`, with the other `app/src/documents` tests named there. See ticket 22's comments.
+
+**2026-11-16, closed by the repo owner.**
