@@ -7,7 +7,6 @@ import {
   type Notice,
   type Step,
   type Steps,
-  type WaitNote,
 } from "./app";
 import { addCopyButtons } from "./copy";
 import { WindowHistory, type Line } from "./history";
@@ -34,6 +33,7 @@ import {
   reportFirstPaint,
   reportReload,
 } from "./timing";
+import { createWaitNote } from "./wait-note";
 
 /** Selects the view that shows the rendered document, and none of the page's own elements. */
 export const DOCUMENT_VIEW_SELECTOR = "article.markdown-body";
@@ -424,33 +424,6 @@ function createGoneBar(): HTMLElement {
   return bar;
 }
 
-/**
- * How long the view waits for the app's answer before the wait note says the document is on its
- * way (ticket 31). Longer than a normal document takes, so it never flashes up for one, and short
- * enough that a large one never looks like a window that froze or never opened.
- */
-const WAIT_NOTE_MS = 500;
-
-/** The note that says the window's document is on its way, over whatever the view shows. */
-function createWaitNote(): HTMLElement {
-  const note = document.createElement("div");
-  note.className = "wait-note markdown-body";
-  note.setAttribute("role", "status");
-  note.hidden = true;
-  return note;
-}
-
-/** "Showing **a.md** (100 MB) ...", the size left out when the app can't tell it. */
-function fillWaitNote(note: HTMLElement, { file, size }: WaitNote): void {
-  const name = document.createElement("strong");
-  name.textContent = file.name;
-  note.replaceChildren(
-    "Showing ",
-    name,
-    size === null ? " ..." : ` (${size}) ...`,
-  );
-}
-
 /** The element the document scrolls in, which `SCROLLER_SELECTOR` selects. */
 function createScroller(): HTMLElement {
   const scroller = document.createElement("div");
@@ -499,7 +472,7 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
   const empty = createEmptyState();
   empty.hidden = true;
   const scroller = createScroller();
-  scroller.append(goneBar, waitNote, view, empty);
+  scroller.append(goneBar, waitNote.element, view, empty);
   document.body.append(scroller);
   keepTheKeysOn(scroller);
   const shown: ScrolledView = { view, scroller };
@@ -547,28 +520,6 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
   const firstSettled = new Promise<boolean>((resolve) => {
     settleFirst = resolve;
   });
-  let waitNoteFirstShown: () => void = () => undefined;
-  /** Resolves once the wait note has shown, so a window whose document is slow shows with it. */
-  const waitNoteShown = new Promise<void>((resolve) => {
-    waitNoteFirstShown = resolve;
-  });
-
-  /**
-   * Shows the wait note for the latest request, once the app has said what it names, unless the
-   * request ended meanwhile or the window shows no document.
-   */
-  const showWaitNote = async (
-    requested: number | null,
-    isLatest: () => boolean,
-  ) => {
-    const note = await askApp("wait_note", { showing: requested }).catch(
-      () => null,
-    );
-    if (note === null || !isLatest() || !requesting) return;
-    fillWaitNote(waitNote, note);
-    waitNote.hidden = false;
-    waitNoteFirstShown();
-  };
 
   /**
    * Asks the app for the window's document, sending the showing the view shows, and says what to
@@ -707,7 +658,7 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
    * overtook is announced by the later one.
    */
   const settle = () => {
-    waitNote.hidden = true;
+    waitNote.hide();
     settleFirst(showing !== null);
     if (unannounced === undefined) return;
     const reason = unannounced;
@@ -727,12 +678,9 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
     requesting = true;
     const thisRequest = ++latestRequest;
     const isLatest = () => thisRequest === latestRequest;
-    const requested = showing;
-    const waiting = setTimeout(() => {
-      void showWaitNote(requested, isLatest);
-    }, WAIT_NOTE_MS);
+    const answered = waitNote.during(showing, isLatest);
     const outcome = await ask();
-    clearTimeout(waiting);
+    answered();
     if (isLatest()) await place(outcome, isLatest);
     if (!isLatest()) return;
     requesting = false;
@@ -790,20 +738,18 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
 
   markFirstPaint("documentRequested");
   void request();
-  // The window opens hidden and shows once the frame with its document, the empty state or the
-  // error is drawn, so it never flashes white or shows an empty frame (ticket 04), or with the
-  // wait note, so a large document's window doesn't stay hidden while it is on its way.
-  // If showing fails, the app shows the window after a few seconds anyway.
-  const showWindow = () => askApp("show_window").catch(() => undefined);
-  const settledFirst = await Promise.race([firstSettled, waitNoteShown]);
-  if (settledFirst === undefined) {
-    await afterNextFrame();
-    void showWindow();
-  }
   // Waits for the latest request, not the first one, which a save can overtake.
-  const showsDocument = await firstSettled;
-  await afterNextFrame();
-  markFirstPaint("firstFrame");
-  if (settledFirst !== undefined) void showWindow();
-  if (showsDocument) reportFirstPaint();
+  const documentFrame = firstSettled.then(async (showsDocument) => {
+    await afterNextFrame();
+    markFirstPaint("firstFrame");
+    return showsDocument;
+  });
+  const waitNoteFrame = waitNote.shown.then(afterNextFrame);
+  // The window opens hidden and shows once the frame with its document, the empty state or the
+  // error is drawn, so it never flashes white or shows an empty frame (ticket 04), or the frame
+  // with the wait note if that comes first, so a large document's window doesn't stay hidden
+  // while it is on its way. If showing fails, the app shows the window after a few seconds anyway.
+  await Promise.race([documentFrame, waitNoteFrame]);
+  void askApp("show_window").catch(() => undefined);
+  if (await documentFrame) reportFirstPaint();
 }
