@@ -3,6 +3,9 @@
 //! the scheme serves the files they name.
 
 use std::borrow::Cow;
+use std::fs::File;
+use std::io::{self, Read};
+use std::path::Path;
 
 use tauri::http::header::{
     CONTENT_SECURITY_POLICY, CONTENT_TYPE, HeaderValue, X_CONTENT_TYPE_OPTIONS,
@@ -10,7 +13,7 @@ use tauri::http::header::{
 use tauri::http::{Request, Response, StatusCode};
 use tauri::{Runtime, UriSchemeContext, UriSchemeResponder};
 
-use crate::disk::{self, Disk};
+use crate::disk::Disk;
 use crate::platform;
 
 /// The scheme's name, which the page sees as `http://image.localhost` on Windows.
@@ -56,7 +59,7 @@ fn response_within(url_path: &str, largest: u64) -> Response<Cow<'static, [u8]>>
     // between gets past the check, but swapping it needs someone on this computer who can already
     // write next to the document, so the gap is accepted.
     let Some((image, bytes)) = image.and_then(|image| {
-        disk::read_no_larger_than(image.path(), largest)
+        read_no_larger_than(image.path(), largest)
             .ok()
             .map(|bytes| (image, bytes))
     }) else {
@@ -75,10 +78,35 @@ fn response_within(url_path: &str, largest: u64) -> Response<Cow<'static, [u8]>>
     response
 }
 
+/// Reads the file at `path` whole if it is no larger than `largest` bytes, and otherwise fails
+/// with [`io::ErrorKind::FileTooLarge`] having read no more of it than that. A failed allocation
+/// aborts the process, which closes every window (ADR 0001), so a file of many GB must never be
+/// read whole: a downloaded archive can carry one that compresses to almost nothing.
+fn read_no_larger_than(path: &Path, largest: u64) -> io::Result<Vec<u8>> {
+    let file = File::open(path)?;
+    let size = file.metadata()?.len();
+    if size > largest {
+        return Err(io::ErrorKind::FileTooLarge.into());
+    }
+    read_up_to(file, size, largest)
+}
+
+/// Reads `reader` to its end, if that comes within `largest` bytes. The file's `size` said it
+/// would, but a file can grow while it is read, or be a device that never ends, so the read stops
+/// one byte past `largest` whatever the size said.
+fn read_up_to(reader: impl Read, size: u64, largest: u64) -> io::Result<Vec<u8>> {
+    let mut bytes = Vec::with_capacity(usize::try_from(size).unwrap_or(0));
+    reader
+        .take(largest.saturating_add(1))
+        .read_to_end(&mut bytes)?;
+    if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > largest {
+        return Err(io::ErrorKind::FileTooLarge.into());
+    }
+    Ok(bytes)
+}
+
 #[cfg(test)]
 mod largest_image_tests {
-    use std::path::Path;
-
     use super::*;
 
     /// Writes a PNG of `size` bytes and asks the image scheme for it with `largest` bytes as the
@@ -106,8 +134,17 @@ mod largest_image_tests {
     }
 
     #[test]
-    fn image_larger_than_the_largest_served_is_not_served_and_not_read_whole() {
+    fn image_larger_than_the_largest_served_is_not_served() {
         assert_eq!(serve_sized("over", 1025, 1024), (StatusCode::NOT_FOUND, 0));
+    }
+
+    #[test]
+    fn read_of_a_file_that_never_ends_stops_past_the_largest_size() {
+        let read = read_up_to(io::repeat(b'#'), 0, 1024);
+        assert_eq!(
+            read.map_err(|error| error.kind()),
+            Err(io::ErrorKind::FileTooLarge)
+        );
     }
 }
 
