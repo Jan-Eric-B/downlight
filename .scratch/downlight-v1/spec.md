@@ -150,7 +150,7 @@ Downlight renders Markdown in Rust (comrak) and shows the result in the system w
   - Decoding: a byte order mark decides (UTF-8, UTF-16 LE, UTF-16 BE); otherwise valid UTF-8 is UTF-8; otherwise Windows-1252.
   - comrak options: GFM (tables, strikethrough, autolinks, task lists, tagfilter), footnotes, alerts, GitHub-style heading anchors, emoji shortcodes, front matter with `---` (shown as a YAML code block), raw HTML allowed, source positions on.
   - Sanitizing with a GitHub-like allowlist: keeps `<details>`, `<summary>`, `<picture>`, `<source>`, `<img>` with `width`, `height` and `align`, `<kbd>`, `<sub>` and `<sup>`, as well as the task list checkboxes, the heading ids, the highlighting classes and the line number attributes. It removes scripts, styles, event handlers and `javascript:` URLs.
-  - Images: relative paths resolve against the document's folder and are served to the page through Downlight's own scheme. Remote `http(s)` images stay. Images on network shares (UNC paths, `file://server/`) are removed.
+  - Images: relative paths resolve against the document's folder and are served to the page through Downlight's own scheme; a local image's URL names when its file was last saved, so a reload shows an image whose file changed and takes an unchanged one from memory (ticket 32). Remote `http(s)` images stay. Images on network shares (UNC paths, `file://server/`) are removed.
 - **Link resolution**: takes the document's path and a link target, and returns one action:
   - show a document in this window, optionally at a heading;
   - scroll to a heading in this document;
