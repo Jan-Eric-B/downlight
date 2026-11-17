@@ -231,7 +231,8 @@ fn size_shown(bytes: u64) -> String {
     // As f64 only to be shown, where a file of over 2^53 bytes losing its last bytes is no loss.
     #[allow(clippy::cast_precision_loss)]
     let size = bytes as f64 / unit as f64;
-    if size < 10.0 {
+    // By the size as it is shown, so one that rounds up to 10 drops its decimal as 10 does.
+    if (size * 10.0).round() < 100.0 {
         format!("{size:.1} {name}")
     } else {
         format!("{size:.0} {name}")
@@ -404,7 +405,10 @@ mod tests {
             (1025, "2 KB"),
             (1024 * 1024, "1.0 MB"),
             (15 * 1024 * 1024 + 600 * 1024, "16 MB"),
+            // Rounds to 10, so it is told without a decimal, as 10 MB itself is.
+            (10 * 1024 * 1024 - 1, "10 MB"),
             (5 * 1024 * 1024 * 1024, "5.0 GB"),
+            (10 * 1024 * 1024 * 1024 - 1, "10 GB"),
         ] {
             assert_eq!(size_shown(bytes), shown, "{bytes}");
         }
