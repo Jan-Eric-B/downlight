@@ -14,11 +14,11 @@
 //!   it (ticket 10).
 //! - [`history`]: the documents a window showed before and after the one it shows, which Back and
 //!   Forward give it back (ticket 12).
+//! - [`settings`]: changing the reader's settings, since they shape every new window and reach
+//!   every page when they change ([`Documents::change_settings`], window design ticket 12).
 //!
-//! It also changes the reader's settings, since they shape every new window and reach every page
-//! when they change ([`Documents::change_settings`], window design ticket 12), and keeps the window
-//! the reader was last in, which a new window opens beside, at a size and place [`place`] works
-//! out (ticket 16).
+//! It also keeps the window the reader was last in, which a new window opens beside, at a size and
+//! place [`place`] works out (ticket 16).
 //!
 //! A window's document, its render, its watch and its history are forgotten with the window.
 
@@ -31,7 +31,7 @@ use crate::message::{Message, Pages};
 use crate::notice::Notice;
 use crate::platform;
 use crate::render::{self, RenderTask};
-use crate::settings::{PageSettings, Settings, SettingsError, SettingsStore};
+use crate::settings::{Settings, SettingsStore};
 use crate::watch::{ReadStamp, Watch};
 
 pub mod handover;
@@ -39,6 +39,7 @@ pub mod history;
 mod place;
 #[cfg(test)]
 pub mod recorder;
+mod settings;
 mod show;
 mod watching;
 
@@ -63,7 +64,9 @@ struct Inner {
     windows: Box<dyn Windows>,
     /// The reader's settings, which shape every new window and which every page is sent when they
     /// change ([`Documents::change_settings`], the one way they change). Shared with Tauri's
-    /// managed state, where the app's other parts read them.
+    /// managed state, where the app's other parts read them. Its lock is taken before the
+    /// table's, never under it: a change tells the pages, which reads the table, while the
+    /// settings are held.
     settings: Arc<SettingsStore>,
 }
 
@@ -300,63 +303,6 @@ impl Documents {
     /// The reader's settings now.
     pub fn settings(&self) -> Settings {
         self.inner.settings.get()
-    }
-
-    /// Changes the settings with `change` and saves them, and sends every window's page the
-    /// settings it shows if they changed (window design ticket 12), the one way a setting
-    /// changes. The pages are told while the settings are still held, so that of two changes at
-    /// once, they are told last what the settings hold last. A change that can't be saved holds
-    /// until Downlight closes all the same, and the error says why it wasn't saved.
-    pub fn change_settings(&self, change: impl FnOnce(&mut Settings)) -> Result<(), SettingsError> {
-        self.inner
-            .settings
-            .update(change, |updated| {
-                let shown = updated.settings.page();
-                if updated.before.page() != shown {
-                    self.send_settings_to_every_page(shown);
-                }
-            })
-            .saved
-    }
-
-    /// Sends every page that hears the settings `settings`, in the order of their labels, and
-    /// keeps that the others missed them, for when they first ask
-    /// ([`Documents::page_hears_settings`]).
-    fn send_settings_to_every_page(&self, settings: PageSettings) {
-        let mut hearing = {
-            let mut table = self.lock();
-            let table = &mut *table;
-            let mut hearing = Vec::new();
-            for window in table.windows.keys() {
-                match table.not_hearing.get_mut(window) {
-                    Some(missed) => *missed = true,
-                    None => hearing.push(window.clone()),
-                }
-            }
-            hearing
-        };
-        hearing.sort();
-        for window in hearing {
-            // A page that can't be told is one whose webview failed to run an event, which the
-            // window that made the change can't mend. What is sent to every window is a whole
-            // snapshot, so that page catches up with the next one.
-            let _ = self.send(&window, Message::Settings(settings));
-        }
-    }
-
-    /// `window`'s page has asked for its document, which it does only once it hears the settings
-    /// (`page/src/main.ts`), so it is sent every change from now on, and the settings now if they
-    /// changed before (ticket 16's review): a window that opened while they changed has the
-    /// settings from before the change in its page's URL, and missed the message. Sent while the
-    /// settings are held, so that a change after it reaches the page after it.
-    fn page_hears_settings(&self, window: &str) {
-        let missed = self.lock().not_hearing.remove(window) == Some(true);
-        if missed {
-            self.inner.settings.read(|settings| {
-                // As in `send_settings_to_every_page`, the next change catches the page up.
-                let _ = self.send(window, Message::Settings(settings.page()));
-            });
-        }
     }
 
     /// The reader is in `window` now, so the next new window opens beside it (ticket 16), and its
