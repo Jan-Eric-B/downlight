@@ -5,7 +5,11 @@
 
 use std::error::Error;
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
+
+use downlight_core::{FileSystem, PathKind};
 
 type TestResult<T = ()> = Result<T, Box<dyn Error>>;
 
@@ -28,6 +32,24 @@ fn fixture_documents() -> TestResult<Vec<PathBuf>> {
     Ok(documents)
 }
 
+/// A file system with nothing in it, so that the HTML doesn't depend on what is on the disk, such
+/// as when an image's file was last saved.
+struct Nothing;
+
+impl FileSystem for Nothing {
+    fn kind_of(&self, _: &Path) -> io::Result<Option<PathKind>> {
+        Ok(None)
+    }
+
+    fn link_target(&self, _: &Path) -> io::Result<Option<PathBuf>> {
+        Ok(None)
+    }
+
+    fn modified(&self, _: &Path) -> io::Result<Option<SystemTime>> {
+        Ok(None)
+    }
+}
+
 /// Renders a fixture document with only its file name as its path, so that the HTML doesn't
 /// depend on where the repository is checked out.
 fn render(document: &Path) -> TestResult<String> {
@@ -36,7 +58,7 @@ fn render(document: &Path) -> TestResult<String> {
         .file_name()
         .ok_or("a fixture document has no file name")?;
     Ok(
-        downlight_core::render(&bytes, Path::new(name), "http://image.localhost")
+        downlight_core::render(&bytes, Path::new(name), "http://image.localhost", Nothing)
             .as_str()
             .to_owned(),
     )

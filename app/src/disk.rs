@@ -1,8 +1,10 @@
 //! The file system the core's link resolution and local images look at, since the core reads no
-//! files: whether a path is a file or a folder, and what a link along it points to.
+//! files: whether a path is a file or a folder, what a link along it points to, and when a file was
+//! last saved.
 
 use std::io;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 use downlight_core::{FileSystem, PathKind};
 
@@ -33,10 +35,20 @@ impl FileSystem for Disk {
             Err(error) => Err(error),
         }
     }
+
+    fn modified(&self, path: &Path) -> io::Result<Option<SystemTime>> {
+        match std::fs::metadata(path) {
+            Ok(metadata) => metadata.modified().map(Some),
+            Err(error) if platform::is_missing(&error) => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
 
     /// A folder of its own under the temp folder, empty.
@@ -67,6 +79,29 @@ mod tests {
                 Some(Some(PathKind::Folder)),
                 Some(None)
             ]
+        );
+    }
+
+    #[test]
+    fn modified_tells_when_a_file_was_saved_and_nothing_for_a_missing_one() {
+        let folder = temp_folder("modified");
+        let logo = folder.join("logo.png");
+        let saved_at = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        std::fs::write(&logo, "PNG").unwrap();
+        let saved = std::fs::File::options()
+            .write(true)
+            .open(&logo)
+            .and_then(|file| file.set_modified(saved_at));
+        let times = [
+            Disk.modified(&logo),
+            Disk.modified(&folder.join("missing.png")),
+            Disk.modified(&folder.join("missing").join("logo.png")),
+        ];
+        std::fs::remove_dir_all(&folder).unwrap();
+        saved.unwrap();
+        assert_eq!(
+            times.map(Result::ok),
+            [Some(Some(saved_at)), Some(None), Some(None)]
         );
     }
 

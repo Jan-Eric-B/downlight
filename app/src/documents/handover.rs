@@ -201,6 +201,7 @@ enum Content {
 /// nowhere but after a return (ticket 12).
 #[cfg(test)]
 pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
+    use crate::disk::Disk;
     use crate::notice::NamedFile;
     use std::io;
 
@@ -244,6 +245,7 @@ pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
             b"# Install\n\nRun the installer.\n",
             Path::new("a.md"),
             "",
+            Disk,
         ))
     };
     // A missing file whose folder is there, so the notice opens the folder (window design ticket

@@ -5,6 +5,7 @@ use comrak::options::Plugins;
 use comrak::{Arena, Options, format_html_with_plugins, parse_document};
 
 use crate::decode::decode;
+use crate::files::FileSystem;
 use crate::highlight::GithubHighlighter;
 use crate::image::ImageSources;
 use crate::sanitize::{drop_filtered_tags, sanitize};
@@ -41,8 +42,15 @@ impl serde::Serialize for RenderedDocument {
 /// The HTML is sanitized: it keeps the raw HTML GitHub allows and nothing that could act on its
 /// own. `path` is the document's file, against whose folder relative images resolve, and
 /// `image_origin` is where the page loads local images from: the app's image scheme, such as
-/// `http://image.localhost`. Markdown is the only format in v1.
-pub fn render(bytes: &[u8], path: &Path, image_origin: &str) -> RenderedDocument {
+/// `http://image.localhost`. A local image's URL names when its file was last saved, as `files`
+/// tells it, so that a render after the file changed loads it anew while an unchanged one keeps
+/// its URL and the page shows it from memory (ticket 32). Markdown is the only format in v1.
+pub fn render(
+    bytes: &[u8],
+    path: &Path,
+    image_origin: &str,
+    files: impl FileSystem + Send + 'static,
+) -> RenderedDocument {
     let text = decode(bytes);
     let options = github_options();
     let arena = Arena::new();
@@ -55,7 +63,7 @@ pub fn render(bytes: &[u8], path: &Path, image_origin: &str) -> RenderedDocument
     let mut html = String::new();
     // Writing to a String never fails, so there is no error to pass on.
     let _ = format_html_with_plugins(root, &options, &mut html, &plugins);
-    let images = ImageSources::new(path, image_origin);
+    let images = ImageSources::new(path, image_origin, files);
     RenderedDocument {
         html: sanitize(&html, images),
     }
@@ -140,6 +148,7 @@ fn yaml_of(front_matter: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::files::fake::FakeFiles;
 
     const IMAGE_ORIGIN: &str = "http://image.localhost";
 
@@ -149,6 +158,7 @@ mod tests {
             b"# Title\n\nSome *text*.\n",
             Path::new("README.md"),
             IMAGE_ORIGIN,
+            FakeFiles::default(),
         );
         let html = rendered.as_str();
 
@@ -162,6 +172,7 @@ mod tests {
             b"Before\n\n<script>alert('x')</script>\n\nAfter <script>alert('y')</script>\n",
             Path::new("README.md"),
             IMAGE_ORIGIN,
+            FakeFiles::default(),
         );
         let html = rendered.as_str();
 
@@ -170,9 +181,14 @@ mod tests {
     }
 
     fn html_of_bytes(bytes: &[u8]) -> String {
-        render(bytes, Path::new("README.md"), IMAGE_ORIGIN)
-            .as_str()
-            .to_owned()
+        render(
+            bytes,
+            Path::new("README.md"),
+            IMAGE_ORIGIN,
+            FakeFiles::default(),
+        )
+        .as_str()
+        .to_owned()
     }
 
     #[test]
@@ -230,9 +246,14 @@ mod tests {
     }
 
     fn html_of(markdown: &str) -> String {
-        render(markdown.as_bytes(), Path::new("README.md"), IMAGE_ORIGIN)
-            .as_str()
-            .to_owned()
+        render(
+            markdown.as_bytes(),
+            Path::new("README.md"),
+            IMAGE_ORIGIN,
+            FakeFiles::default(),
+        )
+        .as_str()
+        .to_owned()
     }
 
     /// The line each `<tag ...>` in the HTML starts at, by its `data-sourcepos`, in order. A tag

@@ -7,6 +7,7 @@
 
 use std::io;
 use std::path::{Component, Path, PathBuf, Prefix};
+use std::time::SystemTime;
 
 /// What a path names on the disk, as the caller's lookup tells it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,6 +27,11 @@ pub trait FileSystem {
     /// `path` is something else or nothing. It must never open the target: the target may be on a
     /// network share. Only asked about paths on this computer.
     fn link_target(&self, path: &Path) -> io::Result<Option<PathBuf>>;
+
+    /// When the file at `path` was last saved, None when nothing is there, or an error when that
+    /// can't be told. Like [`kind_of`](Self::kind_of) it follows links, so it is asked only about
+    /// a path that stays on this computer.
+    fn modified(&self, path: &Path) -> io::Result<Option<SystemTime>>;
 }
 
 /// Where a path leads once Windows has followed the links along it.
@@ -153,19 +159,22 @@ pub(crate) fn is_local(path: &Path) -> bool {
 /// A file system for the tests: every path is a file, except folders, which end in a slash or in
 /// `folder.md`, and missing paths, which contain `missing`. It has the links named here, a link
 /// under a folder named `unreadable` can't be read, and nothing on the server `offline` can be
-/// reached. Every path it is asked about is kept, to check what was looked at.
+/// reached. Only the files named by `modified_at` tell when they were saved. Every path it is
+/// asked about is kept, to check what was looked at.
 #[cfg(test)]
 pub(crate) mod fake {
     use std::cell::RefCell;
     use std::collections::BTreeMap;
     use std::io;
     use std::path::{Path, PathBuf};
+    use std::time::SystemTime;
 
     use super::{FileSystem, PathKind};
 
     #[derive(Default)]
     pub(crate) struct FakeFiles {
         links: BTreeMap<PathBuf, PathBuf>,
+        modified: BTreeMap<PathBuf, SystemTime>,
         pub(crate) asked: RefCell<Vec<PathBuf>>,
     }
 
@@ -174,6 +183,12 @@ pub(crate) mod fake {
         pub(crate) fn with_link(mut self, link: &str, target: &str) -> Self {
             self.links
                 .insert(PathBuf::from(link), PathBuf::from(target));
+            self
+        }
+
+        /// The file at `path` was last saved at `time`.
+        pub(crate) fn modified_at(mut self, path: &str, time: SystemTime) -> Self {
+            self.modified.insert(PathBuf::from(path), time);
             self
         }
 
@@ -211,6 +226,11 @@ pub(crate) mod fake {
                 return Err(io::ErrorKind::PermissionDenied.into());
             }
             Ok(self.links.get(path).cloned())
+        }
+
+        fn modified(&self, path: &Path) -> io::Result<Option<SystemTime>> {
+            self.ask(path);
+            Ok(self.modified.get(path).copied())
         }
     }
 }

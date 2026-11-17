@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use downlight_core::RenderedDocument;
 use tauri::async_runtime::JoinHandle;
 
+use crate::disk::Disk;
 use crate::image;
 use crate::notice::{NamedFile, Notice};
 use crate::platform;
@@ -30,7 +31,7 @@ fn read_and_render(path: &Path) -> ReadAndRender {
     let mut stages = Stages::start();
     let bytes = std::fs::read(path).map_err(|source| unread(path, source))?;
     stages.lap("read");
-    let document = downlight_core::render(&bytes, path, &image::origin());
+    let document = downlight_core::render(&bytes, path, &image::origin(), Disk);
     stages.lap("render");
     Ok((document, stages))
 }

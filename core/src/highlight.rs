@@ -242,6 +242,7 @@ mod tests {
     use std::path::Path;
 
     use super::{RULES, THEME};
+    use crate::files::fake::FakeFiles;
     use crate::render;
 
     fn html_of(markdown: &str) -> String {
@@ -249,6 +250,7 @@ mod tests {
             markdown.as_bytes(),
             Path::new("README.md"),
             "http://image.localhost",
+            FakeFiles::default(),
         )
         .as_str()
         .to_owned()

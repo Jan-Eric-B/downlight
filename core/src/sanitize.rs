@@ -9,6 +9,7 @@ use ammonia::Builder;
 use comrak::nodes::{Node, NodeValue};
 
 use crate::file_url::{self, Target};
+use crate::files::FileSystem;
 use crate::highlight::is_highlight_class;
 use crate::image::ImageSources;
 use crate::links::goes_to_the_system;
@@ -240,7 +241,10 @@ fn names_tag(bytes: &[u8], start: usize, tag: &str) -> bool {
 
 /// Sanitizes the HTML that comrak rendered, with its images loading from `images`. Run
 /// [`drop_filtered_tags`] on the document's tree before rendering it.
-pub(crate) fn sanitize(html: &str, images: ImageSources) -> String {
+pub(crate) fn sanitize<F: FileSystem + Send + 'static>(
+    html: &str,
+    images: ImageSources<F>,
+) -> String {
     let tag_attributes = TAG_ATTRIBUTES
         .iter()
         .map(|(tag, attributes)| (*tag, attributes.iter().copied().collect()))
@@ -298,6 +302,7 @@ mod tests {
     use std::path::Path;
 
     use super::FILTERED_TAGS;
+    use crate::files::fake::FakeFiles;
     use crate::render;
 
     fn html_of(markdown: &str) -> String {
@@ -305,6 +310,7 @@ mod tests {
             markdown.as_bytes(),
             Path::new("README.md"),
             "http://image.localhost",
+            FakeFiles::default(),
         )
         .as_str()
         .to_owned()

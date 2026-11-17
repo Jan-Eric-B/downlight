@@ -4,6 +4,8 @@
 //! Render, Images).
 
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, PoisonError};
+use std::time::SystemTime;
 
 use url::Url;
 
@@ -68,18 +70,21 @@ pub fn local_image(url_path: &str, files: &impl FileSystem) -> Option<LocalImage
 }
 
 /// Where a document's images load from.
-pub(crate) struct ImageSources {
+pub(crate) struct ImageSources<F> {
     /// The document's folder as a `file:` URL, against which relative images resolve.
     folder: Option<Url>,
     /// Where the page loads local images from, such as `http://image.localhost`.
     origin: String,
+    /// The caller's lookups, behind a lock since sanitizing asks for its filter to be `Sync`.
+    files: Mutex<F>,
 }
 
-impl ImageSources {
-    pub(crate) fn new(document: &Path, origin: &str) -> Self {
+impl<F: FileSystem> ImageSources<F> {
+    pub(crate) fn new(document: &Path, origin: &str, files: F) -> Self {
         Self {
             folder: file_url::folder_of(document),
             origin: origin.to_owned(),
+            files: Mutex::new(files),
         }
     }
 
@@ -132,20 +137,46 @@ impl ImageSources {
     }
 
     /// The image scheme's URL for `src`, a relative or absolute path or a `file:` URL, unless it
-    /// names a file on a network share. A query means nothing to a file and is dropped; the
-    /// fragment stays, for GitHub's `#gh-dark-mode-only` and the like.
+    /// names a file on a network share. The document's query means nothing to a file and is
+    /// dropped; in its place the URL names when the file was last saved, which the image scheme
+    /// ignores (ticket 32). The fragment stays, for GitHub's `#gh-dark-mode-only` and the like.
     fn local_source(&self, src: &str) -> Option<String> {
         let file = file_url::resolve(self.folder.as_ref(), src)?;
         // Only a `file:` URL has a path. One with a host, from `//server/share` or
         // `\\server\share`, gives a network share's path, which isn't local.
-        if !is_local(&file.to_file_path().ok()?) {
+        let path = file.to_file_path().ok()?;
+        if !is_local(&path) {
             return None;
         }
+        let query = self
+            .modified(&path)
+            .map(|nanos| format!("?modified={nanos}"))
+            .unwrap_or_default();
         let fragment = file
             .fragment()
             .map(|fragment| format!("#{fragment}"))
             .unwrap_or_default();
-        Some(format!("{}{}{fragment}", self.origin, file.path()))
+        Some(format!("{}{}{query}{fragment}", self.origin, file.path()))
+    }
+
+    /// When the image's file at `path` was last saved, in nanoseconds since 1970, or None when
+    /// that can't be told. A page that sees the same URL again shows the image it loaded before,
+    /// whatever the file holds now, so the time is what makes a changed file load anew. The
+    /// lookup follows links, so it is asked only once the path is known to stay on this computer
+    /// (ticket 20); one that leads elsewhere keeps a URL without a time, which the image scheme
+    /// refuses anyway.
+    fn modified(&self, path: &Path) -> Option<u128> {
+        let files = self.files.lock().unwrap_or_else(PoisonError::into_inner);
+        if leads(path, &*files).ok()? != Leads::ThisComputer {
+            return None;
+        }
+        let modified = files.modified(path).ok()??;
+        Some(
+            modified
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .ok()?
+                .as_nanos(),
+        )
     }
 }
 
@@ -153,6 +184,7 @@ impl ImageSources {
 #[cfg(all(test, windows))]
 mod tests {
     use std::path::Path;
+    use std::time::{Duration, SystemTime};
 
     use super::local_image;
     use crate::files::fake::FakeFiles;
@@ -160,15 +192,139 @@ mod tests {
 
     const ORIGIN: &str = "http://image.localhost";
 
-    /// The HTML of `markdown` in a document at `C:\docs\guide\README.md`.
+    /// The HTML of `markdown` in a document at `C:\docs\guide\README.md`, whose images' files
+    /// have no modified time to tell.
     fn html_of(markdown: &str) -> String {
+        html_with(markdown, FakeFiles::default())
+    }
+
+    /// The HTML of `markdown` in a document at `C:\docs\guide\README.md`, looking at `files`.
+    fn html_with(markdown: &str, files: FakeFiles) -> String {
         render(
             markdown.as_bytes(),
             Path::new(r"C:\docs\guide\README.md"),
             ORIGIN,
+            files,
         )
         .as_str()
         .to_owned()
+    }
+
+    /// 2023-11-14 22:13:20 UTC and 100 ns, written in the URL in nanoseconds since 1970.
+    fn saved_at(extra_seconds: u64) -> SystemTime {
+        SystemTime::UNIX_EPOCH + Duration::new(1_700_000_000 + extra_seconds, 100)
+    }
+
+    #[test]
+    fn local_image_url_names_the_time_its_file_was_last_saved() {
+        let files = FakeFiles::default().modified_at(r"C:\docs\guide\img\logo.png", saved_at(0));
+        let html = html_with("![Logo](img/logo.png)\n", files);
+        assert!(
+            html.contains(
+                r#"<img src="http://image.localhost/C:/docs/guide/img/logo.png?modified=1700000000000000100" alt="Logo">"#
+            ),
+            "{html}"
+        );
+    }
+
+    #[test]
+    fn local_image_url_stays_the_same_until_its_file_is_saved_again() {
+        let render_at = |time| {
+            let files = FakeFiles::default().modified_at(r"C:\docs\guide\img\logo.png", time);
+            html_with("![Logo](img/logo.png)\n", files)
+        };
+        let first = render_at(saved_at(0));
+        assert_eq!(render_at(saved_at(0)), first);
+        let saved_again = render_at(saved_at(5));
+        assert!(
+            saved_again.contains(
+                r#"src="http://image.localhost/C:/docs/guide/img/logo.png?modified=1700000005000000100""#
+            ),
+            "{saved_again}"
+        );
+    }
+
+    #[test]
+    fn image_whose_file_is_missing_loads_without_a_time() {
+        let html = html_of("![Logo](img/missing.png)\n");
+        assert!(
+            html.contains(r#"src="http://image.localhost/C:/docs/guide/img/missing.png""#),
+            "{html}"
+        );
+    }
+
+    #[test]
+    fn saved_time_comes_before_the_fragment_and_in_srcset_too() {
+        let files = FakeFiles::default()
+            .modified_at(r"C:\docs\logo.png", saved_at(0))
+            .modified_at(r"C:\docs\guide\img\dark.png", saved_at(1));
+        let html = html_with(
+            r#"![Logo](../logo.png?raw=true#gh-dark-mode-only)
+
+<picture><source srcset="img/dark.png 2x"><img alt="Logo" src="img/light.png"></picture>
+"#,
+            files,
+        );
+        assert!(
+            html.contains(
+                r#"src="http://image.localhost/C:/docs/logo.png?modified=1700000000000000100#gh-dark-mode-only""#
+            ),
+            "{html}"
+        );
+        assert!(
+            html.contains(
+                r#"srcset="http://image.localhost/C:/docs/guide/img/dark.png?modified=1700000001000000100 2x""#
+            ),
+            "{html}"
+        );
+    }
+
+    #[test]
+    fn image_url_with_its_saved_time_leads_back_to_its_file() {
+        let files = FakeFiles::default().modified_at(r"C:\docs\guide\img\logo.png", saved_at(0));
+        let html = html_with("![Logo](img/logo.png)\n", files);
+        let src = html
+            .split('"')
+            .find(|part| part.starts_with(ORIGIN))
+            .unwrap_or_default();
+        // The image scheme looks only at the URL's path, as `app/src/image.rs` takes it.
+        let url = url::Url::parse(src).unwrap();
+        assert_eq!(url.query(), Some("modified=1700000000000000100"));
+        let image = local_image(url.path(), &FakeFiles::default()).unwrap();
+        assert_eq!(image.path(), Path::new(r"C:\docs\guide\img\logo.png"));
+    }
+
+    #[test]
+    fn image_whose_path_links_off_this_computer_is_not_asked_when_it_was_saved() {
+        // The fake would tell the time, so a URL that names one would mean the lookup followed the
+        // link off this computer (ticket 20).
+        for (link, target) in [
+            (r"C:\docs\guide\img", r"\\server\share\pics"),
+            (r"C:\docs\guide\img\logo.png", r"\\server\share\logo.png"),
+            (
+                r"C:\docs",
+                r"\\?\Volume{0b1e3f6c-0000-0000-0000-100000000000}\docs",
+            ),
+        ] {
+            let files = FakeFiles::default()
+                .with_link(link, target)
+                .modified_at(r"C:\docs\guide\img\logo.png", saved_at(0));
+            let html = html_with("![Logo](img/logo.png)\n", files);
+            assert!(
+                html.contains(r#"src="http://image.localhost/C:/docs/guide/img/logo.png""#),
+                "{link}: {html}"
+            );
+        }
+    }
+
+    #[test]
+    fn image_whose_links_cannot_be_read_is_not_asked_when_it_was_saved() {
+        let files = FakeFiles::default().modified_at(r"C:\docs\unreadable\logo.png", saved_at(0));
+        let html = html_with("![Logo](../unreadable/logo.png)\n", files);
+        assert!(
+            html.contains(r#"src="http://image.localhost/C:/docs/unreadable/logo.png""#),
+            "{html}"
+        );
     }
 
     #[test]
