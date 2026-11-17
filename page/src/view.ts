@@ -461,7 +461,8 @@ function keepTheKeysOn(scroller: HTMLElement): void {
  * showing in view is gone, it says so over the last render (ticket 26), and when a link in another
  * window names a heading in it, it scrolls there once that showing is in view. An answer that
  * takes over half a second, as a large document's does, shows the wait note until it comes
- * (ticket 31). `scriptStart` is when the page's script started, for the first paint report.
+ * (ticket 31), unless the app says it is a reload, which keeps the document in view untouched.
+ * `scriptStart` is when the page's script started, for the first paint report.
  */
 export async function startDocumentView(scriptStart: number): Promise<void> {
   markFirstPaint("scriptStart", scriptStart);
