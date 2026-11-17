@@ -53,5 +53,11 @@
       "heading": "install",
       "showing": 7
     }
+  },
+  "settings": {
+    "event": "settings",
+    "payload": {
+      "zoom": 125
+    }
   }
 }

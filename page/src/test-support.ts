@@ -11,6 +11,7 @@ import pageUrlSamples from "../../app/tests/fixtures/page_url.json?raw";
 import renderDocumentSamples from "../../app/tests/fixtures/render_document.json?raw";
 import timingReportSamples from "../../app/tests/fixtures/timing_reports.json?raw";
 import titleBarSamples from "../../app/tests/fixtures/title_bar.json?raw";
+import zoomChangeSamplesJson from "../../app/tests/fixtures/zoom_changes.json?raw";
 import type {
   AnswerOf,
   ArgsOf,
@@ -28,8 +29,10 @@ import type {
   PageFlags,
   Place,
   ReloadMarks,
+  ZoomChange,
 } from "./app";
 import { SCROLLER_SELECTOR, whenDocumentShown } from "./view";
+import { ZOOM_VARIABLE } from "./zoom";
 
 /** A document shown at a heading, as the app hands it over for a link like `a.md#install`. */
 export interface AtHeading {
@@ -202,6 +205,16 @@ export function menuEntrySamples(): MenuEntry[] {
   return Object.values(
     JSON.parse(menuEntrySamplesJson) as object,
   ) as MenuEntry[];
+}
+
+/**
+ * Every change of the zoom the app's `change_zoom` takes. All of them, so that one the app adds
+ * reaches the page's tests without a name to ask for.
+ */
+export function zoomChangeSamples(): ZoomChange[] {
+  return Object.values(
+    JSON.parse(zoomChangeSamplesJson) as object,
+  ) as ZoomChange[];
 }
 
 /** The timing reports the app takes, by the name of their sample. */
@@ -400,6 +413,14 @@ export function nextShown(): Promise<void> {
 /** The text of the shown document's first-level heading, if it has one. */
 export function heading(): string | null | undefined {
   return document.querySelector("article.markdown-body h1")?.textContent;
+}
+
+/**
+ * The document view's zoom, as the factor its stylesheet zooms it by (`ZOOM_VARIABLE` in
+ * `zoom.ts`), such as "1.25"; happy-dom doesn't apply the stylesheet.
+ */
+export function documentZoom(): string {
+  return document.documentElement.style.getPropertyValue(ZOOM_VARIABLE);
 }
 
 /** What the document view shows while the window has no document. */

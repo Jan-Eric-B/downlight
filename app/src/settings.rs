@@ -11,6 +11,11 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(doc)]
+use crate::documents::Documents;
+use crate::documents::WindowSize;
+use crate::zoom::Zoom;
+
 const FILE_NAME: &str = "settings.json";
 
 /// Where a file that doesn't parse is kept, so a hand-edited file with a typo isn't lost.
@@ -24,10 +29,61 @@ pub struct Settings {
     /// The program Edit opens a document in, as Choose editor... picked it; None for the text
     /// file program.
     pub editor: Option<PathBuf>,
+    /// The document view's zoom level (ticket 16), as Zoom in, Zoom out and Reset zoom set it.
+    pub zoom: Zoom,
+    /// The size of the last window that closed, which a new window opens at (ticket 16); None
+    /// until a window has closed. Kept as the window had it: a new window is fitted to its
+    /// screen when it opens, since the screen may have changed since.
+    pub window_size: Option<WindowSize>,
 }
 
-/// The settings for this process: loaded once at the start, changed through [`SettingsStore::update`],
-/// which saves the whole file.
+impl Settings {
+    /// What of the settings the pages show, as every page gets it: in its URL when its window
+    /// opens, and in a `settings` message whenever it changes (window design ticket 12). The
+    /// editor stays in the app.
+    pub fn page(&self) -> PageSettings {
+        PageSettings { zoom: self.zoom }
+    }
+}
+
+/// The settings a page shows, one snapshot for all of them (window design ticket 12), so that a
+/// setting a page shows is a field here and a listener in the page (`whenSettingsChange` in
+/// `page/src/settings.ts`) rather than a message and a URL flag of its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PageSettings {
+    /// The document view's zoom level, in percent.
+    pub zoom: Zoom,
+}
+
+impl PageSettings {
+    /// The snapshot the contract samples name, the same in the page's URL and in the `settings`
+    /// message. Off the defaults, so a page that ignored it would fail its test.
+    #[cfg(test)]
+    pub fn sample() -> Self {
+        Self {
+            zoom: Zoom::from(125),
+        }
+    }
+}
+
+/// What [`SettingsStore::update`] did: the settings before and after the change, and whether they
+/// were saved.
+#[derive(Debug)]
+pub struct Updated {
+    /// The settings before the change.
+    pub before: Settings,
+    /// The settings now, which hold until Downlight closes even if they weren't saved.
+    pub settings: Settings,
+    /// Whether the change reached the file; a change that changed nothing writes nothing.
+    pub saved: Result<(), SettingsError>,
+}
+
+/// The settings for this process: loaded once at the start, read by anyone who needs them
+/// ([`SettingsStore::get`]), and changed only by [`Documents::change_settings`], so that a change
+/// to what the pages show always reaches every page. One store is shared by the documents module
+/// and Tauri's managed state (`Arc<SettingsStore>`), so a reader such as Edit reads it without
+/// going through the documents module.
 pub struct SettingsStore {
     /// None when the system gives Downlight no config folder; the settings then last until
     /// Downlight closes.
@@ -53,19 +109,60 @@ impl SettingsStore {
         (store, error)
     }
 
-    /// The program Edit opens a document in, as the reader chose it.
-    pub fn editor(&self) -> Option<PathBuf> {
-        self.lock().editor.clone()
+    /// The settings for a process that has only these, which are never saved: there is no config
+    /// folder.
+    #[cfg(test)]
+    pub fn holding(settings: Settings) -> Self {
+        Self {
+            file: None,
+            current: Mutex::new(settings),
+        }
     }
 
-    /// Changes the settings with `change` and saves the whole file. A change that can't be saved
-    /// still holds until Downlight closes, and the error says why it wasn't saved.
-    pub fn update(&self, change: impl FnOnce(&mut Settings)) -> Result<(), SettingsError> {
+    /// The settings now, whole (window design ticket 12).
+    pub fn get(&self) -> Settings {
+        self.lock().clone()
+    }
+
+    /// Runs `read` with the settings now, and holds them until it returns, so that no change comes
+    /// between what `read` reads and what it does with it: a page caught up with the settings is
+    /// sent them before any change after.
+    pub fn read<R>(&self, read: impl FnOnce(&Settings) -> R) -> R {
+        read(&self.lock())
+    }
+
+    /// Changes the settings with `change`, saves the whole file, and runs `then` with what the
+    /// change did before another change can start, so that of two changes at once, what `then`
+    /// does for the later one comes last. A change that can't be saved still holds until
+    /// Downlight closes, and [`Updated::saved`] says why it wasn't saved. Only
+    /// [`Documents::change_settings`] calls this: `then` is how every page hears of a change.
+    pub fn update(
+        &self,
+        change: impl FnOnce(&mut Settings),
+        then: impl FnOnce(&Updated),
+    ) -> Updated {
         // Saved under the lock, so two changes at once reach the file in the order they were made.
         let mut current = self.lock();
+        let before = current.clone();
         change(&mut current);
+        let saved = if *current == before {
+            // Such as Zoom in at the largest zoom, or a window closed at the size the last one had.
+            Ok(())
+        } else {
+            self.save(&current)
+        };
+        let updated = Updated {
+            before,
+            settings: current.clone(),
+            saved,
+        };
+        then(&updated);
+        updated
+    }
+
+    fn save(&self, settings: &Settings) -> Result<(), SettingsError> {
         let file = self.file.as_deref().ok_or(SettingsError::NoConfigFolder)?;
-        write(file, &current).map_err(|source| SettingsError::Write {
+        write(file, settings).map_err(|source| SettingsError::Write {
             file: file.to_owned(),
             source,
         })
@@ -214,6 +311,13 @@ mod tests {
         }
     }
 
+    impl SettingsStore {
+        /// An update that tells nobody, as these tests check only the store.
+        fn change(&self, change: impl FnOnce(&mut Settings)) -> Updated {
+            self.update(change, |_| {})
+        }
+    }
+
     impl Drop for Folder {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
@@ -225,7 +329,7 @@ mod tests {
         let folder = Folder::new("missing");
         let (store, error) = folder.load();
         assert!(error.is_none(), "{error:?}");
-        assert_eq!(store.editor(), None);
+        assert_eq!(store.get().editor, None);
         assert!(!folder.0.exists());
     }
 
@@ -234,7 +338,8 @@ mod tests {
         let folder = Folder::new("first-save");
         let (store, _) = folder.load();
         store
-            .update(|settings| settings.editor = Some(PathBuf::from(r"C:\Tools\edit.exe")))
+            .change(|settings| settings.editor = Some(PathBuf::from(r"C:\Tools\edit.exe")))
+            .saved
             .unwrap();
         assert!(folder.file().is_file());
     }
@@ -246,18 +351,19 @@ mod tests {
         folder
             .load()
             .0
-            .update(|settings| settings.editor = Some(editor.clone()))
+            .change(|settings| settings.editor = Some(editor.clone()))
+            .saved
             .unwrap();
         let (restarted, error) = folder.load();
         assert!(error.is_none(), "{error:?}");
-        assert_eq!(restarted.editor(), Some(editor));
+        assert_eq!(restarted.get().editor, Some(editor));
     }
 
     #[test]
     fn corrupt_file_loads_defaults_and_reports_why() {
         let folder = Folder::with_file("corrupt", "{ \"editor\": ");
         let (store, error) = folder.load();
-        assert_eq!(store.editor(), None);
+        assert_eq!(store.get().editor, None);
         let Some(error @ SettingsError::Parse { .. }) = error else {
             panic!("expected a parse error, got {error:?}");
         };
@@ -279,7 +385,10 @@ mod tests {
             std::fs::read_to_string(folder.0.join(BAD_FILE_NAME)).unwrap(),
             corrupt
         );
-        store.update(|_| {}).unwrap();
+        store
+            .change(|settings| settings.zoom = Zoom::from(150))
+            .saved
+            .unwrap();
         let (_, error) = folder.load();
         assert!(error.is_none(), "{error:?}");
     }
@@ -289,7 +398,7 @@ mod tests {
         let folder = Folder::with_file("without-editor", "{}");
         let (store, error) = folder.load();
         assert!(error.is_none(), "{error:?}");
-        assert_eq!(store.editor(), None);
+        assert_eq!(store.get().editor, None);
     }
 
     #[test]
@@ -300,7 +409,10 @@ mod tests {
         );
         let (store, error) = folder.load();
         assert!(error.is_none(), "{error:?}");
-        assert_eq!(store.editor(), Some(PathBuf::from(r"C:\Tools\edit.exe")));
+        assert_eq!(
+            store.get().editor,
+            Some(PathBuf::from(r"C:\Tools\edit.exe"))
+        );
     }
 
     #[test]
@@ -310,12 +422,14 @@ mod tests {
         std::fs::create_dir_all(folder.file()).unwrap();
         let (store, _) = folder.load();
         let editor = PathBuf::from(r"C:\Tools\edit.exe");
-        let saved = store.update(|settings| settings.editor = Some(editor.clone()));
+        let saved = store
+            .change(|settings| settings.editor = Some(editor.clone()))
+            .saved;
         assert!(
             matches!(saved, Err(SettingsError::Write { .. })),
             "{saved:?}"
         );
-        assert_eq!(store.editor(), Some(editor));
+        assert_eq!(store.get().editor, Some(editor));
     }
 
     #[test]
@@ -323,11 +437,89 @@ mod tests {
         let (store, error) = SettingsStore::load(None);
         assert!(error.is_none(), "{error:?}");
         let editor = PathBuf::from(r"C:\Tools\edit.exe");
-        let saved = store.update(|settings| settings.editor = Some(editor.clone()));
+        let saved = store
+            .change(|settings| settings.editor = Some(editor.clone()))
+            .saved;
         assert!(
             matches!(saved, Err(SettingsError::NoConfigFolder)),
             "{saved:?}"
         );
-        assert_eq!(store.editor(), Some(editor));
+        assert_eq!(store.get().editor, Some(editor));
+    }
+
+    #[test]
+    fn zoom_defaults_to_100_percent_and_no_window_size() {
+        let folder = Folder::with_file("zoom-default", r#"{ "editor": null }"#);
+        let (store, error) = folder.load();
+        assert!(error.is_none(), "{error:?}");
+        assert_eq!(u16::from(store.get().zoom), 100);
+        assert_eq!(store.get().window_size, None);
+    }
+
+    #[test]
+    fn saved_zoom_and_window_size_load_after_a_restart() {
+        let folder = Folder::new("zoom-restart");
+        let size = WindowSize {
+            width: 1024,
+            height: 768,
+        };
+        folder
+            .load()
+            .0
+            .change(|settings| {
+                settings.zoom = Zoom::from(125);
+                settings.window_size = Some(size);
+            })
+            .saved
+            .unwrap();
+        let (restarted, error) = folder.load();
+        assert!(error.is_none(), "{error:?}");
+        assert_eq!(u16::from(restarted.get().zoom), 125);
+        assert_eq!(restarted.get().window_size, Some(size));
+    }
+
+    #[test]
+    fn update_gives_the_settings_after_the_change() {
+        let (store, _) = SettingsStore::load(None);
+        let updated = store.change(|settings| settings.zoom = Zoom::from(150));
+        assert_eq!(u16::from(updated.settings.zoom), 150);
+        assert_eq!(updated.settings, store.get());
+    }
+
+    #[test]
+    fn change_that_changes_nothing_writes_no_file() {
+        let folder = Folder::new("no-change");
+        let (store, _) = folder.load();
+        let updated = store.change(|settings| settings.zoom = Zoom::from(100));
+        assert!(updated.saved.is_ok(), "{:?}", updated.saved);
+        assert!(!folder.0.exists());
+    }
+
+    #[test]
+    fn hand_edited_zoom_out_of_range_loads_within_it() {
+        let too_large = Folder::with_file("zoom-too-large", r#"{ "zoom": 5000 }"#);
+        let too_small = Folder::with_file("zoom-too-small", r#"{ "zoom": 1 }"#);
+        let zoom_in = |folder: &Folder| {
+            let (store, error) = folder.load();
+            assert!(error.is_none(), "{error:?}");
+            u16::from(store.get().page().zoom)
+        };
+        assert_eq!(zoom_in(&too_large), 300);
+        assert_eq!(zoom_in(&too_small), 50);
+    }
+
+    #[test]
+    fn update_tells_what_changed_before_another_change_starts() {
+        let (store, _) = SettingsStore::load(None);
+        let mut told = None;
+        store.update(
+            |settings| settings.zoom = Zoom::from(150),
+            |updated| {
+                // Held still: a read here would wait for ever if the update had let go.
+                assert!(store.current.try_lock().is_err());
+                told = Some((updated.before.zoom, updated.settings.zoom));
+            },
+        );
+        assert_eq!(told, Some((Zoom::default(), Zoom::from(150))));
     }
 }

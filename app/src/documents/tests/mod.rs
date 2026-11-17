@@ -16,13 +16,15 @@ use std::time::{Duration, SystemTime};
 use tauri::async_runtime::block_on;
 
 use super::handover::{Handover, Place};
-use super::recorder::{Recorder, Sent, ToWindow, recorded};
+use super::recorder::{Recorder, Sent, ToWindow, recorded, recorded_with};
 use super::*;
 use crate::watch::Change;
 
 mod give;
 mod handover;
 mod history;
+mod place;
+mod settings;
 mod watch;
 
 /// A file that exists: the app crate's own manifest.
@@ -75,10 +77,14 @@ fn to<T>(window: &str, what: T) -> (String, T) {
     (window.to_owned(), what)
 }
 
-/// What a window opened with `title` is recorded as.
+/// What a window opened with `title` is recorded as, with the default settings, at the default
+/// size, and placed by the system, as when no window has closed and none is active.
 fn opened(title: &str) -> ToWindow {
     ToWindow::Opened(NewWindow {
         title: title.to_owned(),
+        settings: Settings::default().page(),
+        size: super::place::DEFAULT_SIZE,
+        at: None,
     })
 }
 

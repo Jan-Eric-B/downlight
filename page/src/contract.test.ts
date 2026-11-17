@@ -5,13 +5,24 @@
 // side fails a test.
 import { clearMocks, mockWindows } from "@tauri-apps/api/mocks";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { pageFlags, type ArgsOf, type MenuEntry, type NamedFile } from "./app";
+import {
+  DEFAULT_SETTINGS,
+  firstSettings,
+  pageFlags,
+  type ArgsOf,
+  type MenuEntry,
+  type NamedFile,
+  type ZoomChange,
+} from "./app";
 import { startCommands } from "./commands";
 import { startLinks } from "./links";
 import { showNotice } from "./notice";
+import { startSettings } from "./settings";
 import { startTitleBar } from "./title-bar";
+import { startZoom, ZOOM_VARIABLE } from "./zoom";
 import {
   askedOfTheApp,
+  documentZoom,
   emptyWindow,
   failingWith,
   fakeTheApp,
@@ -32,11 +43,13 @@ import {
   settle,
   spyOnHeadingScrolls,
   spyOnScrollsToTop,
+  tell,
   tellAsSampled,
   timingReportSample,
   titleBarButton,
   titleBarFileName,
   titleBarSample,
+  zoomChangeSamples,
 } from "./test-support";
 import {
   requestDocument,
@@ -606,6 +619,24 @@ test("the page's menu entries are the kinds the app takes, each with the keys it
   for (const entry of sent) expect(sampled).toContain(shapeOf(entry));
 });
 
+// `zoom_changes.json`
+
+test("the page's changes of the zoom are each one the app takes, and no other", async () => {
+  const sent: ZoomChange[] = [];
+  fakeTheApp({
+    change_zoom: ({ change }) => {
+      sent.push(change);
+      return null;
+    },
+  });
+  startCommands(stopPage.signal);
+  await settle();
+
+  for (const command of ["zoomIn", "zoomOut", "resetZoom"])
+    await tell("menu-command", command);
+  expect(sent.toSorted()).toEqual(zoomChangeSamples().toSorted());
+});
+
 // `title_bar.json`
 
 test("the page tells the app where its maximize button is in the keys the app takes", async () => {
@@ -643,7 +674,10 @@ test("the page reads every flag in the app's URL with all flags on, and no other
   const url = pageUrlSample("allOn");
   openPageAt(url);
 
-  const named = [...new URL(url, location.origin).searchParams.keys()];
+  // The settings are no flag: the page reads them as a whole (`firstSettings`).
+  const named = [...new URL(url, location.origin).searchParams.keys()].filter(
+    (name) => name !== "settings",
+  );
   expect(flagsOn()).toEqual(named.sort());
   // A flag the page reads but the app never sends would read as off here.
   expect(flagsOn()).toEqual(Object.keys(pageFlags()).sort());
@@ -653,6 +687,43 @@ test("the page reads no flag in the app's URL with all flags off", () => {
   openPageAt(pageUrlSample("allOff"));
 
   expect(flagsOn()).toEqual([]);
+});
+
+// The settings snapshot (window design ticket 12): in `page_url.json` and the `settings` message.
+
+test.each(["allOn", "allOff"] as const)(
+  "the page reads the settings in the app's URL (%s) as the app's settings message gives them",
+  (name) => {
+    openPageAt(pageUrlSample(name));
+    const message = messageSample("settings");
+
+    expect(message.event).toBe("settings");
+    expect(firstSettings()).toEqual(message.payload);
+    // The sample is off the defaults, so settings the page failed to read would show here.
+    expect(firstSettings()).not.toEqual(DEFAULT_SETTINGS);
+  },
+);
+
+test("the page opened at the app's URL zooms the document view to its settings", async () => {
+  openPageAt(pageUrlSample("allOff"));
+  fakeTheApp();
+  await startSettings();
+  const stopZoom = startZoom();
+
+  expect(documentZoom()).toBe("1.25");
+  stopZoom();
+  document.documentElement.style.removeProperty(ZOOM_VARIABLE);
+});
+
+test("the app's settings message zooms the document view", async () => {
+  fakeTheApp();
+  await startSettings();
+  const stopZoom = startZoom();
+  await tellAsSampled(messageSample("settings"));
+
+  expect(documentZoom()).toBe("1.25");
+  stopZoom();
+  document.documentElement.style.removeProperty(ZOOM_VARIABLE);
 });
 
 // `timing_reports.json`. The timing switch is read when `timing.ts` loads, so these tests load the

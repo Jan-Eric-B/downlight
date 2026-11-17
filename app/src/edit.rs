@@ -5,6 +5,7 @@
 
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use tauri::{Manager as _, State, WebviewWindow};
 
@@ -29,10 +30,10 @@ pub enum Editor {
 #[tauri::command]
 pub async fn edit_document(
     window: WebviewWindow,
-    settings: State<'_, SettingsStore>,
+    settings: State<'_, Arc<SettingsStore>>,
 ) -> Result<(), Notice> {
     let app = window.app_handle().clone();
-    let chosen = settings.editor();
+    let chosen = settings.get().editor;
     tauri::async_runtime::spawn_blocking(move || {
         edit(
             &app.state::<Documents>(),
@@ -60,7 +61,7 @@ pub async fn choose_editor(window: WebviewWindow) -> Result<(), Notice> {
         else {
             return Ok(());
         };
-        keep_choice(&app.state::<SettingsStore>(), program)
+        keep_choice(&app.state::<Documents>(), program)
     })
     .await
     .map_err(|source| EditError::DialogStopped { source })??;
@@ -154,11 +155,11 @@ fn is_downlight(program: &Path, own_exe: &Path) -> bool {
 }
 
 /// Keeps `program` as the reader's editor, if it can be one.
-fn keep_choice(settings: &SettingsStore, program: PathBuf) -> Result<(), EditError> {
+fn keep_choice(documents: &Documents, program: PathBuf) -> Result<(), EditError> {
     let own_exe = std::env::current_exe().ok();
     check_choice(&program, own_exe.as_deref())?;
-    settings
-        .update(|settings| settings.editor = Some(program.clone()))
+    documents
+        .change_settings(|settings| settings.editor = Some(program.clone()))
         .map_err(|source| EditError::NotSaved { program, source })
 }
 
@@ -243,7 +244,6 @@ mod tests {
     use super::*;
     use crate::documents::recorder::recorded;
     use crate::documents::{DocumentAt, Target};
-    use crate::settings::SettingsStore;
 
     const CHOSEN: &str = r"C:\Tools\edit.exe";
     const TEXT_FILE_PROGRAM: &str = r"C:\Program Files\Notepad++\notepad++.exe";
@@ -403,17 +403,17 @@ mod tests {
 
     #[test]
     fn choice_that_is_refused_leaves_the_editor_as_it_was() {
-        let (settings, _) = SettingsStore::load(None);
-        assert!(keep_choice(&settings, own_exe()).is_err());
-        assert_eq!(settings.editor(), None);
+        let (documents, _) = recorded();
+        assert!(keep_choice(&documents, own_exe()).is_err());
+        assert_eq!(documents.settings().editor, None);
     }
 
     #[test]
     fn choice_that_cannot_be_saved_is_the_editor_until_downlight_closes() {
-        let (settings, _) = SettingsStore::load(None);
+        let (documents, _) = recorded();
         let program = PathBuf::from(r"C:\Tools\edit.exe");
-        let kept = keep_choice(&settings, program.clone());
-        assert_eq!(settings.editor(), Some(program));
+        let kept = keep_choice(&documents, program.clone());
+        assert_eq!(documents.settings().editor, Some(program));
         let notice = Notice::from(kept.unwrap_err()).to_string();
         assert!(
             notice.ends_with("edit.exe is the editor until Downlight closes."),

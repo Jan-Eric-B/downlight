@@ -6,10 +6,10 @@ mod windows;
 
 #[cfg(windows)]
 pub use windows::{
-    add_maximize_button, custom_scheme_origin, draws_own_title_bar, fold_case, has_backdrop,
-    is_missing, leave_keys_to_the_page, notepad, open_as_text_file, open_folder, open_url,
-    place_maximize_button, process_start, reveal_file, show_error, show_window_menu,
-    text_file_program, with_backdrop,
+    add_maximize_button, ask, custom_scheme_origin, draws_own_title_bar, fold_case, has_backdrop,
+    is_missing, leave_keys_to_the_page, menu_item_text, notepad, open_as_text_file, open_folder,
+    open_url, place_maximize_button, process_start, reveal_file, show_error, show_window_menu,
+    text_file_program, with_backdrop, with_browser_arguments,
 };
 
 /// Other systems name no text file program until their ports find theirs.
@@ -82,6 +82,12 @@ pub fn open_url(_url: &str) -> std::io::Result<()> {
     Err(std::io::ErrorKind::Unsupported.into())
 }
 
+/// Other systems hand the shortcut to Tauri's menu until their ports, which shows those it knows.
+#[cfg(not(windows))]
+pub fn menu_item_text(label: &str, shortcut: Option<&str>) -> (String, Option<String>) {
+    (label.to_owned(), shortcut.map(str::to_owned))
+}
+
 /// Other systems' webviews keep their browser keys until their ports turn them off.
 #[cfg(not(windows))]
 pub fn leave_keys_to_the_page(_window: &tauri::WebviewWindow) {}
@@ -90,6 +96,22 @@ pub fn leave_keys_to_the_page(_window: &tauri::WebviewWindow) {}
 #[cfg(not(windows))]
 pub fn show_error(message: &str) {
     eprintln!("{message}");
+}
+
+/// Other systems' webviews take no browser arguments (Tauri's `additional_browser_args` is
+/// WebView2's); their ports decide how their webviews treat a server's sign-in challenge.
+#[cfg(not(windows))]
+pub fn with_browser_arguments<'a, R: tauri::Runtime, M: tauri::Manager<R>>(
+    builder: tauri::WebviewWindowBuilder<'a, R, M>,
+) -> tauri::WebviewWindowBuilder<'a, R, M> {
+    builder
+}
+
+/// Other systems ask nothing until their ports, and the answer is no: network shares, which ask,
+/// are Windows' paths.
+#[cfg(not(windows))]
+pub fn ask(_window: &tauri::WebviewWindow, _question: &str) -> bool {
+    false
 }
 
 /// Other systems get a plain window until their ports.

@@ -8,6 +8,7 @@ import {
   requestDocument,
   stepThroughHistory,
 } from "./view";
+import { changeZoom } from "./zoom";
 
 /**
  * The reader's commands: each one's name, keyboard shortcut and what it does. A new command is
@@ -38,6 +39,8 @@ interface Command {
    * the one for Forward. Any other button, and a command without one, does what it did.
    */
   mouseButton?: 3 | 4;
+  /** Which way the mouse wheel runs it while Ctrl is held: up for Zoom in, down for Zoom out. */
+  ctrlWheel?: "up" | "down";
   /**
    * Whether it can run now, which the right-click menu shows; always, for a command without it.
    */
@@ -47,8 +50,8 @@ interface Command {
 
 /**
  * A key pressed with exactly the modifiers named, and no others. `key` is a letter in lower case,
- * which follows the keyboard's layout (`pressesKey`), or a named key as `KeyboardEvent.key` gives
- * it, such as `F5` or `ArrowLeft`.
+ * which follows the keyboard's layout (`pressesKey`), a digit, or a character or named key as
+ * `KeyboardEvent.key` gives it, such as `+`, `F5` or `ArrowLeft`.
  */
 interface Shortcut {
   key: string;
@@ -105,6 +108,37 @@ const commands = {
   open: { label: "Open...", shortcuts: [{ ctrl: true, key: "o" }], run: open },
   edit: { label: "Edit", shortcuts: [{ ctrl: true, key: "e" }], run: edit },
   chooseEditor: { label: "Choose editor...", run: chooseEditor },
+  // Ctrl+plus as each layout types it: its own key (German, the number pad), Shift+= (US), and =
+  // without Shift, as browsers take it too.
+  zoomIn: {
+    label: "Zoom in",
+    shortcuts: [
+      { ctrl: true, key: "+" },
+      { ctrl: true, shift: true, key: "+" },
+      { ctrl: true, key: "=" },
+    ],
+    ctrlWheel: "up",
+    repeatsWhileHeld: true,
+    run: () => {
+      changeZoom("in");
+    },
+  },
+  zoomOut: {
+    label: "Zoom out",
+    shortcuts: [{ ctrl: true, key: "-" }],
+    ctrlWheel: "down",
+    repeatsWhileHeld: true,
+    run: () => {
+      changeZoom("out");
+    },
+  },
+  resetZoom: {
+    label: "Reset zoom",
+    shortcuts: [{ ctrl: true, key: "0" }],
+    run: () => {
+      changeZoom("reset");
+    },
+  },
   close: {
     label: "Close",
     shortcuts: [{ ctrl: true, key: "w" }],
@@ -142,6 +176,10 @@ const menu: MenuLine[] = [
   "edit",
   "chooseEditor",
   "open",
+  "separator",
+  "zoomIn",
+  "zoomOut",
+  "resetZoom",
   "separator",
   "copy",
 ];
@@ -184,6 +222,8 @@ export function commandButton(id: CommandId, glyph: string): HTMLButtonElement {
 const WINDOWS_KEY_NAMES: Partial<Record<string, string>> = {
   ArrowLeft: "Left",
   ArrowRight: "Right",
+  "+": "Plus",
+  "-": "Minus",
 };
 
 /** The command's first shortcut as Windows writes it, such as `Ctrl+O` or `Alt+Left`. */
@@ -215,9 +255,12 @@ function pressesShortcutOf(event: KeyboardEvent, command: Command): boolean {
 /**
  * Whether the key pressed is `key`. A letter, on a layout that types Latin letters, goes by the
  * letter the key types, so it follows AZERTY and the like; on other layouts, such as Cyrillic, by
- * the key's place, as other Windows apps do. A named key goes by its name.
+ * the key's place, as other Windows apps do. A digit goes by the digit it types or by the digit
+ * key it is on, since AZERTY types `à` on the 0 key without Shift. A named key goes by its name.
  */
 function pressesKey(event: KeyboardEvent, key: string): boolean {
+  if (/^\d$/.test(key))
+    return event.key === key || event.code === `Digit${key}`;
   if (!isLetter(key)) return event.key === key;
   return /^[a-z]$/i.test(event.key)
     ? event.key.toLowerCase() === key
@@ -227,6 +270,12 @@ function pressesKey(event: KeyboardEvent, key: string): boolean {
 function isLetter(key: string): boolean {
   return /^[a-z]$/.test(key);
 }
+
+/**
+ * How far the wheel turns with Ctrl held, in px, to run Zoom in or Zoom out once: half a mouse
+ * wheel's notch, so every notch zooms whatever the display's scale.
+ */
+const WHEEL_STEP = 50;
 
 function isCommandId(id: string): id is CommandId {
   return Object.hasOwn(commands, id);
@@ -268,6 +317,39 @@ export function startCommands(signal?: AbortSignal): void {
       command.run();
     },
     { signal },
+  );
+
+  /**
+   * How far the wheel has turned with Ctrl held since its command last ran, in px, up below zero.
+   * A mouse wheel turns 100 px or more a notch, which runs its command once, never more; a
+   * touchpad's pinch, which the webview sends as Ctrl+wheel in many small steps, runs it once
+   * every `WHEEL_STEP`.
+   */
+  let wheelTurned = 0;
+  addEventListener(
+    "wheel",
+    (event) => {
+      if (!event.ctrlKey || event.altKey || event.shiftKey || event.metaKey)
+        return;
+      // Ctrl+wheel never scrolls the document, and WebView2 has its own zoom off.
+      event.preventDefault();
+      if (event.deltaY === 0) return;
+      // In lines or pages rather than px, a turn is at least a notch.
+      const turned =
+        event.deltaMode === 0
+          ? event.deltaY
+          : Math.sign(event.deltaY) * WHEEL_STEP;
+      if (Math.sign(turned) !== Math.sign(wheelTurned)) wheelTurned = 0;
+      wheelTurned += turned;
+      if (Math.abs(wheelTurned) < WHEEL_STEP) return;
+      const way = wheelTurned < 0 ? "up" : "down";
+      wheelTurned = 0;
+      const command: Command | undefined = Object.values(commands).find(
+        (candidate: Command) => candidate.ctrlWheel === way,
+      );
+      command?.run();
+    },
+    { signal, passive: false },
   );
 
   addEventListener(

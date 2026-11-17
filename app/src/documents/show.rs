@@ -8,12 +8,14 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::PoisonError;
 
+use super::place::{self, Area, Point, WindowPlace, WindowSize};
 use super::{Claimed, Documents, Given, WindowRecord};
 use crate::APP_NAME;
 use crate::message::Message;
 #[cfg(doc)]
 use crate::message::Pages;
 use crate::notice::file_name_shown;
+use crate::settings::PageSettings;
 
 /// What is done to windows themselves, beside what their pages are told ([`Pages`]): Tauri's in
 /// the app (`window.rs`), a recorder in the tests. A trait with two adapters rather than code
@@ -31,16 +33,34 @@ pub trait Windows: Send + Sync + 'static {
     /// is still being built or hidden, gets nothing, and that is no failure: a hidden one comes up
     /// in front when its page asks to be shown.
     fn bring_to_front(&self, window: &str) -> Result<(), WindowError>;
+
+    /// Where `window` is, for a new window to open beside it and at its size (ticket 16). None
+    /// for a window that has closed or isn't built yet, and for one that is minimized or
+    /// maximized, which isn't at a place and size of its own.
+    fn place_of(&self, window: &str) -> Option<WindowPlace>;
+
+    /// The work area of the main monitor, in its logical pixels: where the system places a new
+    /// window when there is no active window to open beside (ticket 16's review). None when the
+    /// system names no main monitor.
+    fn primary_work_area(&self) -> Option<Area>;
 }
 
-/// What a new window starts with that depends on its document: its title. What every window
-/// starts with alike (the page and its flags, the navigation guard, the backdrop, the key setup
-/// and the 5 s fallback for showing it) is decided in one place, `open_window` in `window.rs`.
-/// Ticket 16 adds the size and the offset here.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// What a new window starts with that the documents module decides: its title, the settings its
+/// page starts with, and its size and place (ticket 16). What every window starts with alike
+/// (the page and its flags, the navigation guard, the backdrop, the key setup and the 5 s
+/// fallback for showing it) is decided in one place, `open_window` in `window.rs`.
+#[derive(Debug, Clone, PartialEq)]
 pub struct NewWindow {
     /// What Alt+Tab and the taskbar show.
     pub title: String,
+    /// What its page shows of the settings from its start, in its URL.
+    pub settings: PageSettings,
+    /// The size of the last window that closed, or the default size until one has.
+    pub size: WindowSize,
+    /// Where its top left corner goes, in the logical pixels of the active window's monitor:
+    /// down and to the right of the active window, on that monitor's screen. None when there is
+    /// no active window to open beside, and the system places it.
+    pub at: Option<Point>,
 }
 
 /// Why the system couldn't open, change or tell a window or its page, in its own words: what
@@ -157,10 +177,20 @@ impl Documents {
     }
 
     /// Opens the window `window` just recorded, titled after `document` (None for a window that
-    /// shows none), or forgets it if it can't open, so that its document opens anew.
+    /// shows none), at the settings' zoom and the size of the last window that closed, beside the
+    /// active window (ticket 16), or forgets it if it can't open, so that its document opens anew.
     pub(super) fn open(&self, window: &str, document: Option<&Path>) -> Result<(), WindowError> {
+        let settings = self.settings();
+        let active = self.lock().active.clone();
+        let active = active.and_then(|active| self.inner.windows.place_of(&active));
+        let (size, at) = place::size_and_place(settings.window_size, active.as_ref(), || {
+            self.inner.windows.primary_work_area()
+        });
         let new_window = NewWindow {
             title: title_of(document),
+            settings: settings.page(),
+            size,
+            at,
         };
         self.inner
             .windows

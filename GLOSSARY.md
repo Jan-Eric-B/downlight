@@ -65,8 +65,12 @@ The moment the first screen of rendered document text is visible after a file is
 _Avoid_: Startup time, load time
 
 **Local image**:
-An image in a document whose file is on this computer. The page loads it through Downlight's own image scheme, never from the file system directly. An image on a network share is never a local image and doesn't load.
+An image in a document whose file is on this computer. The page loads it through Downlight's own image scheme, never from the file system directly. An image on a network share is never a local image and doesn't load, nor is one whose path goes through a symbolic link to a network share.
 _Avoid_: Asset, file image
+
+**Network share**:
+A folder that another computer, its host, shares, named by a path such as `\\host\share`. Looking at anything on one connects to the host, and Windows may sign in there as the reader, so Downlight never loads an image from one, and following a link that leads to one, by its path or through a symbolic link, first asks the reader, naming the host, unless the shown document is on a share of that same host.
+_Avoid_: UNC path, network drive, server
 
 **Link target**:
 Where a link in a document points, as the document writes it (its `href`). It comes from the document, so it is untrusted until link resolution turns it into a link action.
@@ -95,6 +99,10 @@ _Avoid_: Background, material, transparency
 **Full width**:
 The document filling the window's width instead of GitHub's reading width. One choice for every window, kept in the settings.
 _Avoid_: Fixed width, wide mode
+
+**Active window**:
+The Downlight window the reader was last in, while it is open. A new window opens down and to the right of it, at the size of the last window that closed.
+_Avoid_: Current window, focused window
 
 **Keep on top**:
 A window staying above all others. It belongs to one window and is gone when the window closes.

@@ -2,17 +2,19 @@
 //! every message a page is sent and everything done to a window, in order, so a whole show is
 //! tested without a webview (ticket 28).
 
+use std::collections::HashMap;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-use super::{Documents, NewWindow, WindowError, Windows};
+use super::{Area, Documents, NewWindow, WindowError, WindowPlace, Windows};
 use crate::message::{Message, Pages};
+use crate::settings::{Settings, SettingsStore};
 
 /// A message as a [`Recorder`] keeps it: the window it went to, and the message.
 pub type Sent = (String, Message);
 
 /// Something done to a window, as a [`Recorder`] keeps it with the window's label ([`Done`]).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ToWindow {
     /// The window opened, as this says.
     Opened(NewWindow),
@@ -24,10 +26,19 @@ pub enum ToWindow {
 /// Something done to a window as a [`Recorder`] keeps it: the window's label, and what was done.
 pub type Done = (String, ToWindow);
 
-/// The documents module with no window open yet, whose pages and windows `Recorder` keeps.
+/// The documents module with no window open yet, whose pages and windows `Recorder` keeps, with
+/// the default settings, which are never saved: there is no config folder.
 pub fn recorded() -> (Documents, Recorder) {
+    recorded_with(Settings::default())
+}
+
+/// The documents module with no window open yet and `settings`, which are never saved, whose
+/// pages and windows `Recorder` keeps.
+pub fn recorded_with(settings: Settings) -> (Documents, Recorder) {
     let recorder = Recorder::default();
-    (Documents::new(recorder.clone(), recorder.clone()), recorder)
+    let settings = Arc::new(SettingsStore::holding(settings));
+    let documents = Documents::new(recorder.clone(), recorder.clone(), settings);
+    (documents, recorder)
 }
 
 /// Keeps every message sent and everything done to a window, in order, for a test to check. Its
@@ -42,6 +53,10 @@ pub struct Recorder {
     failing_windows: Arc<Mutex<Vec<String>>>,
     /// What runs the next time a window is titled, before the title is set.
     before_next_title: Arc<Mutex<Option<BeforeTitle>>>,
+    /// Where each window is, as the system would say ([`Recorder::place`]).
+    places: Arc<Mutex<HashMap<String, WindowPlace>>>,
+    /// The main monitor's work area, as the system would say; None until a test sets one.
+    primary_work_area: Arc<Mutex<Option<Area>>>,
 }
 
 /// What another thread does while a window is being titled, for [`Recorder::before_next_title`].
@@ -56,6 +71,32 @@ impl Recorder {
         meanwhile: impl FnOnce() -> Result<(), WindowError> + Send + 'static,
     ) {
         *lock(&self.before_next_title) = Some(Box::new(meanwhile));
+    }
+
+    /// From now on, `window` is at `place`, as the system would say. Until then it has no place,
+    /// as a window has while it is minimized or maximized.
+    pub fn place(&self, window: &str, place: WindowPlace) {
+        lock(&self.places).insert(window.to_owned(), place);
+    }
+
+    /// From now on, `window` has no place, as when it was minimized or maximized.
+    pub fn unplace(&self, window: &str) {
+        lock(&self.places).remove(window);
+    }
+
+    /// From now on, the main monitor's work area is `area`, as the system would say.
+    pub fn set_primary_work_area(&self, area: Area) {
+        *lock(&self.primary_work_area) = Some(area);
+    }
+
+    /// What `window` opened as, or None if it didn't open.
+    pub fn opened_as(&self, window: &str) -> Option<NewWindow> {
+        lock(&self.done)
+            .iter()
+            .find_map(|(label, done)| match done {
+                ToWindow::Opened(new_window) if label == window => Some(new_window.clone()),
+                _ => None,
+            })
     }
 
     /// From now on, every message to `window`'s page fails to send, and isn't kept.
@@ -126,6 +167,14 @@ impl Windows for Recorder {
 
     fn bring_to_front(&self, window: &str) -> Result<(), WindowError> {
         self.do_to(window, ToWindow::BroughtToFront)
+    }
+
+    fn place_of(&self, window: &str) -> Option<WindowPlace> {
+        lock(&self.places).get(window).copied()
+    }
+
+    fn primary_work_area(&self) -> Option<Area> {
+        *lock(&self.primary_work_area)
     }
 }
 

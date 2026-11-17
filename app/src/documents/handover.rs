@@ -91,6 +91,7 @@ impl Documents {
     /// page asked goes with the answer rather than as a message, since the page's listener for
     /// notices may not be registered yet (ticket 26).
     pub(super) fn handover(&self, window: &str, page_shows: Option<Showing>) -> Option<Handover> {
+        self.page_hears_settings(window);
         let mut table = self.lock();
         let record = table.windows.get_mut(window)?;
         let steps = record.history.steps();

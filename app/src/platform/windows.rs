@@ -27,7 +27,8 @@ use windows_sys::Win32::UI::Shell::{
     ShellExecuteW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    MB_ICONERROR, MB_OK, MB_SETFOREGROUND, MessageBoxW, SW_SHOWNORMAL,
+    IDYES, MB_DEFBUTTON2, MB_ICONERROR, MB_ICONWARNING, MB_OK, MB_SETFOREGROUND, MB_YESNO,
+    MessageBoxW, SW_SHOWNORMAL,
 };
 
 use crate::APP_NAME;
@@ -39,6 +40,17 @@ pub use title_bar::{add_maximize_button, place_maximize_button, show_window_menu
 /// Windows 11's first build. Mica needs it; Windows 10 has no Mica, and Tauri drops the effect
 /// there without an error, which would leave a transparent window see-through.
 const FIRST_BUILD_WITH_MICA: u32 = 22000;
+
+/// A menu item's text with its `shortcut` shown beside it, as Windows writes it after a tab, and
+/// the shortcut for Tauri's menu, which is None. Written into the text rather than handed to muda,
+/// which takes only shortcuts it has a key code for and drops the rest without a word, such as
+/// zoom's `Ctrl+Plus` (ticket 16); in a popup menu the shortcut is only shown, never pressed.
+pub fn menu_item_text(label: &str, shortcut: Option<&str>) -> (String, Option<String>) {
+    match shortcut {
+        Some(shortcut) => (format!("{label}\t{shortcut}"), None),
+        None => (label.to_owned(), None),
+    }
+}
 
 /// Whether the page draws the title bar in place of the native frame (ADR 0005). Windows only, so
 /// far; false brings the native title bar back.
@@ -60,6 +72,28 @@ pub fn with_backdrop<'a, R: Runtime, M: Manager<R>>(
     builder
         .transparent(true)
         .effects(EffectsBuilder::new().effect(Effect::Mica).build())
+}
+
+/// The browser arguments of every webview, the same for each window: windows in one process share
+/// one WebView2 browser, which refuses a webview whose arguments differ from those it runs with.
+/// A second launch hands its documents to the running process (ADR 0001) and builds no webview,
+/// so its own `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` changes nothing (ticket 19).
+///
+/// - wry's own defaults, which setting arguments replaces: no mini menu on selected text, no PDF
+///   menu, and no SmartScreen check of each URL.
+/// - No server gets the reader's Windows sign-in without asking (ticket 20). Chromium answers an
+///   NTLM or Negotiate challenge with it on its own for any host Windows counts as intranet
+///   (`URLACTION_CREDENTIALS_USE`, a dotless name such as `http://fileserver/` by default) unless
+///   an allowlist is set; an empty one counts as unset, so the list names a host that can never
+///   resolve (RFC 6761). A proxy's challenge is still answered.
+const BROWSER_ARGUMENTS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection \
+     --auth-server-allowlist=downlight.invalid";
+
+/// Starts the window's webview with [`BROWSER_ARGUMENTS`].
+pub fn with_browser_arguments<'a, R: Runtime, M: Manager<R>>(
+    builder: WebviewWindowBuilder<'a, R, M>,
+) -> WebviewWindowBuilder<'a, R, M> {
+    builder.additional_browser_args(BROWSER_ARGUMENTS)
 }
 
 /// Where the page loads a custom scheme's URLs from: WebView2 serves custom schemes as
@@ -106,6 +140,30 @@ pub fn show_error(message: &str) {
             MB_OK | MB_ICONERROR | MB_SETFOREGROUND,
         );
     }
+}
+
+/// Asks the reader a yes or no `question` in a message box that belongs to `window`, which waits
+/// for the answer, and says whether the answer was yes. No is the default button, so a stray
+/// Enter answers no. Meant for a blocking thread: the box runs its own message loop there, and
+/// the main thread and the other windows keep answering.
+pub fn ask(window: &WebviewWindow, question: &str) -> bool {
+    // Without its window the box would belong to no window, and the reader could miss it.
+    let Ok(owner) = window.hwnd() else {
+        return false;
+    };
+    let text = wide(question);
+    let caption = wide(APP_NAME);
+    // SAFETY: both strings are NUL-terminated UTF-16 buffers that outlive the call, and a window
+    // that has closed meanwhile only makes the call fail, which counts as no.
+    let answer = unsafe {
+        MessageBoxW(
+            owner.0,
+            text.as_ptr(),
+            caption.as_ptr(),
+            MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2,
+        )
+    };
+    answer == IDYES
 }
 
 /// `s` as the NUL-terminated UTF-16 string Windows' wide APIs take.
@@ -404,6 +462,46 @@ mod tests {
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_F5;
 
     use super::*;
+
+    /// The value of the browser argument `--name=value`, if it is given.
+    fn browser_argument(name: &str) -> Option<&'static str> {
+        BROWSER_ARGUMENTS
+            .split_ascii_whitespace()
+            .find_map(|argument| argument.strip_prefix(&format!("--{name}=")))
+    }
+
+    #[test]
+    fn webview_answers_no_servers_sign_in_challenge_on_its_own() {
+        // An empty allowlist would fall back to Windows' zones, which let intranet hosts in.
+        let allowlist = browser_argument("auth-server-allowlist").unwrap_or_default();
+        assert!(
+            !allowlist.is_empty()
+                && allowlist
+                    .split(',')
+                    .all(|host| host.ends_with(".invalid") && !host.contains('*')),
+            "{allowlist:?}"
+        );
+    }
+
+    #[test]
+    fn webview_keeps_wry_s_default_browser_arguments() {
+        assert_eq!(
+            browser_argument("disable-features"),
+            Some("msWebOOUI,msPdfOOUI,msSmartScreenProtection")
+        );
+    }
+
+    #[test]
+    fn menu_item_shows_any_shortcut_after_a_tab_as_windows_writes_it() {
+        assert_eq!(
+            menu_item_text("Zoom in", Some("Ctrl+Plus")),
+            ("Zoom in\tCtrl+Plus".to_owned(), None)
+        );
+        assert_eq!(
+            menu_item_text("Choose editor...", None),
+            ("Choose editor...".to_owned(), None)
+        );
+    }
 
     #[test]
     fn fold_case_upper_cases_every_character() {

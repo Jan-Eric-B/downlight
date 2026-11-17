@@ -192,6 +192,53 @@ export function pageFlags(): PageFlags {
 }
 
 /**
+ * What the page shows of the reader's settings, one snapshot of all of them (`PageSettings` in
+ * `app/src/settings.rs`, window design ticket 12): the first in the page's URL, and each change in
+ * a `settings` message. The page hears both in one place (`whenSettingsChange` in `settings.ts`).
+ */
+export type PageSettings = {
+  /** The document view's zoom level in percent (ticket 16). */
+  zoom: number;
+};
+
+/**
+ * The settings of a reader who changed none, for a URL without a snapshot the page can read. The
+ * app's own defaults are in `Settings::default` (`app/src/settings.rs`), the zoom's in
+ * `app/src/zoom.rs` (`DEFAULT`); keep them the same.
+ */
+export const DEFAULT_SETTINGS: PageSettings = { zoom: 100 };
+
+function isPageSettings(value: unknown): value is PageSettings {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "zoom" in value &&
+    typeof value.zoom === "number" &&
+    Number.isFinite(value.zoom) &&
+    value.zoom > 0
+  );
+}
+
+/**
+ * The settings the app opened the page with, from its URL's `settings`, read at each call so the
+ * tests can open the page with other ones. A URL without them, or with ones the page can't read,
+ * gives the defaults rather than a page that can't start.
+ */
+export function firstSettings(): PageSettings {
+  const given = new URLSearchParams(location.search).get("settings");
+  if (given === null) return DEFAULT_SETTINGS;
+  try {
+    const settings: unknown = JSON.parse(given);
+    return isPageSettings(settings) ? settings : DEFAULT_SETTINGS;
+  } catch {
+    return DEFAULT_SETTINGS;
+  }
+}
+
+/** A change of the zoom level that every window shares (`ZoomChange` in `app/src/zoom.rs`). */
+export type ZoomChange = "in" | "out" | "reset";
+
+/**
  * Every command the app has (`generate_handler!` in `app/src/main.rs`), with the arguments the
  * page passes and the app's answer; a command whose Rust function returns `()` answers null.
  */
@@ -253,6 +300,12 @@ export type Commands = {
    * Choosing nothing changes nothing; a choice that can't be the editor rejects with why.
    */
   choose_editor: { args: undefined; answer: null };
+  /**
+   * Zoom in, Zoom out or Reset zoom (ticket 16), for every window: the app sends each page the
+   * new level in a `settings` message, this one too. Rejects with why when the level couldn't be
+   * saved; it holds until Downlight closes all the same.
+   */
+  change_zoom: { args: { change: ZoomChange }; answer: null };
 };
 
 export type Command = keyof Commands;
@@ -304,6 +357,8 @@ export type Messages = {
    * app's window behind the button rather than the page.
    */
   "maximize-button": "normal" | "hovered" | "pressed";
+  /** What the page shows of the settings, whole, since one of them changed. */
+  settings: PageSettings;
 };
 
 export type Message = keyof Messages;
@@ -317,12 +372,26 @@ export function listenToApp<M extends Message>(
   message: M,
   handler: (payload: Messages[M]) => void,
 ): void {
-  getCurrentWebviewWindow()
-    .listen<Messages[M]>(message, ({ payload }) => {
-      handler(payload);
-    })
-    .catch((error: unknown) => {
-      // Without the listener the window would miss what the app tells it.
-      showNotice(String(error));
-    });
+  void startListeningToApp(message, handler);
+}
+
+/**
+ * `listenToApp`, resolved once the page hears `message`: registering a listener is a round trip
+ * to the app, and a message the app sends before it is done is lost. Never rejects.
+ */
+export async function startListeningToApp<M extends Message>(
+  message: M,
+  handler: (payload: Messages[M]) => void,
+): Promise<void> {
+  try {
+    await getCurrentWebviewWindow().listen<Messages[M]>(
+      message,
+      ({ payload }) => {
+        handler(payload);
+      },
+    );
+  } catch (error: unknown) {
+    // Without the listener the window would miss what the app tells it.
+    showNotice(String(error));
+  }
 }

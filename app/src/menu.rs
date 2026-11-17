@@ -8,6 +8,7 @@ use tauri::{AppHandle, Manager as _, WebviewWindow};
 
 use crate::documents::Documents;
 use crate::message::Message;
+use crate::platform;
 
 /// One line of the menu, as the page describes it. Serialized only for its contract samples.
 #[derive(Deserialize)]
@@ -70,13 +71,16 @@ pub fn show_document_menu(window: WebviewWindow, entries: Vec<MenuEntry>) -> tau
                 label,
                 shortcut,
                 enabled,
-            } => menu.append(&MenuItem::with_id(
-                &window,
-                item_id(window.label(), &id),
-                label,
-                enabled,
-                shortcut,
-            )?)?,
+            } => {
+                let (text, shortcut) = platform::menu_item_text(&label, shortcut.as_deref());
+                menu.append(&MenuItem::with_id(
+                    &window,
+                    item_id(window.label(), &id),
+                    text,
+                    enabled,
+                    shortcut,
+                )?)?;
+            }
             MenuEntry::Separator => menu.append(&PredefinedMenuItem::separator(&window)?)?,
             MenuEntry::Copy => menu.append(&PredefinedMenuItem::copy(&window, Some("Copy"))?)?,
         }

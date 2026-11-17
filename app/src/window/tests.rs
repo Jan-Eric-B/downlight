@@ -1,4 +1,5 @@
-use crate::documents::recorder::{ToWindow, recorded};
+use crate::documents::recorder::{Recorder, ToWindow, recorded};
+use crate::zoom::Zoom;
 
 use super::*;
 
@@ -10,15 +11,19 @@ fn launch_that_names_no_document_opens_a_window_titled_downlight() {
     let (documents, recorder) = recorded();
     let failures = open_launch(&documents, ["downlight"], Path::new(r"C:\work"));
     assert!(failures.is_empty(), "{failures:?}");
-    assert_eq!(
-        recorder.done(),
-        [(
-            "document-0".to_owned(),
-            ToWindow::Opened(NewWindow {
-                title: "Downlight".to_owned()
-            })
-        )]
-    );
+    assert_eq!(opened_titles(&recorder), ["Downlight"]);
+}
+
+/// The title of each window that opened, in turn.
+fn opened_titles(recorder: &Recorder) -> Vec<String> {
+    recorder
+        .done()
+        .into_iter()
+        .filter_map(|(_, done)| match done {
+            ToWindow::Opened(NewWindow { title, .. }) => Some(title),
+            _ => None,
+        })
+        .collect()
 }
 
 #[test]
@@ -29,22 +34,10 @@ fn launch_opens_a_window_for_each_document_titled_after_it() {
         ["downlight", LAUNCHED, r"C:\work\b.md"],
         Path::new(r"C:\work"),
     );
-    let titles = recorder
-        .done()
-        .into_iter()
-        .map(|(_, done)| done)
-        .collect::<Vec<_>>();
     assert!(failures.is_empty(), "{failures:?}");
     assert_eq!(
-        titles,
-        [
-            ToWindow::Opened(NewWindow {
-                title: "README.md - docs - Downlight".to_owned()
-            }),
-            ToWindow::Opened(NewWindow {
-                title: "b.md - work - Downlight".to_owned()
-            })
-        ]
+        opened_titles(&recorder),
+        ["README.md - docs - Downlight", "b.md - work - Downlight"]
     );
 }
 
@@ -114,11 +107,50 @@ fn page_url_tells_the_page_about_timing_backdrop_and_title_bar() {
         backdrop: true,
         title_bar: true,
     };
-    assert_eq!(page_url(false, plain), "index.html");
-    assert_eq!(page_url(true, plain), "index.html?timing");
-    assert_eq!(page_url(false, backdrop), "index.html?backdrop");
-    assert_eq!(page_url(false, title_bar), "index.html?titleBar");
-    assert_eq!(page_url(true, both), "index.html?timing&backdrop&titleBar");
+    let url = |timing, look| {
+        page_url(
+            timing,
+            look,
+            PageSettings {
+                zoom: Zoom::from(100),
+            },
+        )
+        .unwrap()
+    };
+    let settings = "settings=%7B%22zoom%22%3A100%7D";
+    assert_eq!(url(false, plain), format!("index.html?{settings}"));
+    assert_eq!(url(true, plain), format!("index.html?timing&{settings}"));
+    assert_eq!(
+        url(false, backdrop),
+        format!("index.html?backdrop&{settings}")
+    );
+    assert_eq!(
+        url(false, title_bar),
+        format!("index.html?titleBar&{settings}")
+    );
+    assert_eq!(
+        url(true, both),
+        format!("index.html?timing&backdrop&titleBar&{settings}")
+    );
+}
+
+#[test]
+fn page_url_gives_the_page_the_settings_it_starts_with() {
+    let plain = WindowLook {
+        backdrop: false,
+        title_bar: false,
+    };
+    assert_eq!(
+        page_url(
+            false,
+            plain,
+            PageSettings {
+                zoom: Zoom::from(150)
+            }
+        )
+        .unwrap(),
+        "index.html?settings=%7B%22zoom%22%3A150%7D"
+    );
 }
 
 #[test]

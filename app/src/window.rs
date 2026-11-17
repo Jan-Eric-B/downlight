@@ -10,11 +10,15 @@ use std::time::Duration;
 
 use tauri::webview::NewWindowResponse;
 use tauri::{
-    AppHandle, Manager as _, State, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+    AppHandle, Manager as _, Monitor, State, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
     WindowEvent,
 };
 
-use crate::documents::{DocumentAt, Documents, NewWindow, ShowError, Target, WindowError, Windows};
+use crate::documents::{
+    Area, DocumentAt, Documents, NewWindow, Point, ShowError, Target, WindowError, WindowPlace,
+    WindowSize, Windows,
+};
+use crate::settings::PageSettings;
 use crate::timing::Timing;
 use crate::{command_line, platform, title_bar};
 
@@ -83,10 +87,20 @@ pub fn open_launch(
         .collect()
 }
 
-/// Forgets a closed window's document, so opening the document again opens a new window.
-pub fn forget_when_destroyed(window: &tauri::Window, event: &WindowEvent) {
-    if let WindowEvent::Destroyed = event {
-        window.state::<Documents>().forget(window.label());
+/// Keeps track of the windows for the documents module: which one the reader is in, for a new
+/// window to open beside (ticket 16); the size of one that is closing, read while it is still
+/// there to measure, for a new window to open at; and forgets a closed window's document, so
+/// opening the document again opens a new window.
+pub fn track_windows(window: &tauri::Window, event: &WindowEvent) {
+    let documents = window.state::<Documents>();
+    match event {
+        WindowEvent::Focused(true) => documents.activated(window.label()),
+        // Saved here, on the main thread, rather than on a background task, since closing the
+        // last window ends the process right after: an exception to keeping the main thread free
+        // (ticket 16's Results), one small file written as a window closes.
+        WindowEvent::CloseRequested { .. } => documents.closing(window.label()),
+        WindowEvent::Destroyed => documents.forget(window.label()),
+        _ => {}
     }
 }
 
@@ -120,6 +134,47 @@ impl Windows for AppHandle {
         }
         Ok(window.set_focus()?)
     }
+
+    fn place_of(&self, window: &str) -> Option<WindowPlace> {
+        let window = self.get_webview_window(window)?;
+        if window.is_minimized().ok()? || window.is_maximized().ok()? {
+            return None;
+        }
+        // In the logical pixels of the window's own monitor, so that a new window opened beside
+        // it lands on that monitor, at that monitor's scale (tao picks the monitor a logical
+        // position lands on at its own scale).
+        let scale = window.scale_factor().ok()?;
+        let at = window.outer_position().ok()?.to_logical::<f64>(scale);
+        let size = window.inner_size().ok()?.to_logical::<f64>(scale);
+        let monitor = window.current_monitor().ok()??;
+        Some(WindowPlace {
+            at: Point { x: at.x, y: at.y },
+            size: WindowSize {
+                width: size.width.round() as u32,
+                height: size.height.round() as u32,
+            },
+            work_area: work_area_of(&monitor, scale),
+        })
+    }
+
+    fn primary_work_area(&self) -> Option<Area> {
+        // At the main monitor's own scale, which a window the system places there opens at.
+        let monitor = self.primary_monitor().ok()??;
+        Some(work_area_of(&monitor, monitor.scale_factor()))
+    }
+}
+
+/// `monitor`'s work area, in logical pixels at `scale`.
+fn work_area_of(monitor: &Monitor, scale: f64) -> Area {
+    let work_area = monitor.work_area();
+    let corner = work_area.position.to_logical::<f64>(scale);
+    let extent = work_area.size.to_logical::<f64>(scale);
+    Area {
+        left: corner.x,
+        top: corner.y,
+        width: extent.width,
+        height: extent.height,
+    }
 }
 
 /// What a window leaves for its page to draw, decided once when it opens.
@@ -133,38 +188,52 @@ struct WindowLook {
     title_bar: bool,
 }
 
-/// The page and what it is told in its query: `timing` turns on its timing reports, and the
-/// window's look (`backdrop`, `titleBar`) says what the page draws. The page reads them in one
-/// place (`pageFlags` in `page/src/app.ts`), against this function's contract sample.
-fn page_url(timing: bool, look: WindowLook) -> String {
-    let flags = [
-        ("timing", timing),
-        ("backdrop", look.backdrop),
-        ("titleBar", look.title_bar),
-    ]
-    .into_iter()
-    .filter_map(|(flag, on)| on.then_some(flag))
-    .collect::<Vec<_>>();
-    if flags.is_empty() {
-        "index.html".to_owned()
-    } else {
-        format!("index.html?{}", flags.join("&"))
+/// The page and what it is told in its query: `timing` turns on its timing reports, the window's
+/// look (`backdrop`, `titleBar`) says what the page draws, and `settings` is the first snapshot
+/// of the settings the page shows, as JSON (window design ticket 12), so first paint waits for no
+/// round trip. The page reads them in one place (`pageFlags` and `firstSettings` in
+/// `page/src/app.ts`), against this function's contract sample.
+fn page_url(timing: bool, look: WindowLook, settings: PageSettings) -> tauri::Result<String> {
+    // Only the query is kept, so any URL does as the base: Tauri resolves the page's path
+    // against its own origin.
+    let mut url = Url::parse("tauri://localhost/").map_err(tauri::Error::InvalidUrl)?;
+    {
+        let mut query = url.query_pairs_mut();
+        let flags = [
+            ("timing", timing),
+            ("backdrop", look.backdrop),
+            ("titleBar", look.title_bar),
+        ];
+        for (flag, on) in flags {
+            if on {
+                query.append_key_only(flag);
+            }
+        }
+        // Form-encoded, as the page's `URLSearchParams` reads it.
+        query.append_pair("settings", &serde_json::to_string(&settings)?);
     }
+    Ok(format!("index.html?{}", url.query().unwrap_or_default()))
 }
 
-/// The page's URL with every flag on and with none, which the page's tests read its flags from
-/// (`app/src/contract.rs`). A flag that is renamed on one side only would otherwise pass both
-/// test suites and, for `titleBar`, open a frameless window with no title bar to close it by.
+/// The page's URL with every flag on and with none, which the page's tests read its flags and
+/// its first settings from (`app/src/contract.rs`). A flag that is renamed on one side only would
+/// otherwise pass both test suites and, for `titleBar`, open a frameless window with no title bar
+/// to close it by.
 #[cfg(test)]
 pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
+    use serde::ser::Error as _;
+
     // A struct literal names every field, so a new flag stops the build here until it is sampled.
     let every = |on| WindowLook {
         backdrop: on,
         title_bar: on,
     };
+    // The snapshot of the `settings` message's sample (`message::contract_samples`).
+    let settings = PageSettings::sample();
+    let url = |timing, look| page_url(timing, look, settings).map_err(serde_json::Error::custom);
     Ok(serde_json::json!({
-        "allOn": page_url(true, every(true)),
-        "allOff": page_url(false, every(false)),
+        "allOn": url(true, every(true))?,
+        "allOff": url(false, every(false))?,
     }))
 }
 
@@ -175,8 +244,9 @@ const LONGEST_HIDDEN: Duration = Duration::from_secs(5);
 
 /// Opens a window, hidden until its page has drawn its first frame (`show_window`), so it never
 /// shows WebView2's white or an empty frame while the webview starts (ticket 04). The one place
-/// that decides what every new window starts with: the page and its flags, its frame, the
-/// navigation guard, the backdrop, the key setup, the maximize button and the 5 s fallback.
+/// that decides what every new window starts with: the page and its flags and first settings, its
+/// size and place as `new_window` says, its frame, the navigation guard, the backdrop, the
+/// webview's browser arguments, the key setup, the maximize button and the 5 s fallback.
 fn open_window(app: &AppHandle, label: &str, new_window: &NewWindow) -> tauri::Result<()> {
     let timing = app.state::<Timing>();
     timing.window_opening(label);
@@ -186,11 +256,19 @@ fn open_window(app: &AppHandle, label: &str, new_window: &NewWindow) -> tauri::R
         backdrop: platform::has_backdrop(),
         title_bar: platform::draws_own_title_bar(),
     };
-    let url = WebviewUrl::App(page_url(timing.is_on(), look).into());
+    let url = WebviewUrl::App(page_url(timing.is_on(), look, new_window.settings)?.into());
     let page = page_origin(app);
+    let size = new_window.size;
     let builder = WebviewWindowBuilder::new(app, label, url)
         // Alt+Tab and the taskbar still show the title, though the page's title bar doesn't.
         .title(&new_window.title)
+        .inner_size(f64::from(size.width), f64::from(size.height));
+    // Without a place the system places the window, as for the first one.
+    let builder = match new_window.at {
+        Some(at) => builder.position(at.x, at.y),
+        None => builder,
+    };
+    let builder = builder
         .decorations(!look.title_bar)
         .visible(false)
         // Links never navigate the webview or open one of its own windows: the page follows them
@@ -203,7 +281,7 @@ fn open_window(app: &AppHandle, label: &str, new_window: &NewWindow) -> tauri::R
     } else {
         builder
     };
-    let window = builder.build()?;
+    let window = platform::with_browser_arguments(builder).build()?;
     platform::leave_keys_to_the_page(&window);
     if look.title_bar {
         title_bar::add_maximize_button(&window);

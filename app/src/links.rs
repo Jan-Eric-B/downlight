@@ -5,9 +5,10 @@
 use std::path::{Path, PathBuf};
 use std::{fmt, io};
 
-use downlight_core::{LinkAction, LinkError, PathKind, resolve_link};
+use downlight_core::{LinkAction, LinkError, resolve_link};
 use tauri::{Manager as _, WebviewWindow};
 
+use crate::disk::Disk;
 use crate::documents::{DocumentAt, Documents, Given, ShowError, Showing, Target};
 use crate::notice::{NamedFile, Notice};
 use crate::platform;
@@ -19,8 +20,10 @@ use crate::platform;
 /// would otherwise resolve against the new document's folder.
 ///
 /// The page passes only the showing and the target: the document comes from the app's own state.
-/// Resolving looks at the file system, and a network share connects only now, on a blocking
-/// thread, so the window keeps answering.
+/// Resolving looks at the file system, on a blocking thread, so the window keeps answering. A
+/// link that leads to a network share first asks the reader, in a box that belongs to the window,
+/// and connects to the share only after a yes, unless the share is on the host the document is on
+/// (ticket 20).
 #[tauri::command]
 pub async fn follow_link(
     window: WebviewWindow,
@@ -29,14 +32,14 @@ pub async fn follow_link(
     new_window: bool,
 ) -> Result<Followed, Notice> {
     let app = window.app_handle().clone();
-    let label = window.label().to_owned();
     let followed = tauri::async_runtime::spawn_blocking(move || {
         follow(
             &app.state::<Documents>(),
-            &label,
+            window.label(),
             showing,
             &target,
             new_window,
+            |path, host| platform::ask(&window, &connect_question(path, host)),
         )
     })
     .await
@@ -76,19 +79,33 @@ pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
     }))
 }
 
+/// What the reader is asked before a link connects to the network share on `host` that `path`
+/// leads to: the host is named, since it is the computer that may get the reader's sign-in.
+fn connect_question(path: &Path, host: &str) -> String {
+    format!(
+        "The link goes to {}, which is on a network share of the computer {host}. \
+         Following it connects to {host}, and Windows may sign in there as you.\n\n\
+         Follow the link?",
+        path.display()
+    )
+}
+
+/// Follows the link, with `ask_to_connect` asking the reader, given the link's path and the
+/// share's host, whether a link that leads to a network share may connect to it.
 fn follow(
     documents: &Documents,
     label: &str,
     showing: Showing,
     target: &str,
     new_window: bool,
+    ask_to_connect: impl FnOnce(&Path, &str) -> bool,
 ) -> Result<Followed, FollowError> {
     // A window that shows no document has no links, and one that has left the link's has none
     // of that document's.
     let Some(document) = documents.document_path_shown_as(label, showing) else {
         return Ok(Followed::Nothing);
     };
-    match resolve_link(&document, target, path_kind)? {
+    match resolve_link(&document, target, &Disk, ask_to_connect)? {
         LinkAction::ShowDocument { path, heading } => {
             let document = DocumentAt {
                 path: &path,
@@ -126,18 +143,6 @@ fn follow(
             Err(source) => Err(FollowError::OpenUrl { url, source }),
         },
         LinkAction::Nothing => Ok(Followed::Nothing),
-    }
-}
-
-/// Whether `path` is a file or a folder, or None when nothing is there, for the core's link
-/// resolution. Any other error, such as an offline share or a folder the reader may not open,
-/// stays an error: the file may well exist, so the reader mustn't be told it doesn't.
-fn path_kind(path: &Path) -> io::Result<Option<PathKind>> {
-    match std::fs::metadata(path) {
-        Ok(metadata) if metadata.is_dir() => Ok(Some(PathKind::Folder)),
-        Ok(_) => Ok(Some(PathKind::File)),
-        Err(error) if platform::is_missing(&error) => Ok(None),
-        Err(error) => Err(error),
     }
 }
 
@@ -215,25 +220,61 @@ mod tests {
     use crate::documents::recorder::{ToWindow, recorded};
     use crate::message::Message;
 
+    /// Follows `target` in `window`'s document as `showing`, where no link leads to a share.
+    fn follow(
+        documents: &Documents,
+        window: &str,
+        showing: Showing,
+        target: &str,
+        new_window: bool,
+    ) -> Result<Followed, FollowError> {
+        super::follow(documents, window, showing, target, new_window, |path, _| {
+            panic!("asked to connect for {}", path.display())
+        })
+    }
+
+    /// A host name that never resolves (RFC 6761), so a link that wrongly looked at its share
+    /// would still connect to nothing.
+    const SHARE: &str = r"\\downlight-test.invalid\share";
+
     #[test]
-    fn path_kind_tells_files_folders_and_missing_apart() {
-        let folder = std::env::temp_dir().join(format!("downlight-links-{}", std::process::id()));
-        std::fs::create_dir_all(folder.join("sub")).unwrap();
-        std::fs::write(folder.join("notes.txt"), "Notes").unwrap();
-        let kinds = [
-            path_kind(&folder.join("notes.txt")),
-            path_kind(&folder.join("sub")),
-            path_kind(&folder.join("missing.md")),
-        ];
-        // Cleaned up before asserting, so a failing run leaves no folder behind.
-        std::fs::remove_dir_all(&folder).unwrap();
+    fn link_to_a_share_asks_naming_the_host_and_a_no_leaves_the_window_as_it_was() {
+        let (documents, recorder) = recorded();
+        let (window, showing) = window_showing_notes(&documents);
+        for target in [format!(r"{SHARE}\a.md"), format!(r"{SHARE}\notes.txt")] {
+            let mut asked = Vec::new();
+            let followed = super::follow(
+                &documents,
+                &window,
+                showing,
+                &target,
+                false,
+                |path, host| {
+                    asked.push((path.to_owned(), host.to_owned()));
+                    false
+                },
+            );
+            assert_eq!(followed.ok(), Some(Followed::Nothing), "{target}");
+            assert_eq!(
+                asked,
+                [(PathBuf::from(&target), "downlight-test.invalid".to_owned())]
+            );
+        }
         assert_eq!(
-            kinds.map(Result::ok),
-            [
-                Some(Some(PathKind::File)),
-                Some(Some(PathKind::Folder)),
-                Some(None)
-            ]
+            documents.document_path(&window),
+            Some(fixtures().join("notes.md"))
+        );
+        assert_eq!(recorder.sent(), []);
+    }
+
+    #[test]
+    fn question_before_connecting_names_the_link_s_path_and_the_host() {
+        let question = connect_question(Path::new(r"\\fileserver\team\a.md"), "fileserver");
+        assert_eq!(
+            question,
+            "The link goes to \\\\fileserver\\team\\a.md, which is on a network share of the \
+             computer fileserver. Following it connects to fileserver, and Windows may sign in \
+             there as you.\n\nFollow the link?"
         );
     }
 

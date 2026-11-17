@@ -6,6 +6,7 @@ use tauri::{AppHandle, Emitter as _};
 
 use crate::documents::{Showing, WindowError};
 use crate::notice::Notice;
+use crate::settings::PageSettings;
 use crate::title_bar::MaximizeButtonState;
 
 /// A message for one window's page. Each goes as the event the page listens for, with a string
@@ -36,6 +37,9 @@ pub enum Message {
     /// How the page's maximize button is to look: the pointer on it reaches the window behind
     /// the button on Windows, not the page (`title_bar.rs`).
     MaximizeButton(MaximizeButtonState),
+    /// What the page shows of the settings, whole, since one of them changed (window design
+    /// ticket 12). Sent to every window (`Documents::change_settings`).
+    Settings(PageSettings),
 }
 
 /// What a message carries to the page.
@@ -46,6 +50,7 @@ enum Payload<'a> {
     Showing(Showing),
     HeadingIn { showing: Showing, heading: &'a str },
     Notice(&'a Notice),
+    Settings(PageSettings),
 }
 
 impl Message {
@@ -76,6 +81,7 @@ impl Message {
                     MaximizeButtonState::Pressed => "pressed",
                 }),
             ),
+            Self::Settings(settings) => ("settings", Some(Payload::Settings(*settings))),
         }
     }
 }
@@ -94,7 +100,8 @@ pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
         | Message::Notice(_)
         | Message::MenuCommand(_)
         | Message::WindowState { .. }
-        | Message::MaximizeButton(_) => {}
+        | Message::MaximizeButton(_)
+        | Message::Settings(_) => {}
     };
     let sample = |message: Message| {
         let (event, payload) = message.event();
@@ -122,6 +129,9 @@ pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
         "maximizeButtonNormal": sample(Message::MaximizeButton(MaximizeButtonState::Normal)),
         "maximizeButtonHovered": sample(Message::MaximizeButton(MaximizeButtonState::Hovered)),
         "maximizeButtonPressed": sample(Message::MaximizeButton(MaximizeButtonState::Pressed)),
+        // The snapshot of the page URL's sample (`window::contract_samples`), so the page's tests
+        // can check that the two say the same.
+        "settings": sample(Message::Settings(PageSettings::sample())),
     }))
 }
 

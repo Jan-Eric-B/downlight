@@ -7,6 +7,7 @@
 mod command_line;
 #[cfg(test)]
 mod contract;
+mod disk;
 mod documents;
 mod edit;
 mod image;
@@ -22,9 +23,11 @@ mod timing;
 mod title_bar;
 mod watch;
 mod window;
+mod zoom;
 
 use std::path::Path;
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use tauri::Manager as _;
 
@@ -74,23 +77,15 @@ fn main() -> ExitCode {
             notice::open_named_folder,
             edit::edit_document,
             edit::choose_editor,
+            zoom::change_zoom,
         ])
         .on_menu_event(menu::forward_choice)
         .on_window_event(|window, event| {
-            window::forget_when_destroyed(window, event);
+            window::track_windows(window, event);
             open::show_when_dropped(window, event);
             title_bar::tell_window_state(window, event);
         })
         .setup(|app| {
-            // Before any window opens, as later settings shape new windows. Without a config
-            // folder the settings hold until Downlight closes, and the first change says so.
-            let (settings, problem) =
-                SettingsStore::load(app.path().app_config_dir().ok().as_deref());
-            app.manage(settings);
-            if let Some(problem) = problem {
-                // Off the main thread, so the windows open while the box is up.
-                std::thread::spawn(move || platform::show_error(&problem.to_string()));
-            }
             // Without the current folder a relative path stays relative, and reading it reports
             // the problem to the reader.
             let folder = std::env::current_dir().unwrap_or_default();
@@ -115,8 +110,21 @@ fn main() -> ExitCode {
         Ok(app) => {
             // Its messages go to the pages, and its windows open, through the app's handle, which
             // exists only once the app is built. Managed before the event loop runs, so the
-            // launches in `setup` and a second launch's documents find it.
-            app.manage(Documents::new(app.handle().clone(), app.handle().clone()));
+            // launches in `setup` and a second launch's documents find it. The settings load
+            // before any window opens, since they shape every new window. Without a config folder
+            // they hold until Downlight closes, and the first change says so.
+            let (settings, problem) =
+                SettingsStore::load(app.path().app_config_dir().ok().as_deref());
+            if let Some(problem) = problem {
+                // Off the main thread, so the windows open while the box is up.
+                std::thread::spawn(move || platform::show_error(&problem.to_string()));
+            }
+            // One store: the documents module changes it, and tells every page, and the app's
+            // other parts, such as Edit, read it from the managed state.
+            let settings = Arc::new(settings);
+            app.manage(Arc::clone(&settings));
+            let handle = app.handle().clone();
+            app.manage(Documents::new(handle.clone(), handle, settings));
             app.run(|_, _| {});
             ExitCode::SUCCESS
         }

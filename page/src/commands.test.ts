@@ -406,7 +406,7 @@ test("a key that names no shortcut never minimizes or maximizes the window", () 
 });
 
 describe("the right-click menu", () => {
-  test("replaces the webview's menu with Back, Forward, Reload, Find, Edit, Choose editor..., Open and Copy", () => {
+  test("replaces the webview's menu with Back, Forward, Reload, Find, Edit, Choose editor..., Open, Zoom in, Zoom out, Reset zoom and Copy", () => {
     let entries: MenuEntry[] = [];
     app.show_document_menu = (args) => {
       entries = args.entries;
@@ -436,6 +436,11 @@ describe("the right-click menu", () => {
       // Without a shortcut, the menu shows none beside it.
       command("chooseEditor", "Choose editor..."),
       command("open", "Open...", "Ctrl+O"),
+      { kind: "separator" },
+      // As Windows names the keys, as in Notepad's menu.
+      command("zoomIn", "Zoom in", "Ctrl+Plus"),
+      command("zoomOut", "Zoom out", "Ctrl+Minus"),
+      command("resetZoom", "Reset zoom", "Ctrl+0"),
       { kind: "separator" },
       { kind: "copy" },
     ]);

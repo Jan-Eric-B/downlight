@@ -9,14 +9,8 @@ use percent_encoding::{AsciiSet, CONTROLS, percent_decode_str, utf8_percent_enco
 use url::Url;
 
 use crate::file_url::{self, Target};
+use crate::files::{FileSystem, Leads, PathKind, is_on_share_of, leads};
 use crate::format::is_markdown;
-
-/// What a path names on the disk, as the caller's lookup tells [`resolve_link`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PathKind {
-    File,
-    Folder,
-}
 
 /// What following a link does (glossary: Link action).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,12 +63,18 @@ impl std::error::Error for LinkError {
 
 /// The action for the link `target` (glossary: Link target) in `document`, the document's file.
 ///
-/// The core reads no files, so `kind_of` tells whether a path is a file or a folder, None when it
-/// is missing, or an error when that can't be told. It is asked only about a link to a path.
+/// The core reads no files, so `files` tells whether a path is a file or a folder, and what the
+/// links along it point to; it is asked only about a link to a path. A path that leads to a
+/// network share, itself or through a link, is looked at only if `ask_to_connect`, given the path
+/// and the share's host, says yes, since looking connects to that host (ticket 20); a no, or a path
+/// that leads anywhere else off this computer, does nothing. A share on the host whose share
+/// `document`'s path names is looked at without asking: reading the document connected there
+/// already.
 pub fn resolve_link(
     document: &Path,
     target: &str,
-    kind_of: impl Fn(&Path) -> io::Result<Option<PathKind>>,
+    files: &impl FileSystem,
+    ask_to_connect: impl FnOnce(&Path, &str) -> bool,
 ) -> Result<LinkAction, LinkError> {
     let target = target.trim();
     if let Some(fragment) = target.strip_prefix('#') {
@@ -99,7 +99,18 @@ pub fn resolve_link(
     let Ok(path) = file.to_file_path() else {
         return Ok(LinkAction::Nothing);
     };
-    let kind = match kind_of(&path) {
+    let may_look = match leads(&path, files) {
+        Ok(Leads::ThisComputer) => true,
+        Ok(Leads::Share { host }) => {
+            is_on_share_of(document, &host) || ask_to_connect(&path, &host)
+        }
+        Ok(Leads::Elsewhere) => false,
+        Err(source) => return Err(LinkError::Unreachable { path, source }),
+    };
+    if !may_look {
+        return Ok(LinkAction::Nothing);
+    }
+    let kind = match files.kind_of(&path) {
         Ok(kind) => kind,
         Err(source) => return Err(LinkError::Unreachable { path, source }),
     };
@@ -152,23 +163,14 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use super::*;
+    use crate::files::fake::FakeFiles;
 
     const DOCUMENT: &str = r"C:\docs\guide\README.md";
 
-    /// A disk on which every path is a file, except the ones ending in a slash and the folders
-    /// named here. Missing files are named `missing`, and nothing on the server `offline` can be
-    /// reached.
-    fn disk(path: &Path) -> io::Result<Option<PathKind>> {
-        let text = path.to_string_lossy();
-        if text.starts_with(r"\\offline\") {
-            Err(io::ErrorKind::PermissionDenied.into())
-        } else if text.contains("missing") {
-            Ok(None)
-        } else if text.ends_with('\\') || text.ends_with("folder.md") {
-            Ok(Some(PathKind::Folder))
-        } else {
-            Ok(Some(PathKind::File))
-        }
+    /// The reader's answer when a link asks to connect to a share: yes, as the tests that resolve
+    /// links on shares need.
+    fn yes(_: &Path, _: &str) -> bool {
+        true
     }
 
     #[expect(
@@ -176,7 +178,7 @@ mod tests {
         reason = "a helper isn't a #[test] function, and its panic fails the test that called it"
     )]
     fn action(document: &str, target: &str) -> LinkAction {
-        resolve_link(Path::new(document), target, disk)
+        resolve_link(Path::new(document), target, &FakeFiles::default(), yes)
             .unwrap_or_else(|error| panic!("{document} {target}: {error:?}"))
     }
 
@@ -185,7 +187,7 @@ mod tests {
         reason = "a helper isn't a #[test] function, and its panic fails the test that called it"
     )]
     fn error(document: &str, target: &str) -> LinkError {
-        match resolve_link(Path::new(document), target, disk) {
+        match resolve_link(Path::new(document), target, &FakeFiles::default(), yes) {
             Ok(action) => panic!("{document} {target}: {action:?}"),
             Err(error) => error,
         }
@@ -360,7 +362,7 @@ mod tests {
     }
 
     #[test]
-    fn network_share_paths_resolve_like_local_paths() {
+    fn network_share_paths_resolve_like_local_paths_once_the_reader_says_yes() {
         for (document, target, expected) in [
             (
                 DOCUMENT,
@@ -444,9 +446,6 @@ mod tests {
 
     #[test]
     fn heading_and_web_links_look_up_no_file() {
-        let no_lookup = |path: &Path| -> io::Result<Option<PathKind>> {
-            panic!("looked up {}", path.display());
-        };
         for target in [
             "#install",
             "https://example.com/",
@@ -455,7 +454,161 @@ mod tests {
             "",
             "?q",
         ] {
-            let _ = resolve_link(Path::new(DOCUMENT), target, no_lookup);
+            let files = FakeFiles::default();
+            let _ = resolve_link(Path::new(DOCUMENT), target, &files, |path, _| {
+                panic!("asked to connect for {}", path.display())
+            });
+            assert!(files.asked.borrow().is_empty(), "{target:?}");
         }
+    }
+
+    /// Follows `target` in `document` with `answer` as the reader's answer, and gives what it did,
+    /// what the reader was asked (the path and the host), and whether anything looked at a share.
+    #[expect(
+        clippy::panic,
+        reason = "a helper isn't a #[test] function, and its panic fails the test that called it"
+    )]
+    fn follow_answering(
+        document: &str,
+        target: &str,
+        files: &FakeFiles,
+        answer: bool,
+    ) -> (LinkAction, Vec<(PathBuf, String)>, bool) {
+        let mut asked = Vec::new();
+        let action = resolve_link(Path::new(document), target, files, |path, host| {
+            asked.push((path.to_owned(), host.to_owned()));
+            answer
+        })
+        .unwrap_or_else(|error| panic!("{document} {target}: {error:?}"));
+        (action, asked, files.touched_a_share())
+    }
+
+    #[test]
+    fn link_to_a_share_asks_naming_its_host_and_a_no_does_nothing_without_looking_there() {
+        for (document, target, path) in [
+            (DOCUMENT, r"\\server\share\a.md", r"\\server\share\a.md"),
+            (DOCUMENT, "//server/share/b.txt", r"\\server\share\b.txt"),
+            (
+                DOCUMENT,
+                "file://server/share/docs/",
+                r"\\server\share\docs\",
+            ),
+            (
+                r"\\other\share\docs\README.md",
+                r"\\server\share\a.md",
+                r"\\server\share\a.md",
+            ),
+            (
+                r"\\?\UNC\other\share\docs\README.md",
+                "file://server/share/docs/",
+                r"\\server\share\docs\",
+            ),
+            (
+                r"\\server.example\share\docs\README.md",
+                r"\\server\share\a.md",
+                r"\\server\share\a.md",
+            ),
+        ] {
+            let files = FakeFiles::default();
+            let (action, asked, touched) = follow_answering(document, target, &files, false);
+            assert_eq!(action, LinkAction::Nothing, "{document} {target}");
+            assert_eq!(
+                asked,
+                [(PathBuf::from(path), "server".to_owned())],
+                "{document} {target}"
+            );
+            assert!(!touched, "{document} {target}: {:?}", files.asked);
+        }
+    }
+
+    #[test]
+    fn link_to_a_share_is_followed_after_a_yes() {
+        let files = FakeFiles::default();
+        let (action, asked, _) = follow_answering(DOCUMENT, r"\\server\share\a.md", &files, true);
+        assert_eq!(action, show(r"\\server\share\a.md", None));
+        assert_eq!(asked.len(), 1);
+    }
+
+    #[test]
+    fn link_through_a_local_link_to_a_share_asks_naming_the_share_s_host() {
+        let files = FakeFiles::default().with_link(r"C:\docs\guide\shared", r"\\nas\team");
+        let (action, asked, touched) = follow_answering(DOCUMENT, "shared/a.md", &files, false);
+        assert_eq!(action, LinkAction::Nothing);
+        assert_eq!(
+            asked,
+            [(
+                PathBuf::from(r"C:\docs\guide\shared\a.md"),
+                "nas".to_owned()
+            )]
+        );
+        assert!(!touched, "{:?}", files.asked);
+    }
+
+    #[test]
+    fn link_to_a_share_on_the_document_s_own_host_is_followed_without_asking() {
+        // Windows connected to the document's host to read the document, so following a link
+        // there sends it nothing it hasn't had (ticket 20).
+        for (document, target, expected) in [
+            (
+                r"\\server\share\docs\README.md",
+                "guide.md#install",
+                show(r"\\server\share\docs\guide.md", Some("install")),
+            ),
+            (
+                r"\\server\share\docs\README.md",
+                r"\\server\other\a.md",
+                show(r"\\server\other\a.md", None),
+            ),
+            (
+                r"\\SERVER\share\docs\README.md",
+                "//Server/share/b.txt",
+                LinkAction::RevealFile(PathBuf::from(r"\\server\share\b.txt")),
+            ),
+            (
+                r"\\?\UNC\server\share\docs\README.md",
+                r"\\Server\share\a.md",
+                show(r"\\server\share\a.md", None),
+            ),
+            (
+                r"\\Server\share\docs\README.md",
+                "file://SERVER/share/docs/",
+                LinkAction::OpenFolder(PathBuf::from(r"\\server\share\docs\")),
+            ),
+        ] {
+            let files = FakeFiles::default();
+            let (action, asked, _) = follow_answering(document, target, &files, false);
+            assert_eq!(action, expected, "{document} {target}");
+            assert_eq!(asked, [], "{document} {target}");
+        }
+    }
+
+    #[test]
+    fn link_through_a_local_link_to_the_document_s_own_host_is_followed_without_asking() {
+        let files = FakeFiles::default().with_link(r"C:\shared", r"\\server\team");
+        let (action, asked, _) = follow_answering(
+            r"\\server\share\docs\README.md",
+            "C:/shared/a.md",
+            &files,
+            false,
+        );
+        assert_eq!(action, show(r"C:\shared\a.md", None));
+        assert_eq!(asked, []);
+    }
+
+    #[test]
+    fn link_on_this_computer_asks_nothing() {
+        let files = FakeFiles::default().with_link(r"C:\docs\guide\pics", r"D:\pics");
+        for target in ["guide.md", "pics/a.png", "C:/x.md"] {
+            let (_, asked, _) = follow_answering(DOCUMENT, target, &files, false);
+            assert_eq!(asked, [], "{target}");
+        }
+    }
+
+    #[test]
+    fn link_through_a_local_link_to_a_device_does_nothing_without_asking() {
+        let files = FakeFiles::default().with_link(r"C:\docs\guide\pipe", r"\\.\pipe\x");
+        let (action, asked, _) = follow_answering(DOCUMENT, "pipe/a.md", &files, true);
+        assert_eq!(action, LinkAction::Nothing);
+        assert_eq!(asked, []);
     }
 }

@@ -1,7 +1,7 @@
 //! The contract samples (ticket 27): a sample of each answer and message the app sends a page, of
 //! the failures that name a missing file (window design ticket 11), and of each argument the page
-//! sends the app that is more than a number, string or flag (the menu entries and the timing
-//! reports), and of the flags a window tells its page in the page's URL, committed as JSON in
+//! sends the app that is more than a number, string or flag (the menu entries, the timing reports
+//! and the changes of the zoom), and of the flags a window tells its page in the page's URL, committed as JSON in
 //! `tests/fixtures`. The page's tests read the same files through the
 //! types in `page/src/app.ts`: they drive each answer and message through the page, check the
 //! arguments the page sends against their samples, and read the flags from the sampled URLs, so a
@@ -20,7 +20,7 @@ use std::error::Error;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::{documents, links, menu, message, notice, timing, title_bar, window};
+use crate::{documents, links, menu, message, notice, timing, title_bar, window, zoom};
 
 type TestResult<T = ()> = Result<T, Box<dyn Error>>;
 
@@ -31,9 +31,9 @@ const HOW_TO_UPDATE: &str =
 
 /// Each sample file, with what writes it: the answers of the commands that answer with more than
 /// nothing, the failure of `open_named_folder` for a folder gone since, the messages, the
-/// arguments of `show_document_menu`, the timing reports and `place_maximize_button`, and the
-/// flags a window tells its page in the page's URL.
-const SAMPLE_FILES: [(&str, Samples); 8] = [
+/// arguments of `show_document_menu`, the timing reports, `place_maximize_button` and
+/// `change_zoom`, and the flags a window tells its page in the page's URL.
+const SAMPLE_FILES: [(&str, Samples); 9] = [
     ("render_document.json", documents::contract_samples),
     ("follow_link.json", links::contract_samples),
     ("open_named_folder.json", notice::contract_samples),
@@ -42,6 +42,7 @@ const SAMPLE_FILES: [(&str, Samples); 8] = [
     ("timing_reports.json", timing::contract_samples),
     ("title_bar.json", title_bar::contract_samples),
     ("page_url.json", window::contract_samples),
+    ("zoom_changes.json", zoom::contract_samples),
 ];
 
 fn sample_file(name: &str) -> PathBuf {

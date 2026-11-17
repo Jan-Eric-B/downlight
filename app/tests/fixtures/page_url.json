@@ -1,4 +1,4 @@
 {
-  "allOff": "index.html",
-  "allOn": "index.html?timing&backdrop&titleBar"
+  "allOff": "index.html?settings=%7B%22zoom%22%3A125%7D",
+  "allOn": "index.html?timing&backdrop&titleBar&settings=%7B%22zoom%22%3A125%7D"
 }

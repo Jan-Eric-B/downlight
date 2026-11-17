@@ -3,11 +3,12 @@
 //! all, so a document can't make Windows send the reader's credentials to a server (spec:
 //! Render, Images).
 
-use std::path::{Component, Path, PathBuf, Prefix};
+use std::path::{Path, PathBuf};
 
 use url::Url;
 
 use crate::file_url::{self, Target};
+use crate::files::{FileSystem, Leads, is_local, leads};
 
 /// The image formats the webview shows, by extension, with their media types.
 const MEDIA_TYPES: [(&str, &str); 10] = [
@@ -44,9 +45,11 @@ impl LocalImage {
 
 /// The local image that a path of the image scheme's URLs names, as rendering writes them
 /// (`/C:/docs/logo.png`), or None for anything else: a file on a network share, a relative path,
-/// or a file that isn't an image the webview shows. The page asks for whatever a document names,
-/// so the scheme checks again what rendering checked.
-pub fn local_image(url_path: &str) -> Option<LocalImage> {
+/// a file that isn't an image the webview shows, or one with a link along its path that leads off
+/// this computer (ticket 20), or whose links can't be read. The page asks for whatever a document
+/// names, so the scheme checks again what rendering checked, and asks `files` for the links that
+/// rendering can't see.
+pub fn local_image(url_path: &str, files: &impl FileSystem) -> Option<LocalImage> {
     let path = Url::parse(&format!("file://{url_path}"))
         .ok()?
         .to_file_path()
@@ -58,7 +61,10 @@ pub fn local_image(url_path: &str) -> Option<LocalImage> {
     let (_, media_type) = MEDIA_TYPES
         .iter()
         .find(|(known, _)| extension.eq_ignore_ascii_case(known))?;
-    Some(LocalImage { path, media_type })
+    match leads(&path, files) {
+        Ok(Leads::ThisComputer) => Some(LocalImage { path, media_type }),
+        Ok(Leads::Share { .. } | Leads::Elsewhere) | Err(_) => None,
+    }
 }
 
 /// Where a document's images load from.
@@ -143,25 +149,13 @@ impl ImageSources {
     }
 }
 
-/// Whether `path` is a whole path on this computer: on Windows, one on a drive, never a network
-/// share or a device.
-fn is_local(path: &Path) -> bool {
-    path.is_absolute()
-        && match path.components().next() {
-            Some(Component::Prefix(prefix)) => {
-                matches!(prefix.kind(), Prefix::Disk(_) | Prefix::VerbatimDisk(_))
-            }
-            // Only Windows has prefixes.
-            _ => true,
-        }
-}
-
 // Windows paths: v1 ships for Windows only, and drive letters and network shares are Windows'.
 #[cfg(all(test, windows))]
 mod tests {
     use std::path::Path;
 
     use super::local_image;
+    use crate::files::fake::FakeFiles;
     use crate::render;
 
     const ORIGIN: &str = "http://image.localhost";
@@ -326,7 +320,7 @@ mod tests {
         let html = html_of("![Logo](<img/my logo ä.png>)\n");
         let url_path = "/C:/docs/guide/img/my%20logo%20%C3%A4.png";
         assert!(html.contains(&format!("{ORIGIN}{url_path}")), "{html}");
-        let image = local_image(url_path).unwrap();
+        let image = local_image(url_path, &FakeFiles::default()).unwrap();
         assert_eq!(image.path(), Path::new(r"C:\docs\guide\img\my logo ä.png"));
         assert_eq!(image.media_type(), "image/png");
     }
@@ -342,8 +336,31 @@ mod tests {
             "/C:/docs/README.md",
             "/C:/docs/logo",
         ] {
-            assert!(local_image(url_path).is_none(), "{url_path}");
+            assert!(
+                local_image(url_path, &FakeFiles::default()).is_none(),
+                "{url_path}"
+            );
         }
+    }
+
+    #[test]
+    fn image_scheme_refuses_an_image_whose_path_links_to_a_share_without_looking_there() {
+        for (link, target) in [
+            (r"C:\docs\logo.png", r"\\server\share\x.png"),
+            (r"C:\docs", r"\\server\share\docs"),
+        ] {
+            let files = FakeFiles::default().with_link(link, target);
+            assert!(local_image("/C:/docs/logo.png", &files).is_none(), "{link}");
+            assert!(!files.touched_a_share(), "{link}: {:?}", files.asked);
+        }
+    }
+
+    #[test]
+    fn image_scheme_serves_an_image_whose_path_links_to_this_computer() {
+        let files = FakeFiles::default().with_link(r"C:\docs\logo.png", r"D:\art\logo.png");
+        let image = local_image("/C:/docs/logo.png", &files).unwrap();
+        // The file is read through the link, as the document names it.
+        assert_eq!(image.path(), Path::new(r"C:\docs\logo.png"));
     }
 
     #[test]
@@ -360,7 +377,7 @@ mod tests {
             ("a.bmp", "image/bmp"),
             ("a.ico", "image/x-icon"),
         ] {
-            let image = local_image(&format!("/C:/pics/{name}"));
+            let image = local_image(&format!("/C:/pics/{name}"), &FakeFiles::default());
             assert_eq!(
                 image.map(|image| image.media_type()),
                 Some(media_type),

@@ -80,6 +80,13 @@ article.markdown-body > * {
   contain-intrinsic-size: auto 3em;
 }
 
+/* Zoom (zoom.ts, ticket 16): the document view only, so the title bar, the find bar and notices
+   keep their size. CSS zoom scales the reading width and padding too, and the view still never
+   gets wider than the window, so the text wraps as it does at the browser's zoom. */
+article.markdown-body {
+  zoom: var(--document-zoom, 1);
+}
+
 /* GitHub's other way to show an image in light or dark mode only, besides <picture>:
    `![Logo](logo-dark.png#gh-dark-mode-only)`. Rendering keeps the fragment on local images. */
 @media (prefers-color-scheme: light) {

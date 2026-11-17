@@ -159,7 +159,7 @@ Downlight renders Markdown in Rust (comrak) and shows the result in the system w
   - hand a URL to the system (`http`, `https` and `mailto` only);
   - nothing.
 
-  A file is Markdown when it has one of the six extensions. Paths on network shares are treated like local paths, since they only connect when clicked.
+  A file is Markdown when it has one of the six extensions. A path that leads to a network share, by its name or through a symbolic link, asks the reader first, naming the share's host, and is looked at only after a yes (ticket 20); with a yes it resolves like a local path. A share on the host whose share the document's own path names asks nothing, since reading the document connected there already.
 
 **App** (the Tauri crate):
 

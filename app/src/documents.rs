@@ -15,6 +15,11 @@
 //! - [`history`]: the documents a window showed before and after the one it shows, which Back and
 //!   Forward give it back (ticket 12).
 //!
+//! It also changes the reader's settings, since they shape every new window and reach every page
+//! when they change ([`Documents::change_settings`], window design ticket 12), and keeps the window
+//! the reader was last in, which a new window opens beside, at a size and place [`place`] works
+//! out (ticket 16).
+//!
 //! A window's document, its render, its watch and its history are forgotten with the window.
 
 use std::collections::HashMap;
@@ -26,10 +31,12 @@ use crate::message::{Message, Pages};
 use crate::notice::Notice;
 use crate::platform;
 use crate::render::{self, RenderTask};
+use crate::settings::{PageSettings, Settings, SettingsError, SettingsStore};
 use crate::watch::Watch;
 
 pub mod handover;
 pub mod history;
+mod place;
 #[cfg(test)]
 pub mod recorder;
 mod show;
@@ -38,6 +45,7 @@ mod watching;
 #[cfg(test)]
 pub use handover::contract_samples;
 use history::History;
+pub use place::{Area, Point, WindowPlace, WindowSize};
 pub use show::{NewWindow, ShowError, WindowError, Windows};
 
 /// Which window shows which document, by window label. The app's managed state.
@@ -53,6 +61,10 @@ struct Inner {
     titles: Mutex<()>,
     pages: Box<dyn Pages>,
     windows: Box<dyn Windows>,
+    /// The reader's settings, which shape every new window and which every page is sent when they
+    /// change ([`Documents::change_settings`], the one way they change). Shared with Tauri's
+    /// managed state, where the app's other parts read them.
+    settings: Arc<SettingsStore>,
 }
 
 /// Every open window by label, whether it shows a document or none.
@@ -67,6 +79,16 @@ struct WindowTable {
     claims_issued: u64,
     /// Every open window, with the document it shows now and its history.
     windows: HashMap<String, WindowRecord>,
+    /// The window the reader was last in, which a new window opens beside (ticket 16), while it
+    /// is open.
+    active: Option<String>,
+    /// The windows whose pages haven't asked for their document yet, by label, with whether the
+    /// settings changed meanwhile. Such a page may not hear a `settings` message yet, so it is
+    /// sent the settings when it first asks ([`Documents::page_hears_settings`]); it asks only
+    /// once it hears them (`page/src/main.ts`). Kept beside the window's record rather than in
+    /// it, since a show that fails puts the record back whole, and the page's hearing doesn't go
+    /// back with it.
+    not_hearing: HashMap<String, bool>,
 }
 
 /// An open window: the document it shows now, None while it shows none, and its history. Kept
@@ -256,30 +278,107 @@ enum Claimed {
 }
 
 impl Documents {
-    /// No window shows a document yet; what pages are told goes to `pages`, and what is done to
-    /// windows to `windows`.
-    pub fn new(pages: impl Pages, windows: impl Windows) -> Self {
+    /// No window shows a document yet; what pages are told goes to `pages`, what is done to
+    /// windows to `windows`, and new windows open with `settings`.
+    pub fn new(pages: impl Pages, windows: impl Windows, settings: Arc<SettingsStore>) -> Self {
         Self {
             inner: Arc::new(Inner {
                 table: Mutex::default(),
                 titles: Mutex::default(),
                 pages: Box::new(pages),
                 windows: Box::new(windows),
+                settings,
             }),
         }
+    }
+
+    /// The reader's settings now.
+    pub fn settings(&self) -> Settings {
+        self.inner.settings.get()
+    }
+
+    /// Changes the settings with `change` and saves them, and sends every window's page the
+    /// settings it shows if they changed (window design ticket 12), the one way a setting
+    /// changes. The pages are told while the settings are still held, so that of two changes at
+    /// once, they are told last what the settings hold last. A change that can't be saved holds
+    /// until Downlight closes all the same, and the error says why it wasn't saved.
+    pub fn change_settings(&self, change: impl FnOnce(&mut Settings)) -> Result<(), SettingsError> {
+        self.inner
+            .settings
+            .update(change, |updated| {
+                let shown = updated.settings.page();
+                if updated.before.page() != shown {
+                    self.send_settings_to_every_page(shown);
+                }
+            })
+            .saved
+    }
+
+    /// Sends every page that hears the settings `settings`, in the order of their labels, and
+    /// keeps that the others missed them, for when they first ask
+    /// ([`Documents::page_hears_settings`]).
+    fn send_settings_to_every_page(&self, settings: PageSettings) {
+        let mut hearing = {
+            let mut table = self.lock();
+            let table = &mut *table;
+            let mut hearing = Vec::new();
+            for window in table.windows.keys() {
+                match table.not_hearing.get_mut(window) {
+                    Some(missed) => *missed = true,
+                    None => hearing.push(window.clone()),
+                }
+            }
+            hearing
+        };
+        hearing.sort();
+        for window in hearing {
+            // A page that can't be told is one whose webview failed to run an event, which the
+            // window that made the change can't mend. What is sent to every window is a whole
+            // snapshot, so that page catches up with the next one.
+            let _ = self.send(&window, Message::Settings(settings));
+        }
+    }
+
+    /// `window`'s page has asked for its document, which it does only once it hears the settings
+    /// (`page/src/main.ts`), so it is sent every change from now on, and the settings now if they
+    /// changed before (ticket 16's review): a window that opened while they changed has the
+    /// settings from before the change in its page's URL, and missed the message. Sent while the
+    /// settings are held, so that a change after it reaches the page after it.
+    fn page_hears_settings(&self, window: &str) {
+        let missed = self.lock().not_hearing.remove(window) == Some(true);
+        if missed {
+            self.inner.settings.read(|settings| {
+                // As in `send_settings_to_every_page`, the next change catches the page up.
+                let _ = self.send(window, Message::Settings(settings.page()));
+            });
+        }
+    }
+
+    /// The reader is in `window` now, so the next new window opens beside it (ticket 16).
+    pub fn activated(&self, window: &str) {
+        let mut table = self.lock();
+        if table.windows.contains_key(window) {
+            table.active = Some(window.to_owned());
+        }
+    }
+
+    /// `window` is closing: its size is kept in the settings, for the next new window to open at
+    /// (ticket 16). Called while the window is still there to measure. A minimized or maximized
+    /// window keeps the size of the last one that closed before it, since it isn't at a size of
+    /// its own.
+    pub fn closing(&self, window: &str) {
+        let Some(place) = self.inner.windows.place_of(window) else {
+            return;
+        };
+        // The window is closing, so there is no page left to tell when the size can't be saved;
+        // it holds for the windows that open until Downlight closes all the same.
+        let _ = self.change_settings(|settings| settings.window_size = Some(place.size));
     }
 
     /// Opens a new window that shows no document, as for a launch that names none, and returns
     /// its label. A window that can't open is forgotten.
     pub fn open_empty(&self) -> Result<String, WindowError> {
-        let window = {
-            let mut table = self.lock();
-            let window = table.next_label();
-            table
-                .windows
-                .insert(window.clone(), WindowRecord::default());
-            window
-        };
+        let window = self.lock().record_new(WindowRecord::default());
         self.open(&window, None)?;
         Ok(window)
     }
@@ -348,14 +447,12 @@ impl Documents {
         // window starts no render.
         match target {
             Target::NewWindow | Target::NewWindowFrom(_) => {
-                let window = table.next_label();
                 let (showing, claim) = (table.next_showing(), table.next_claim());
                 let shown = ShownDocument::given(document, key, showing, claim);
-                let record = WindowRecord {
+                let window = table.record_new(WindowRecord {
                     shown: Some(shown),
                     history: History::default(),
-                };
-                table.windows.insert(window.clone(), record);
+                });
                 Claimed::NewWindow(window)
             }
             Target::Window(window) => {
@@ -403,7 +500,14 @@ impl Documents {
     /// for it, the watch on its document and its history go with it.
     pub fn forget(&self, window: &str) {
         // Dropped after the lock, since dropping a watch stops it.
-        let _forgotten = self.lock().windows.remove(window);
+        let _forgotten = {
+            let mut table = self.lock();
+            if table.active.as_deref() == Some(window) {
+                table.active = None;
+            }
+            table.not_hearing.remove(window);
+            table.windows.remove(window)
+        };
     }
 
     /// Sends `window`'s page `message`. Every message a page gets goes through here, also those
@@ -458,10 +562,13 @@ impl WindowTable {
         })
     }
 
-    fn next_label(&mut self) -> String {
-        let label = format!("document-{}", self.labels_issued);
+    /// Records a new window as `record`, whose page hears nothing yet, and gives its label.
+    fn record_new(&mut self, record: WindowRecord) -> String {
+        let window = format!("document-{}", self.labels_issued);
         self.labels_issued += 1;
-        label
+        self.windows.insert(window.clone(), record);
+        self.not_hearing.insert(window.clone(), false);
+        window
     }
 
     fn next_showing(&mut self) -> Showing {

@@ -10,6 +10,7 @@ use tauri::http::header::{
 use tauri::http::{Request, Response, StatusCode};
 use tauri::{Runtime, UriSchemeContext, UriSchemeResponder};
 
+use crate::disk::Disk;
 use crate::platform;
 
 /// The scheme's name, which the page sees as `http://image.localhost` on Windows.
@@ -38,7 +39,10 @@ pub fn serve<R: Runtime>(
 /// The image a path names, or Not Found for anything that isn't a readable local image: a
 /// missing image shows as missing in the page, as it does in a browser.
 fn response_to(url_path: &str) -> Response<Cow<'static, [u8]>> {
-    let image = downlight_core::local_image(url_path);
+    let image = downlight_core::local_image(url_path, &Disk);
+    // The read follows links, after the check looked at them (ticket 20). A link swapped in
+    // between gets past the check, but swapping it needs someone on this computer who can already
+    // write next to the document, so the gap is accepted.
     let Some((image, bytes)) =
         image.and_then(|image| std::fs::read(image.path()).ok().map(|bytes| (image, bytes)))
     else {

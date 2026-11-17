@@ -133,6 +133,7 @@ interface StartedView {
   step: (step: Step) => void;
   canStep: (step: Step) => boolean;
   visitHeading: (heading: string | null) => Promise<void>;
+  keepReadingPosition: (change: () => void) => Promise<void>;
 }
 
 /** The started view, until a view starts. */
@@ -179,6 +180,20 @@ export function canStepThroughHistory(step: Step): boolean {
  */
 export function visitHeading(heading: string | null): Promise<void> {
   return theView?.visitHeading(heading) ?? Promise.resolve();
+}
+
+/**
+ * Changes the view's layout with `change`, and puts the view back at the reading position, as a
+ * reload does: for a change that moves the document's text about without changing it, such as
+ * zoom (ticket 16) and Full width (window design ticket 06). The content stays as it was, so Find's
+ * matches stay where they are, and the `whenDocumentShown` listeners hear nothing. Before the
+ * view has started, or while it shows no document, it only makes the change. Of two changes in
+ * quick succession, only the later one lands.
+ */
+export function keepReadingPosition(change: () => void): Promise<void> {
+  if (theView) return theView.keepReadingPosition(change);
+  change();
+  return Promise.resolve();
 }
 
 /**
@@ -660,12 +675,35 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
     if (awaited !== null && awaited.showing === showing)
       await visitHeadingInView(awaited.heading);
   };
+  /** Counts the layout changes, so that only the latest one lands. */
+  let latestLayoutChange = 0;
+
+  /** A layout change that keeps the reading position (`keepReadingPosition`). */
+  const keepReadingPositionInView = async (change: () => void) => {
+    const line = showing === null ? undefined : readingPosition(shown);
+    change();
+    // At the start of the document the view stays at its top, where it was.
+    if (line === undefined) return;
+    const inView = showing;
+    const thisChange = ++latestLayoutChange;
+    const requestBefore = latestRequest;
+    await returnToReadingPosition(
+      view,
+      line,
+      () =>
+        showing === inView &&
+        thisChange === latestLayoutChange &&
+        requestBefore === latestRequest,
+    );
+  };
+
   theView = {
     request,
     showing: () => showing,
     step,
     canStep: (to) => history.canStep(showing, to),
     visitHeading: visitHeadingInView,
+    keepReadingPosition: keepReadingPositionInView,
   };
 
   // The listeners only start: waiting for them would hold up first paint.
