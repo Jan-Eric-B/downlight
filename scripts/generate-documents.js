@@ -1,9 +1,9 @@
 // Writes the test documents that performance is measured on (ticket 02) to target/documents/:
 // 100 KB and 1 MB of Markdown with a table and a code block about every 30 lines, a second
 // 100 KB document of that kind for a further window, and 1 MB of prose only. The large documents
-// (ticket 31) are 5, 20 and 100 MB of each kind, for choosing the size limits; `npm run measure`
-// writes them only for `npm run measure -- large`, since they take a while. The text is
-// pseudo-random from a fixed seed, so every run writes the same files.
+// are 5, 20 and 100 MB of each kind, for measuring large documents (ticket 31); since they take a
+// while and about 375 MB of disk, only `npm run documents -- large` and `npm run measure -- large`
+// write them. The text is pseudo-random from a fixed seed, so every run writes the same files.
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -170,6 +170,9 @@ export function writeDocuments({ large = false } = {}) {
 }
 
 if (import.meta.main) {
-  writeDocuments({ large: true });
-  console.log(`Wrote the test documents to ${DOCUMENTS_FOLDER}`);
+  const large = process.argv.includes("large");
+  writeDocuments({ large });
+  console.log(
+    `Wrote the ${large ? "small and large " : ""}test documents to ${DOCUMENTS_FOLDER}`,
+  );
 }

@@ -6,7 +6,12 @@
 // documents and the large ones instead (ticket 31).
 
 import { execFileSync, spawn } from "node:child_process";
-import { appendFileSync, copyFileSync, existsSync } from "node:fs";
+import {
+  appendFileSync,
+  copyFileSync,
+  existsSync,
+  readFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -42,13 +47,12 @@ const RELOAD_DOCUMENT = DOCUMENTS.mixed1mb.replace(/\.md$/, "-reload.md");
  * process (ADR 0001), and the run waits for its window to paint too. `afterPaint`, if given, then
  * acts on the first window over WebView2's debug port (`scrollThrough`, `reloadInTheMiddle` or
  * `typeInFind`), and the run returns its result as `after`. `prepare` runs before the process
- * starts.
+ * starts. A run ends once its processes are gone, so the next one starts on none.
  */
 async function run(
   documents,
   { afterPaint, laterDocuments = [], prepare, timeoutMs = RUN_TIMEOUT_MS } = {},
 ) {
-  await untilNoDownlight();
   prepare?.();
   const env = { ...process.env, DOWNLIGHT_TIMING: "1" };
   if (afterPaint) {
@@ -110,7 +114,12 @@ async function run(
 }
 
 /** Downlight's user data folder for WebView2 is named after the app's identifier. */
-const APP_IDENTIFIER = "io.github.jan-eric-b.downlight";
+const APP_IDENTIFIER = JSON.parse(
+  readFileSync(
+    join(import.meta.dirname, "..", "app", "tauri.conf.json"),
+    "utf8",
+  ),
+).identifier;
 
 /** How long to wait for Downlight and its WebView2 processes to be gone. */
 const GONE_TIMEOUT_MS = 60_000;
@@ -671,6 +680,8 @@ if (!existsSync(EXECUTABLE)) {
   console.error(`No ${EXECUTABLE}. Run npm run tauri build first.`);
   process.exit(1);
 }
+// Each run waits for its own processes to be gone; this is for any left from before.
+await untilNoDownlight();
 if (process.argv.includes("large")) {
   writeDocuments({ large: true });
   await measureLarge();
