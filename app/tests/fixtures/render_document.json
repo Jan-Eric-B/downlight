@@ -66,7 +66,7 @@
     },
     "heading": null,
     "notice": {
-      "after": " for changes, so only F5 reloads it: Access is denied.",
+      "after": " for changes as they are made, so a save reloads it up to 2 seconds later: Access is denied.",
       "before": "Can't watch ",
       "file": {
         "folder": "C:\\docs",

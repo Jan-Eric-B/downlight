@@ -110,7 +110,8 @@ pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
     let naming_file = Notice::naming(
         "Can't watch ",
         NamedFile::sample(false),
-        " for changes, so only F5 reloads it: Access is denied.",
+        " for changes as they are made, so a save reloads it up to 2 seconds later: \
+         Access is denied.",
     );
     Ok(serde_json::json!({
         "askForDocument": sample(Message::AskForDocument),

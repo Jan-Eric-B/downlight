@@ -25,6 +25,7 @@
 use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use crate::message::{Message, Pages};
@@ -32,7 +33,7 @@ use crate::notice::Notice;
 use crate::platform;
 use crate::render::{self, RenderTask};
 use crate::settings::{PageSettings, Settings, SettingsError, SettingsStore};
-use crate::watch::Watch;
+use crate::watch::{Stamp, Watch};
 
 pub mod handover;
 pub mod history;
@@ -135,8 +136,11 @@ struct ShownDocument {
     /// process (ticket 07), so the render runs while the webview starts. A reload starts a new
     /// one.
     render_ahead: Option<RenderTask>,
-    /// The watch on the document's file, which reloads it; None until it has started, or if it
-    /// couldn't. Replacing or forgetting the entry drops it, which stops it.
+    /// The file's stamp from just before the render ahead read it, which the watch starts from
+    /// (ticket 30); taken when the watch starts.
+    read_stamp: Option<Receiver<Option<Stamp>>>,
+    /// The watch on the document's file, which reloads it; None until it has started.
+    /// Replacing or forgetting the entry drops it, which stops it.
     watch: Option<Watch>,
     /// Whether the page has asked for this document yet, and so listens for messages. A new
     /// window's page listens for nothing until its webview has started, about 600 ms after the
@@ -179,10 +183,12 @@ impl ShownDocument {
         claim: u64,
         arrival: Arrival,
     ) -> Self {
+        let (render_ahead, read_stamp) = render::start_with_stamp(&path);
         Self {
             showing,
             claim,
-            render_ahead: Some(render::start(&path)),
+            render_ahead: Some(render_ahead),
+            read_stamp: Some(read_stamp),
             path,
             key,
             watch: None,
@@ -354,12 +360,18 @@ impl Documents {
         }
     }
 
-    /// The reader is in `window` now, so the next new window opens beside it (ticket 16).
+    /// The reader is in `window` now, so the next new window opens beside it (ticket 16), and its
+    /// document's file is checked again, so a change its watch missed reloads it, or shows that
+    /// it is gone, at the moment the reader looks (ticket 30).
     pub fn activated(&self, window: &str) {
         let mut table = self.lock();
-        if table.windows.contains_key(window) {
-            table.active = Some(window.to_owned());
+        let Some(record) = table.windows.get(window) else {
+            return;
+        };
+        if let Some(watch) = record.shown.as_ref().and_then(|shown| shown.watch.as_ref()) {
+            watch.recheck();
         }
+        table.active = Some(window.to_owned());
     }
 
     /// `window` is closing: its size is kept in the settings, for the next new window to open at

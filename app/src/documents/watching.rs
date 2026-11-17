@@ -1,6 +1,7 @@
 //! Watching the file of the document a window shows (ticket 10): a change reloads it, a file that
-//! is gone tells the page, and a watch that can't start becomes a notice, held until the page
-//! first asks. Kept apart from the table, since every callback here runs on a watch's thread and
+//! is gone tells the page, and a folder whose events can't be watched becomes a notice, held
+//! until the page first asks (ticket 30). Kept apart from the table, since every callback here
+//! runs on a watch's thread and
 //! must check, under the table's lock, that the window still shows the document it was started
 //! for (ticket 21).
 
@@ -10,33 +11,46 @@ use std::sync::{Arc, Weak};
 use super::{Documents, Inner};
 use crate::message::Message;
 use crate::notice::{NamedFile, Notice};
-use crate::watch::{Change, Watch};
+use crate::watch::{Change, RECHECK, Stamp, Watch};
 
 impl Documents {
     /// Starts watching `document`'s file, which `window` was just given with `key`, on a blocking
-    /// thread, since that reads the file system. A watch that can't start leaves the window
-    /// without reloads on save, and the reader is told.
+    /// thread, since that reads the file system, from the stamp the render ahead read it at
+    /// (ticket 30). A window that has left the document since starts none. A folder whose events
+    /// can't be watched is checked every [`RECHECK`] instead, and the reader is told that saves
+    /// reload late.
     pub(super) fn watch(&self, window: &str, document: &Path, key: PathBuf) {
+        let Some(read_stamp) = self
+            .lock()
+            .shown_mut(window, &key)
+            .and_then(|shown| shown.read_stamp.take())
+        else {
+            return;
+        };
         // Weak, so that a watch never keeps the table that holds it alive.
         let documents = Arc::downgrade(&self.inner);
         let (window, document) = (window.to_owned(), document.to_owned());
         tauri::async_runtime::spawn_blocking(move || {
+            // The render ahead sends the stamp first thing; without it, the file now is the
+            // nearest there is.
+            let read = read_stamp.recv().unwrap_or_else(|_| Stamp::of(&document));
             let on_change = Self::on_change(documents.clone(), window.clone(), key.clone());
-            let started = Watch::start(&document, on_change);
+            let (watch, unwatched) = Watch::start(&document, read, on_change);
             let Some(documents) = Self::upgrade(&documents) else {
                 return;
             };
-            match started {
-                Ok(watch) => documents.keep_watch(&window, &key, watch),
-                Err(error) => documents.notice(
+            documents.keep_watch(&window, &key, watch);
+            if let Some(error) = unwatched {
+                let late = format!(
+                    " for changes as they are made, so a save reloads it up to {} seconds \
+                     later: {error}",
+                    RECHECK.as_secs()
+                );
+                documents.notice(
                     &window,
                     &key,
-                    Notice::naming(
-                        "Can't watch ",
-                        NamedFile::at(&document),
-                        format!(" for changes, so only F5 reloads it: {error}"),
-                    ),
-                ),
+                    Notice::naming("Can't watch ", NamedFile::at(&document), late),
+                );
             }
         });
     }

@@ -99,16 +99,11 @@ fn reload_overtaken_by_another_document_sends_nothing() {
 /// A watch on `path` whose callback holds the sender of the returned receiver. A dropped watch
 /// ends its thread, which drops the callback, so the receiver tells a running watch (Timeout)
 /// from a dropped one (Disconnected).
-#[expect(
-    clippy::unwrap_used,
-    reason = "a helper isn't a #[test] function, and its panic fails the test that called it"
-)]
 fn watch_with_its_life(path: &Path) -> (Watch, Receiver<Change>) {
     let (sender, receiver) = mpsc::channel();
-    let watch = Watch::start(path, move |change| {
+    let (watch, _) = Watch::start(path, Stamp::of(path), move |change| {
         let _ = sender.send(change);
-    })
-    .unwrap();
+    });
     (watch, receiver)
 }
 
@@ -225,35 +220,64 @@ fn window_forgotten_before_its_page_asks_hands_over_nothing_and_drops_its_late_w
     assert_eq!(running, Err(RecvTimeoutError::Disconnected));
 }
 
-/// A document whose file can't be watched: its folder is missing.
-fn unwatchable() -> PathBuf {
-    std::env::temp_dir()
-        .join(format!(
-            "downlight-documents-{}-missing",
-            std::process::id()
-        ))
-        .join("unwatched.md")
-}
+/// Longer than the watch's check takes to find a file its folder's events didn't report.
+const RECHECK_WAIT: Duration = Duration::from_secs(5);
 
-/// Long enough for a watch that can't start to have failed: its folder is missing, which it
-/// finds at once on its blocking thread. Only a stalled machine takes longer.
+/// Long enough for a window's watch to have started, on its blocking thread, and made the
+/// comparison it starts with. Only a stalled machine takes longer.
 const WATCH_START_WAIT: Duration = Duration::from_secs(1);
 
+/// Several times the 150 ms a watch waits for quiet before it reports, yet well under its
+/// RECHECK.
+const QUIET_WAIT: Duration = Duration::from_millis(500);
+
 #[test]
-fn watch_that_cannot_start_is_noticed_once_the_page_asks() {
-    // The notice is held, not sent: a page that hasn't asked yet may not listen (ticket 10).
+fn document_whose_folder_is_missing_is_asked_for_again_once_its_file_is_written() {
+    // Story 40: the window watches for the folder and its file, as after a build wiped the
+    // folder, rather than telling the reader it can't watch it.
+    let folder = std::env::temp_dir().join(format!(
+        "downlight-documents-{}-missing",
+        std::process::id()
+    ));
+    let path = folder.join("later.md");
     let (documents, pages) = documents();
-    let label = open_new(&documents, &unwatchable());
-    let before_asking = pages.wait_until(WATCH_START_WAIT, |sent| !sent.is_empty());
+    let label = open_new(&documents, &path);
     let answered = handover(&documents, &label, None).notice;
-    assert_eq!(before_asking, []);
-    assert!(
-        answered
-            .as_ref()
-            .is_some_and(|notice| notice.to_string().starts_with("Can't watch")),
-        "{answered:?}"
-    );
-    assert_eq!(pages.sent(), []);
+    let before_written = pages.wait_until(WATCH_START_WAIT, |sent| !sent.is_empty());
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(&path, "# Written at last").unwrap();
+    let sent = pages.wait_until(RECHECK_WAIT, |sent| !sent.is_empty());
+    std::fs::remove_dir_all(&folder).unwrap();
+    assert_eq!(answered, None);
+    assert_eq!(before_written, []);
+    assert_eq!(sent, [to(&label, Message::AskForDocument)]);
+}
+
+#[test]
+fn window_getting_the_focus_reloads_a_file_its_watch_missed() {
+    // A deleted folder's watch has stopped, and the folder made again has none until a check
+    // finds it, so only a check can see its file: as with any change the folder's watch misses.
+    let folder =
+        std::env::temp_dir().join(format!("downlight-documents-{}-focus", std::process::id()));
+    let path = folder.join("focus.md");
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(&path, "# First").unwrap();
+    let (documents, pages) = documents();
+    let label = open_new(&documents, &path);
+    let showing = handover(&documents, &label, None).showing;
+    save_until_reported(&pages, &label, &path);
+    std::fs::remove_dir_all(&folder).unwrap();
+    let gone = to(&label, Message::Gone(showing));
+    let before = pages
+        .wait_until(REPORT_WAIT, |sent| sent.contains(&gone))
+        .len();
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(&path, "# Made again").unwrap();
+    // Well inside the RECHECK after the `gone`, so only the focus can find the file.
+    documents.activated(&label);
+    let sent = pages.wait_until(QUIET_WAIT, |sent| sent.len() > before);
+    std::fs::remove_dir_all(&folder).unwrap();
+    assert_eq!(sent.get(before), Some(&to(&label, Message::AskForDocument)));
 }
 
 #[test]

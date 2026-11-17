@@ -18,7 +18,7 @@ use tauri::async_runtime::block_on;
 use super::handover::{Handover, Place};
 use super::recorder::{Recorder, Sent, ToWindow, recorded, recorded_with};
 use super::*;
-use crate::watch::Change;
+use crate::watch::{Change, Stamp};
 
 mod give;
 mod handover;

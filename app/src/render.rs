@@ -3,6 +3,7 @@
 
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, Receiver};
 
 use downlight_core::RenderedDocument;
 use tauri::async_runtime::JoinHandle;
@@ -12,6 +13,7 @@ use crate::image;
 use crate::notice::{NamedFile, Notice};
 use crate::platform;
 use crate::timing::Stages;
+use crate::watch::Stamp;
 
 /// The rendered document, with how long reading and rendering it took for the timing switch.
 pub type ReadAndRender = Result<(RenderedDocument, Stages), DocumentError>;
@@ -25,6 +27,20 @@ pub type RenderTask = JoinHandle<ReadAndRender>;
 pub fn start(path: &Path) -> RenderTask {
     let path = path.to_owned();
     tauri::async_runtime::spawn_blocking(move || read_and_render(&path))
+}
+
+/// Starts reading and rendering `path` as [`start`] does, and gives the file's stamp from just
+/// before the read, which the watch on the file starts from: a save after the read then reloads
+/// the document, even one made before the watch started (ticket 30).
+pub fn start_with_stamp(path: &Path) -> (RenderTask, Receiver<Option<Stamp>>) {
+    let path = path.to_owned();
+    let (stamp_sender, stamp) = mpsc::sync_channel(1);
+    let task = tauri::async_runtime::spawn_blocking(move || {
+        // Nobody waits for the stamp once the window has left the document.
+        let _ = stamp_sender.send(Stamp::of(&path));
+        read_and_render(&path)
+    });
+    (task, stamp)
 }
 
 fn read_and_render(path: &Path) -> ReadAndRender {
