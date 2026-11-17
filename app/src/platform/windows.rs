@@ -65,12 +65,22 @@ pub fn has_backdrop() -> bool {
 
 /// Puts Mica behind the whole window, for windows where `has_backdrop()` is true. The window and
 /// its webview are then transparent, and the page, told so by the app, draws no background of its
-/// own, so the document sits on Mica. `Effect::Mica` follows the system's light or dark mode.
+/// own, so the document sits on Mica. `Effect::Mica` follows the window's light or dark mode,
+/// which tao reads from Windows as it creates the window, and again when Windows' setting changes,
+/// and also gives the webview as its `prefers-color-scheme`, so Mica and the page agree.
+///
+/// No redirection surface (`WS_EX_NOREDIRECTIONBITMAP`), so no white surface shows behind the page
+/// before the window first paints it clear, a paint tao holds back while the event loop is busy,
+/// as during `setup` (window design ticket 13).
+///
+/// This and `transparent` can only be set when the window is built, so a live Backdrop choice
+/// (window design ticket 08) must change only the effect.
 pub fn with_backdrop<'a, R: Runtime, M: Manager<R>>(
     builder: WebviewWindowBuilder<'a, R, M>,
 ) -> WebviewWindowBuilder<'a, R, M> {
     builder
         .transparent(true)
+        .no_redirection_bitmap(true)
         .effects(EffectsBuilder::new().effect(Effect::Mica).build())
 }
 
