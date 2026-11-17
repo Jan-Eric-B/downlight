@@ -157,3 +157,5 @@ Hand checks for the owner:
 - A document with a code block over 128 KB in a slow grammar (TypeScript) shows that block as plain code, and the blocks before it highlighted.
 - A local image larger than 256 MB shows as missing (its alt text) and the window stays open; a normal large image (20 to 100 MB) loads.
 - Measure the 100 KB first paint again on an idle machine (`npm run measure`): this session's 1040 ms came with a loaded machine.
+
+**2026-11-17, decided by the repo owner.** A reload shows no wait note: the note shows only while the window has no document yet or waits for a different one (a link, Open, a drop, Back or Forward). A reload keeps the document in view untouched until the new one replaces it. To be built with the review fixes.
