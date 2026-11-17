@@ -1,0 +1,17 @@
+{
+  "fullWidth": {
+    "setting": "switchFullWidth"
+  },
+  "resetZoom": {
+    "change": "reset",
+    "setting": "zoom"
+  },
+  "zoomIn": {
+    "change": "in",
+    "setting": "zoom"
+  },
+  "zoomOut": {
+    "change": "out",
+    "setting": "zoom"
+  }
+}

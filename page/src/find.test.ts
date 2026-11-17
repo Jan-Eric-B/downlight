@@ -16,6 +16,7 @@ import {
   TITLE_BAR_HEIGHT,
 } from "./test-support";
 import { afterNextFrame } from "./reading-position";
+import { startSettings } from "./settings";
 import { startDocumentView } from "./view";
 
 /** How often "lamp" is in `find.md`, whatever its case: in the heading, prose, table and code. */
@@ -43,6 +44,7 @@ beforeEach(async () => {
   });
   stop = new AbortController();
   startFind(stop.signal);
+  await startSettings();
   startCommands(stop.signal);
   await startDocumentView(0);
   await settle();

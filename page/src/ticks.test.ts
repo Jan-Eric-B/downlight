@@ -7,6 +7,7 @@ import { startCommands } from "./commands";
 import { startFind } from "./find";
 import { startLinks } from "./links";
 import { afterNextFrame } from "./reading-position";
+import { startSettings } from "./settings";
 import {
   answerAsTheApp,
   askedOfTheApp,
@@ -28,7 +29,7 @@ let documents: Read[] = [];
 
 let stop: AbortController;
 
-beforeEach(() => {
+beforeEach(async () => {
   mockWindows("document-0");
   documents = [];
   fakeTheApp({
@@ -40,6 +41,7 @@ beforeEach(() => {
     forget_forward: forgetForwardAsTheApp,
   });
   stop = new AbortController();
+  await startSettings();
   startCommands(stop.signal);
   startLinks(stop.signal);
   startFind(stop.signal);

@@ -1,8 +1,9 @@
 import { clearMocks, mockWindows } from "@tauri-apps/api/mocks";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import readme from "../../core/tests/fixtures/readme.html?raw";
-import type { ZoomChange } from "./app";
+import { DEFAULT_SETTINGS, type SettingChange, type ZoomChange } from "./app";
 import { startCommands } from "./commands";
+import { startLayout } from "./layout";
 import { startSettings } from "./settings";
 import {
   answerAsTheApp,
@@ -17,13 +18,16 @@ import {
   type FakeApp,
 } from "./test-support";
 import { startDocumentView } from "./view";
-import { startZoom, ZOOM_VARIABLE } from "./zoom";
+import { ZOOM_VARIABLE } from "./zoom";
 
-/** How the fake app answers; a test sets `change_zoom` to make it fail. */
+/** How the fake app answers; a test sets `change_setting` to make it fail. */
 let app: FakeApp;
 
-/** The changes of the zoom the page asked the app for, in turn. */
-let asked: ZoomChange[];
+/**
+ * The changes of the zoom the page asked the app for, in turn, and any other setting it asked to
+ * change by its name.
+ */
+let asked: (ZoomChange | SettingChange["setting"])[];
 
 let stop: AbortController;
 let stopZoom: () => void;
@@ -32,8 +36,8 @@ beforeEach(async () => {
   mockWindows("document-0");
   asked = [];
   app = {
-    change_zoom: ({ change }) => {
-      asked.push(change);
+    change_setting: ({ change }) => {
+      asked.push(change.setting === "zoom" ? change.change : change.setting);
       return null;
     },
     render_document: (args) =>
@@ -41,9 +45,9 @@ beforeEach(async () => {
   };
   fakeTheApp(app);
   stop = new AbortController();
-  startCommands(stop.signal);
   await startSettings();
-  stopZoom = startZoom();
+  startCommands(stop.signal);
+  stopZoom = startLayout();
 });
 
 afterEach(() => {
@@ -178,7 +182,7 @@ test("Zoom in chosen in the right-click menu zooms in", async () => {
 });
 
 test("a zoom that can't be saved says why", async () => {
-  app.change_zoom = () =>
+  app.change_setting = () =>
     failingWith("Downlight's settings can't be saved. The zoom holds.");
   pressWithCtrl({ key: "+" });
   await vi.waitFor(() => {
@@ -194,9 +198,11 @@ test("the document view starts at 100% when the reader never zoomed", () => {
 
 test("the document view starts at the zoom level in the page's URL", async () => {
   stopZoom();
-  openPageAt(`?settings=${encodeURIComponent(JSON.stringify({ zoom: 150 }))}`);
+  openPageAt(
+    `?settings=${encodeURIComponent(JSON.stringify({ ...DEFAULT_SETTINGS, zoom: 150 }))}`,
+  );
   await startSettings();
-  stopZoom = startZoom();
+  stopZoom = startLayout();
   expect(documentZoom()).toBe("1.5");
 });
 
@@ -204,12 +210,12 @@ test("a page whose URL has settings it can't read starts at 100%", async () => {
   stopZoom();
   openPageAt("?settings=%7Bzoom");
   await startSettings();
-  stopZoom = startZoom();
+  stopZoom = startLayout();
   expect(documentZoom()).toBe("1");
 });
 
 test("a new zoom level from the app zooms the document view", async () => {
-  await tell("settings", { zoom: 125 });
+  await tell("settings", { ...DEFAULT_SETTINGS, zoom: 125 });
   expect(documentZoom()).toBe("1.25");
 });
 
@@ -228,7 +234,7 @@ test("zooming keeps the block that was at the top of the view at the top", async
   // Halfway down "## Options", on line 15.
   layOut(15.5);
   const scrolledTo = spyOnScrolls();
-  await tell("settings", { zoom: 150 });
+  await tell("settings", { ...DEFAULT_SETTINGS, zoom: 150 });
   await vi.waitFor(() => {
     expect(scrolledTo().length).toBeGreaterThan(0);
   });
@@ -241,7 +247,7 @@ test("zooming at the top of the document stays at the top", async () => {
   await settle();
   layOut(1);
   const scrolledTo = spyOnScrolls();
-  await tell("settings", { zoom: 150 });
+  await tell("settings", { ...DEFAULT_SETTINGS, zoom: 150 });
   await settle();
   expect(scrolledTo()).toEqual([]);
 });
@@ -251,7 +257,7 @@ test("a settings message that leaves the zoom as it was doesn't move the view", 
   await settle();
   layOut(15.5);
   const scrolledTo = spyOnScrolls();
-  await tell("settings", { zoom: 100 });
+  await tell("settings", { ...DEFAULT_SETTINGS, zoom: 100 });
   await settle();
   expect(scrolledTo()).toEqual([]);
 });

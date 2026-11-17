@@ -4,6 +4,8 @@
 //! without them loads with their defaults, and a file from a newer version, with values this one
 //! doesn't know, still loads.
 
+pub mod change;
+
 use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -35,6 +37,9 @@ pub struct Settings {
     /// until a window has closed. Kept as the window had it: a new window is fitted to its
     /// screen when it opens, since the screen may have changed since.
     pub window_size: Option<WindowSize>,
+    /// Whether the document fills the window's width instead of GitHub's reading width (window
+    /// design ticket 06); off for a reader who never switched it.
+    pub full_width: bool,
 }
 
 impl Settings {
@@ -42,7 +47,10 @@ impl Settings {
     /// opens, and in a `settings` message whenever it changes (window design ticket 12). The
     /// editor stays in the app.
     pub fn page(&self) -> PageSettings {
-        PageSettings { zoom: self.zoom }
+        PageSettings {
+            zoom: self.zoom,
+            full_width: self.full_width,
+        }
     }
 }
 
@@ -54,6 +62,17 @@ impl Settings {
 pub struct PageSettings {
     /// The document view's zoom level, in percent.
     pub zoom: Zoom,
+    /// Whether the document fills the window's width (window design ticket 06).
+    pub full_width: bool,
+}
+
+/// The snapshot of a reader who changed nothing, from [`Settings::default`], so the defaults live
+/// in one place. The page's `DEFAULT_SETTINGS` is checked against it through the page URL's
+/// "defaults" contract sample (`window::contract_samples`).
+impl Default for PageSettings {
+    fn default() -> Self {
+        Settings::default().page()
+    }
 }
 
 impl PageSettings {
@@ -63,6 +82,7 @@ impl PageSettings {
     pub fn sample() -> Self {
         Self {
             zoom: Zoom::from(125),
+            full_width: true,
         }
     }
 }
@@ -476,6 +496,30 @@ mod tests {
         assert!(error.is_none(), "{error:?}");
         assert_eq!(u16::from(restarted.get().zoom), 125);
         assert_eq!(restarted.get().window_size, Some(size));
+    }
+
+    #[test]
+    fn full_width_defaults_to_off() {
+        let folder = Folder::with_file("full-width-default", r#"{ "zoom": 125 }"#);
+        let (store, error) = folder.load();
+        assert!(error.is_none(), "{error:?}");
+        assert!(!store.get().full_width);
+        assert!(!store.get().page().full_width);
+    }
+
+    #[test]
+    fn saved_full_width_loads_after_a_restart() {
+        let folder = Folder::new("full-width-restart");
+        folder
+            .load()
+            .0
+            .change(|settings| settings.full_width = true)
+            .saved
+            .unwrap();
+        let (restarted, error) = folder.load();
+        assert!(error.is_none(), "{error:?}");
+        assert!(restarted.get().full_width);
+        assert!(restarted.get().page().full_width);
     }
 
     #[test]

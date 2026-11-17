@@ -9,6 +9,7 @@ use crate::zoom::Zoom;
 fn zoomed_to(percent: u16) -> Message {
     Message::Settings(PageSettings {
         zoom: Zoom::from(percent),
+        ..PageSettings::default()
     })
 }
 
@@ -19,6 +20,31 @@ fn settings_change_reaches_a_page_that_has_asked_at_once() {
     documents.page_asks(&window);
     let _ = documents.change_settings(|settings| settings.zoom = Zoom::from(150));
     assert_eq!(recorder.sent(), [to(&window, zoomed_to(150))]);
+}
+
+// The one broadcast test for every setting: each changes through `change_settings`
+// (`SettingChange` in `app/src/settings/change.rs`).
+#[test]
+fn settings_change_reaches_every_page_and_new_windows_open_with_it() {
+    let (documents, recorder) = documents();
+    let first = open_empty(&documents);
+    let second = open_empty(&documents);
+    documents.page_asks(&first);
+    documents.page_asks(&second);
+    // Without a config folder the change isn't saved, and holds all the same.
+    let changed = documents.change_settings(|settings| settings.zoom = Zoom::from(110));
+    assert!(changed.is_err(), "{changed:?}");
+    assert_eq!(
+        recorder.sent(),
+        [to(&first, zoomed_to(110)), to(&second, zoomed_to(110))]
+    );
+    let new_window = open_empty(&documents);
+    assert_eq!(
+        recorder
+            .opened_as(&new_window)
+            .map(|opened| opened.settings.zoom),
+        Some(Zoom::from(110))
+    );
 }
 
 #[test]

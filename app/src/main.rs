@@ -11,6 +11,7 @@ mod disk;
 mod documents;
 mod edit;
 mod image;
+mod keep_on_top;
 mod links;
 mod menu;
 mod message;
@@ -77,7 +78,8 @@ fn main() -> ExitCode {
             notice::open_named_folder,
             edit::edit_document,
             edit::choose_editor,
-            zoom::change_zoom,
+            settings::change::change_setting,
+            keep_on_top::switch_keep_on_top,
         ])
         .on_menu_event(menu::forward_choice)
         .on_window_event(|window, event| {

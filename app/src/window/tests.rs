@@ -107,18 +107,14 @@ fn page_url_tells_the_page_about_timing_backdrop_and_title_bar() {
         backdrop: true,
         title_bar: true,
     };
-    let url = |timing, look| {
-        page_url(
-            timing,
-            look,
-            PageSettings {
-                zoom: Zoom::from(100),
-            },
-        )
-        .unwrap()
-    };
-    let settings = "settings=%7B%22zoom%22%3A100%7D";
-    assert_eq!(url(false, plain), format!("index.html?{settings}"));
+    let url = |timing, look| page_url(timing, look, PageSettings::default()).unwrap();
+    // The settings come last, after the flags, as the URL without flags has them;
+    // `page_url_gives_the_page_the_settings_it_starts_with` checks what they say.
+    let plain_url = url(false, plain);
+    let settings = plain_url
+        .strip_prefix("index.html?")
+        .filter(|query| query.starts_with("settings=") && !query.contains('&'))
+        .unwrap_or_else(|| panic!("a URL without flags gives only the settings: {plain_url}"));
     assert_eq!(url(true, plain), format!("index.html?timing&{settings}"));
     assert_eq!(
         url(false, backdrop),
@@ -145,11 +141,12 @@ fn page_url_gives_the_page_the_settings_it_starts_with() {
             false,
             plain,
             PageSettings {
-                zoom: Zoom::from(150)
+                zoom: Zoom::from(150),
+                full_width: true,
             }
         )
         .unwrap(),
-        "index.html?settings=%7B%22zoom%22%3A150%7D"
+        "index.html?settings=%7B%22zoom%22%3A150%2C%22fullWidth%22%3Atrue%7D"
     );
 }
 

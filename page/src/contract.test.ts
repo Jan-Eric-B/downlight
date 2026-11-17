@@ -12,14 +12,17 @@ import {
   type ArgsOf,
   type MenuEntry,
   type NamedFile,
-  type ZoomChange,
+  type SettingChange,
 } from "./app";
 import { startCommands } from "./commands";
+import { FULL_WIDTH_CLASS } from "./full-width";
+import { startKeepOnTop } from "./keep-on-top";
+import { startLayout } from "./layout";
 import { startLinks } from "./links";
 import { showNotice } from "./notice";
 import { startSettings } from "./settings";
 import { startTitleBar } from "./title-bar";
-import { startZoom, ZOOM_VARIABLE } from "./zoom";
+import { ZOOM_VARIABLE } from "./zoom";
 import {
   askedOfTheApp,
   documentZoom,
@@ -31,6 +34,7 @@ import {
   followLinkSample,
   goneBar,
   heading,
+  keepOnTopSample,
   menuEntrySamples,
   messageSample,
   nextInTurn,
@@ -40,6 +44,7 @@ import {
   pageUrlSample,
   renderDocumentSample,
   revealFailureSample,
+  settingChangeSamples,
   settle,
   spyOnHeadingScrolls,
   spyOnScrollsToTop,
@@ -49,7 +54,7 @@ import {
   titleBarButton,
   titleBarFileName,
   titleBarSample,
-  zoomChangeSamples,
+  titleBarZoomLevel,
 } from "./test-support";
 import {
   requestDocument,
@@ -258,6 +263,7 @@ test.each([
         return null;
       },
     });
+    await startSettings();
     startCommands(stopPage.signal);
     await startDocumentView(0);
 
@@ -286,6 +292,7 @@ test.each(["showAtTop", "unreadShow"])(
     fakeTitleBarLayout();
     openPageWith("titleBar");
     answerWithSamples(name);
+    await startSettings();
     startTitleBar(stopPage.signal);
     await startDocumentView(0);
 
@@ -379,6 +386,7 @@ test("the app's notice naming a file shows its name in bold and its folder after
 
 test("the app's message that the reader chose a menu command runs it", async () => {
   fakeTheApp();
+  await startSettings();
   startCommands(stopPage.signal);
   await settle();
 
@@ -392,6 +400,7 @@ async function startTheTitleBar(): Promise<HTMLButtonElement> {
   fakeTitleBarLayout();
   openPageWith("titleBar");
   fakeTheApp();
+  await startSettings();
   startTitleBar(stopPage.signal);
   await settle();
   return titleBarButton("Maximize");
@@ -415,6 +424,33 @@ test.each([
 
   await tellAsSampled(messageSample(name));
   expect(maximize.dataset.state).toBe(look);
+});
+
+// `keep_on_top.json`
+
+test("the app's answers to switch Keep on top press its button and release it", async () => {
+  const answers = [
+    keepOnTopSample("switchedOn"),
+    keepOnTopSample("switchedOff"),
+  ];
+  fakeTitleBarLayout();
+  openPageWith("titleBar");
+  fakeTheApp({
+    switch_keep_on_top: () => nextInTurn(answers) ?? false,
+  });
+  await startSettings();
+  startKeepOnTop(stopPage.signal);
+  startTitleBar(stopPage.signal);
+  const keepOnTop = titleBarButton("Keep on top");
+
+  keepOnTop.click();
+  await vi.waitFor(() => {
+    expect(keepOnTop.getAttribute("aria-pressed")).toBe("true");
+  });
+  keepOnTop.click();
+  await vi.waitFor(() => {
+    expect(keepOnTop.getAttribute("aria-pressed")).toBe("false");
+  });
 });
 
 // `follow_link.json`
@@ -540,6 +576,7 @@ test("the app's failure to reveal a missing file opens its folder from the notic
     reveal_document: () => failingWith(failure),
     open_named_folder: openFolder,
   });
+  await startSettings();
   startTitleBar(stopPage.signal);
   await startDocumentView(0);
 
@@ -604,6 +641,7 @@ test("the page's menu entries are the kinds the app takes, each with the keys it
       return null;
     },
   });
+  await startSettings();
   startCommands(stopPage.signal);
 
   document.body.dispatchEvent(
@@ -619,22 +657,30 @@ test("the page's menu entries are the kinds the app takes, each with the keys it
   for (const entry of sent) expect(sampled).toContain(shapeOf(entry));
 });
 
-// `zoom_changes.json`
+// `setting_changes.json`
 
-test("the page's changes of the zoom are each one the app takes, and no other", async () => {
-  const sent: ZoomChange[] = [];
+/** `change` as JSON with its keys in order, so that changes compare whatever order their keys came in. */
+function inKeyOrder(change: SettingChange): string {
+  return JSON.stringify(change, keysSent(change));
+}
+
+test("the page's changes of the settings are each one the app takes, with its keys, and no other", async () => {
+  const sent: SettingChange[] = [];
   fakeTheApp({
-    change_zoom: ({ change }) => {
+    change_setting: ({ change }) => {
       sent.push(change);
       return null;
     },
   });
+  await startSettings();
   startCommands(stopPage.signal);
   await settle();
 
-  for (const command of ["zoomIn", "zoomOut", "resetZoom"])
+  for (const command of ["zoomIn", "zoomOut", "resetZoom", "fullWidth"])
     await tell("menu-command", command);
-  expect(sent.toSorted()).toEqual(zoomChangeSamples().toSorted());
+  expect(sent.map(inKeyOrder).toSorted()).toEqual(
+    settingChangeSamples().map(inKeyOrder).toSorted(),
+  );
 });
 
 // `title_bar.json`
@@ -649,6 +695,7 @@ test("the page tells the app where its maximize button is in the keys the app ta
       return null;
     },
   });
+  await startSettings();
   startTitleBar(stopPage.signal);
 
   layOutTitleBar();
@@ -704,11 +751,20 @@ test.each(["allOn", "allOff"] as const)(
   },
 );
 
+// The defaults live in the app (`impl Default for PageSettings`); the page keeps a copy for a URL
+// it can't read. Settings the page couldn't read here would give its defaults and pass, but the
+// test above fails then.
+test("the page's default settings are the app's", () => {
+  openPageAt(pageUrlSample("defaults"));
+
+  expect(firstSettings()).toEqual(DEFAULT_SETTINGS);
+});
+
 test("the page opened at the app's URL zooms the document view to its settings", async () => {
   openPageAt(pageUrlSample("allOff"));
   fakeTheApp();
   await startSettings();
-  const stopZoom = startZoom();
+  const stopZoom = startLayout();
 
   expect(documentZoom()).toBe("1.25");
   stopZoom();
@@ -718,12 +774,51 @@ test("the page opened at the app's URL zooms the document view to its settings",
 test("the app's settings message zooms the document view", async () => {
   fakeTheApp();
   await startSettings();
-  const stopZoom = startZoom();
+  const stopZoom = startLayout();
   await tellAsSampled(messageSample("settings"));
 
   expect(documentZoom()).toBe("1.25");
   stopZoom();
   document.documentElement.style.removeProperty(ZOOM_VARIABLE);
+});
+
+test("the page opened at the app's URL starts with the document at the full width of its settings", async () => {
+  openPageAt(pageUrlSample("allOff"));
+  fakeTheApp();
+  await startSettings();
+  const stopFullWidth = startLayout();
+
+  expect(document.documentElement.classList.contains(FULL_WIDTH_CLASS)).toBe(
+    true,
+  );
+  stopFullWidth();
+  document.documentElement.classList.remove(FULL_WIDTH_CLASS);
+});
+
+test("the app's settings message switches the document to its full width", async () => {
+  fakeTheApp();
+  await startSettings();
+  const stopFullWidth = startLayout();
+  await tellAsSampled(messageSample("settings"));
+
+  expect(document.documentElement.classList.contains(FULL_WIDTH_CLASS)).toBe(
+    true,
+  );
+  stopFullWidth();
+  document.documentElement.classList.remove(FULL_WIDTH_CLASS);
+});
+
+test("the app's settings message shows its zoom level in the title bar", async () => {
+  fakeTitleBarLayout();
+  openPageWith("titleBar");
+  answerWithSamples("showAtTop");
+  await startSettings();
+  startTitleBar(stopPage.signal);
+  await startDocumentView(0);
+  await tellAsSampled(messageSample("settings"));
+
+  expect(titleBarZoomLevel().hidden).toBe(false);
+  expect(titleBarZoomLevel().textContent).toBe("125%");
 });
 
 // `timing_reports.json`. The timing switch is read when `timing.ts` loads, so these tests load the

@@ -87,6 +87,13 @@ article.markdown-body {
   zoom: var(--document-zoom, 1);
 }
 
+/* Full width (full-width.ts, window design ticket 06): the document fills the window instead of
+   GitHub's reading width, keeping its padding. Only the document view: the empty window's way to
+   open a file and the notices keep theirs. */
+:root.full-width article.markdown-body {
+  max-width: none;
+}
+
 /* GitHub's other way to show an image in light or dark mode only, besides <picture>:
    `![Logo](logo-dark.png#gh-dark-mode-only)`. Rendering keeps the fragment on local images. */
 @media (prefers-color-scheme: light) {

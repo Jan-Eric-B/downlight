@@ -216,9 +216,10 @@ fn page_url(timing: bool, look: WindowLook, settings: PageSettings) -> tauri::Re
 }
 
 /// The page's URL with every flag on and with none, which the page's tests read its flags and
-/// its first settings from (`app/src/contract.rs`). A flag that is renamed on one side only would
-/// otherwise pass both test suites and, for `titleBar`, open a frameless window with no title bar
-/// to close it by.
+/// its first settings from (`app/src/contract.rs`), and with the default settings, which the page
+/// checks its own defaults against (`DEFAULT_SETTINGS` in `page/src/app.ts`). A flag that is
+/// renamed on one side only would otherwise pass both test suites and, for `titleBar`, open a
+/// frameless window with no title bar to close it by.
 #[cfg(test)]
 pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
     use serde::ser::Error as _;
@@ -228,12 +229,15 @@ pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
         backdrop: on,
         title_bar: on,
     };
+    let url = |timing, look, settings| {
+        page_url(timing, look, settings).map_err(serde_json::Error::custom)
+    };
     // The snapshot of the `settings` message's sample (`message::contract_samples`).
-    let settings = PageSettings::sample();
-    let url = |timing, look| page_url(timing, look, settings).map_err(serde_json::Error::custom);
+    let sample = PageSettings::sample();
     Ok(serde_json::json!({
-        "allOn": url(true, every(true))?,
-        "allOff": url(false, every(false))?,
+        "allOn": url(true, every(true), sample)?,
+        "allOff": url(false, every(false), sample)?,
+        "defaults": url(false, every(false), PageSettings::default())?,
     }))
 }
 

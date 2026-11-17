@@ -61,11 +61,8 @@
   height: 16px;
 }
 
-/* Windows 11's caption text. It gives way first when the window narrows, cut with an ellipsis
-   before it pushes the window's buttons. */
-.title-bar .file-name {
-  flex: 0 1 auto;
-  min-width: 0;
+/* The file name and the zoom level beside it: Windows 11's caption text, with a hover. */
+.title-bar :is(.file-name, .zoom-level) {
   margin: 4px 0;
   padding: 0 6px;
   border-radius: 4px;
@@ -76,9 +73,24 @@
     sans-serif;
 }
 
-/* An empty window shows only the logo; display: flex above would show the name all the same. */
-.title-bar .file-name[hidden] {
+/* An empty window shows only the logo; display: flex above would show them all the same. */
+.title-bar :is(.file-name, .zoom-level)[hidden] {
   display: none;
+}
+
+.title-bar :is(.file-name, .zoom-level):hover {
+  background-color: var(--subtle-fill-hover);
+}
+
+.title-bar :is(.file-name, .zoom-level):active {
+  background-color: var(--subtle-fill-pressed);
+}
+
+/* The name gives way first when the window narrows, cut with an ellipsis before it pushes the
+   window's buttons. */
+.title-bar .file-name {
+  flex: 0 1 auto;
+  min-width: 0;
 }
 
 .title-bar .file-name span {
@@ -87,18 +99,86 @@
   white-space: nowrap;
 }
 
-.title-bar .file-name:hover {
-  background-color: var(--subtle-fill-hover);
+/* The zoom level beside the name while it isn't 100% (ticket 04), a little dimmer than the name so
+   the name stays what the eye finds first. */
+.title-bar .zoom-level {
+  flex: none;
+  opacity: 0.7;
 }
 
-.title-bar .file-name:active {
-  background-color: var(--subtle-fill-pressed);
+.title-bar .zoom-level:hover {
+  opacity: 1;
+}
+
+/* The reader's commands (window design ticket 05), right of the drag strip, which gives way first
+   when the window narrows. */
+.command-buttons {
+  display: flex;
+  flex: none;
+  align-items: center;
+  margin-left: auto;
 }
 
 .window-buttons {
   display: flex;
   flex: none;
-  margin-left: auto;
+}
+
+/* Smaller than the window's own buttons, with a rounded fill under the pointer, as the file name
+   has, so they read as the app's commands rather than the window's. */
+.command-button {
+  justify-content: center;
+  width: 32px;
+  height: 28px;
+  padding: 0;
+  border-radius: 4px;
+}
+
+.command-button svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+}
+
+.command-button:hover {
+  background-color: var(--subtle-fill-hover);
+}
+
+.command-button:active {
+  background-color: var(--subtle-fill-pressed);
+}
+
+/* Edit in a window without a document: in the inactive bar's color, with no fill under the
+   pointer. */
+.command-button:disabled {
+  background-color: transparent;
+  color: light-dark(rgb(0 0 0 / 36.1%), rgb(255 255 255 / 36.3%));
+}
+
+/* A switched-on button, such as Full width (tickets 06 and 07): its glyph in the accent's emphasis,
+   at least 3:1 as WCAG asks of icons, with no fill of its own, so it keeps the hover and pressed
+   fills of the others. In an inactive window it dims with the bar, as Windows dims its caption. */
+.command-button[aria-pressed="true"] {
+  color: var(--accent-emphasis);
+}
+
+.title-bar.inactive .command-button[aria-pressed="true"] svg {
+  opacity: 0.4;
+}
+
+/* Only from the keyboard: a click leaves the focus in the document. */
+.command-button:focus-visible {
+  outline: 2px solid var(--accent-emphasis);
+  outline-offset: -2px;
+}
+
+/* A thin line between two groups of buttons, in Windows 11's divider color. */
+.title-bar .separator {
+  flex: none;
+  width: 1px;
+  height: 16px;
+  margin: 0 6px;
+  background-color: light-dark(rgb(0 0 0 / 8%), rgb(255 255 255 / 8.4%));
 }
 
 /* Minimize, maximize or restore, and close, at Windows 11's size and in its colors. On Windows
@@ -154,8 +234,25 @@
     forced-color-adjust: none;
   }
 
+  .command-button:disabled {
+    color: GrayText;
+  }
+
+  .title-bar .separator {
+    forced-color-adjust: none;
+    background-color: GrayText;
+  }
+
+  .title-bar .zoom-level {
+    opacity: 1;
+  }
+
   .title-bar .file-name:hover,
   .title-bar .file-name:active,
+  .title-bar .zoom-level:hover,
+  .title-bar .zoom-level:active,
+  .command-button:not(:disabled):hover,
+  .command-button:not(:disabled):active,
   .window-button:hover,
   .window-button[data-state="hovered"],
   .window-button:active,

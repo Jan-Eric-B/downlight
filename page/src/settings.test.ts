@@ -1,6 +1,6 @@
 import { clearMocks, mockWindows } from "@tauri-apps/api/mocks";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import type { PageSettings } from "./app";
+import { DEFAULT_SETTINGS, type PageSettings } from "./app";
 import { startSettings, whenSettingsChange } from "./settings";
 import { fakeTheApp, openPageAt, tell } from "./test-support";
 
@@ -27,33 +27,39 @@ function listen(): void {
 }
 
 test("a settings listener runs at once with the settings in the page's URL", async () => {
-  openPageAt(`?settings=${encodeURIComponent('{"zoom":175}')}`);
+  openPageAt(
+    `?settings=${encodeURIComponent('{"zoom":175,"fullWidth":false}')}`,
+  );
   await startSettings();
   listen();
-  expect(heard).toEqual([{ zoom: 175 }]);
+  expect(heard).toEqual([{ ...DEFAULT_SETTINGS, zoom: 175 }]);
 });
 
 test("a settings listener runs again on each settings message", async () => {
   await startSettings();
   listen();
-  await tell("settings", { zoom: 110 });
-  await tell("settings", { zoom: 125 });
-  expect(heard).toEqual([{ zoom: 100 }, { zoom: 110 }, { zoom: 125 }]);
+  await tell("settings", { ...DEFAULT_SETTINGS, zoom: 110 });
+  await tell("settings", { ...DEFAULT_SETTINGS, zoom: 125 });
+  expect(heard).toEqual([
+    { ...DEFAULT_SETTINGS, zoom: 100 },
+    { ...DEFAULT_SETTINGS, zoom: 110 },
+    { ...DEFAULT_SETTINGS, zoom: 125 },
+  ]);
 });
 
 test("a listener added after a settings message starts with that message's settings", async () => {
   await startSettings();
-  await tell("settings", { zoom: 90 });
+  await tell("settings", { ...DEFAULT_SETTINGS, zoom: 90 });
   listen();
-  expect(heard).toEqual([{ zoom: 90 }]);
+  expect(heard).toEqual([{ ...DEFAULT_SETTINGS, zoom: 90 }]);
 });
 
 test("a removed settings listener hears no more", async () => {
   await startSettings();
   listen();
   stopListening();
-  await tell("settings", { zoom: 110 });
-  expect(heard).toEqual([{ zoom: 100 }]);
+  await tell("settings", { ...DEFAULT_SETTINGS, zoom: 110 });
+  expect(heard).toEqual([{ ...DEFAULT_SETTINGS, zoom: 100 }]);
 });
 
 test("a settings listener added before the page hears the settings fails", async () => {
@@ -64,4 +70,11 @@ test("a settings listener added before the page hears the settings fails", async
   expect(() => fresh.whenSettingsChange(() => undefined)).toThrow(
     "startSettings()",
   );
+});
+
+test("reading the settings before the page hears them fails", async () => {
+  vi.resetModules();
+  const fresh = await import("./settings");
+
+  expect(() => fresh.settingsNow()).toThrow("startSettings()");
 });

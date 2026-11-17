@@ -4,14 +4,15 @@ import { emit } from "@tauri-apps/api/event";
 import { mockIPC } from "@tauri-apps/api/mocks";
 import { vi } from "vitest";
 import followLinkSamples from "../../app/tests/fixtures/follow_link.json?raw";
+import keepOnTopSamples from "../../app/tests/fixtures/keep_on_top.json?raw";
 import menuEntrySamplesJson from "../../app/tests/fixtures/menu_entries.json?raw";
 import messageSamples from "../../app/tests/fixtures/messages.json?raw";
 import openNamedFolderSamples from "../../app/tests/fixtures/open_named_folder.json?raw";
 import pageUrlSamples from "../../app/tests/fixtures/page_url.json?raw";
 import renderDocumentSamples from "../../app/tests/fixtures/render_document.json?raw";
+import settingChangeSamplesJson from "../../app/tests/fixtures/setting_changes.json?raw";
 import timingReportSamples from "../../app/tests/fixtures/timing_reports.json?raw";
 import titleBarSamples from "../../app/tests/fixtures/title_bar.json?raw";
-import zoomChangeSamplesJson from "../../app/tests/fixtures/zoom_changes.json?raw";
 import type {
   AnswerOf,
   ArgsOf,
@@ -29,7 +30,7 @@ import type {
   PageFlags,
   Place,
   ReloadMarks,
-  ZoomChange,
+  SettingChange,
 } from "./app";
 import { SCROLLER_SELECTOR, whenDocumentShown } from "./view";
 import { ZOOM_VARIABLE } from "./zoom";
@@ -84,7 +85,10 @@ type AnsweredWithMore = {
  * as a TypeError it shows as a notice, which hides the missing setup. The type makes a command the
  * app adds with such an answer join the list.
  */
-const MUST_BE_ANSWERED: Record<AnsweredWithMore, true> = { follow_link: true };
+const MUST_BE_ANSWERED: Record<AnsweredWithMore, true> = {
+  follow_link: true,
+  switch_keep_on_top: true,
+};
 
 /** The commands the page asked the fake app for, in turn. */
 let asked: Command[] = [];
@@ -171,6 +175,13 @@ export function followLinkSample(name: string): Followed {
   return sampleIn(followLinkSamples, name) as Followed;
 }
 
+/** A sample of the app's answers to `switch_keep_on_top`, switched on or off. */
+export function keepOnTopSample(
+  name: "switchedOn" | "switchedOff",
+): AnswerOf<"switch_keep_on_top"> {
+  return sampleIn(keepOnTopSamples, name) as AnswerOf<"switch_keep_on_top">;
+}
+
 /**
  * A sample of `follow_link`'s failure for a link to a missing file, whose folder is there or gone
  * too.
@@ -208,13 +219,13 @@ export function menuEntrySamples(): MenuEntry[] {
 }
 
 /**
- * Every change of the zoom the app's `change_zoom` takes. All of them, so that one the app adds
- * reaches the page's tests without a name to ask for.
+ * Every change of a setting the app's `change_setting` takes. All of them, so that one the app
+ * adds reaches the page's tests without a name to ask for.
  */
-export function zoomChangeSamples(): ZoomChange[] {
+export function settingChangeSamples(): SettingChange[] {
   return Object.values(
-    JSON.parse(zoomChangeSamplesJson) as object,
-  ) as ZoomChange[];
+    JSON.parse(settingChangeSamplesJson) as object,
+  ) as SettingChange[];
 }
 
 /** The timing reports the app takes, by the name of their sample. */
@@ -232,8 +243,12 @@ export function timingReportSample<N extends keyof TimingReports>(
   return sampleIn(timingReportSamples, name) as TimingReports[N];
 }
 
-/** The page's URL as the app opens it, with every flag on (`allOn`) or none (`allOff`). */
-export function pageUrlSample(name: "allOn" | "allOff"): string {
+/**
+ * The page's URL as the app opens it, with every flag on (`allOn`) or none (`allOff`), both with
+ * the settings of the `settings` message's sample, or with no flag and the default settings
+ * (`defaults`).
+ */
+export function pageUrlSample(name: "allOn" | "allOff" | "defaults"): string {
   return sampleIn(pageUrlSamples, name) as string;
 }
 
@@ -510,6 +525,15 @@ export function titleBarFileName(): HTMLElement {
   return found;
 }
 
+/** The title bar's zoom level beside the file name (window design ticket 04). */
+export function titleBarZoomLevel(): HTMLButtonElement {
+  const found = document.querySelector<HTMLButtonElement>(
+    ".title-bar .zoom-level",
+  );
+  if (!found) throw new Error("The title bar has no zoom level.");
+  return found;
+}
+
 /** The title bar's button that a screen reader names `label`. */
 export function titleBarButton(label: string): HTMLButtonElement {
   const found = document.querySelector<HTMLButtonElement>(
@@ -517,6 +541,22 @@ export function titleBarButton(label: string): HTMLButtonElement {
   );
   if (!found) throw new Error(`The title bar has no ${label} button.`);
   return found;
+}
+
+/**
+ * The title bar's buttons right of the file name, left to right, each by the name a screen reader
+ * gives it, with "|" for a separator between groups (window design ticket 05).
+ */
+export function titleBarButtonRow(): string[] {
+  return [
+    ...document.querySelectorAll<HTMLElement>(
+      ".title-bar :is(.command-button, .window-button, .separator)",
+    ),
+  ].map((item) =>
+    item.classList.contains("separator")
+      ? "|"
+      : (item.getAttribute("aria-label") ?? ""),
+  );
 }
 
 /** The height of the title bar the page draws (window design ticket 01), in px. */

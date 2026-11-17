@@ -110,7 +110,8 @@ export type Followed =
 
 /**
  * A line of the right-click menu as `show_document_menu` takes it (`MenuEntry` in
- * `app/src/menu.rs`): a command the page runs when it is chosen, and whether it can run now, a
+ * `app/src/menu.rs`): a command the page runs when it is chosen, whether it can run now, and for
+ * one that switches something on and off whether it is on, shown as a check mark, a
  * separator, or the system's Copy.
  */
 export type MenuEntry =
@@ -120,6 +121,7 @@ export type MenuEntry =
       label: string;
       shortcut?: string;
       enabled: boolean;
+      checked?: boolean;
     }
   | { kind: "separator" }
   | { kind: "copy" };
@@ -199,14 +201,16 @@ export function pageFlags(): PageFlags {
 export type PageSettings = {
   /** The document view's zoom level in percent (ticket 16). */
   zoom: number;
+  /** Whether the document fills the window's width (window design ticket 06). */
+  fullWidth: boolean;
 };
 
 /**
  * The settings of a reader who changed none, for a URL without a snapshot the page can read. The
- * app's own defaults are in `Settings::default` (`app/src/settings.rs`), the zoom's in
- * `app/src/zoom.rs` (`DEFAULT`); keep them the same.
+ * app's `PageSettings::default` (`app/src/settings.rs`) is the source; a contract test checks this
+ * against it (the page URL's `defaults` sample).
  */
-export const DEFAULT_SETTINGS: PageSettings = { zoom: 100 };
+export const DEFAULT_SETTINGS: PageSettings = { zoom: 100, fullWidth: false };
 
 function isPageSettings(value: unknown): value is PageSettings {
   return (
@@ -215,7 +219,9 @@ function isPageSettings(value: unknown): value is PageSettings {
     "zoom" in value &&
     typeof value.zoom === "number" &&
     Number.isFinite(value.zoom) &&
-    value.zoom > 0
+    value.zoom > 0 &&
+    "fullWidth" in value &&
+    typeof value.fullWidth === "boolean"
   );
 }
 
@@ -237,6 +243,14 @@ export function firstSettings(): PageSettings {
 
 /** A change of the zoom level that every window shares (`ZoomChange` in `app/src/zoom.rs`). */
 export type ZoomChange = "in" | "out" | "reset";
+
+/**
+ * A change of a setting every window shares, tagged with the setting it changes (`SettingChange`
+ * in `app/src/settings/change.rs`): a zoom step (ticket 16), or Full width switched (window design
+ * ticket 06), switched rather than set so that two windows switching it at once each switch it.
+ */
+export type SettingChange =
+  { setting: "zoom"; change: ZoomChange } | { setting: "switchFullWidth" };
 
 /**
  * Every command the app has (`generate_handler!` in `app/src/main.rs`), with the arguments the
@@ -301,11 +315,17 @@ export type Commands = {
    */
   choose_editor: { args: undefined; answer: null };
   /**
-   * Zoom in, Zoom out or Reset zoom (ticket 16), for every window: the app sends each page the
-   * new level in a `settings` message, this one too. Rejects with why when the level couldn't be
-   * saved; it holds until Downlight closes all the same.
+   * A change of a shared setting, such as Zoom in or Full width, for every window: the app sends
+   * each page the settings in a `settings` message, this one too. Rejects with why when the change
+   * couldn't be saved; it holds until Downlight closes all the same.
    */
-  change_zoom: { args: { change: ZoomChange }; answer: null };
+  change_setting: { args: { change: SettingChange }; answer: null };
+  /**
+   * Keep on top (window design ticket 07), for the asking window only: switched on if it was off,
+   * and off if it was on. Answers whether the window is kept on top now. Rejects with why when the
+   * window couldn't be switched.
+   */
+  switch_keep_on_top: { args: undefined; answer: boolean };
 };
 
 export type Command = keyof Commands;

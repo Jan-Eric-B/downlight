@@ -6,6 +6,7 @@ import type { ArgsOf, Followed, MenuEntry } from "./app";
 import { startCommands } from "./commands";
 import { startLinks } from "./links";
 import { afterNextFrame } from "./reading-position";
+import { startSettings } from "./settings";
 import {
   answerAsTheApp,
   askedOfTheApp,
@@ -41,7 +42,7 @@ let menu: MenuEntry[] = [];
 
 let stop: AbortController;
 
-beforeEach(() => {
+beforeEach(async () => {
   mockWindows("document-0");
   documents = [];
   steps = [];
@@ -66,6 +67,7 @@ beforeEach(() => {
     },
   });
   stop = new AbortController();
+  await startSettings();
   startCommands(stop.signal);
   startLinks(stop.signal);
 });

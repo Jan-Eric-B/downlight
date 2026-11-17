@@ -1,4 +1,11 @@
-import { firstSettings, startListeningToApp, type PageSettings } from "./app";
+import {
+  askApp,
+  firstSettings,
+  startListeningToApp,
+  type PageSettings,
+  type SettingChange,
+} from "./app";
+import { showingWhy } from "./notice";
 
 /**
  * The settings every window shares, as the page shows them (window design ticket 12): the first
@@ -30,17 +37,44 @@ export function startSettings(): Promise<void> {
 }
 
 /**
+ * Asks the app to change a setting for every window. The app sends every page the settings, this
+ * one too, which its listeners then show; a change that couldn't be saved says why. A setting the
+ * reader changes is a variant of `SettingChange` rather than a command of its own.
+ */
+export function changeSetting(change: SettingChange): void {
+  showingWhy(askApp("change_setting", { change }));
+}
+
+/**
+ * The settings the page shows now, for a command whose button or menu entry shows one, such as
+ * Full width: read when it is drawn, so it never waits for a listener that may run after the one
+ * drawing it. Throws before `startSettings`, as `whenSettingsChange` does.
+ */
+export function settingsNow(): PageSettings {
+  return started();
+}
+
+/**
  * Runs `listener` with the settings now, and again with each new snapshot the app sends. Returns
  * a function that removes the listener. Throws before `startSettings`, which would leave the
  * listener deaf to every change.
  */
 export function whenSettingsChange(listener: SettingsListener): () => void {
-  if (current === undefined) {
-    throw new Error("The page hears the settings only after startSettings().");
-  }
+  const settings = started();
   listeners.add(listener);
-  listener(current);
+  listener(settings);
   return () => {
     listeners.delete(listener);
   };
+}
+
+/**
+ * The snapshot now, or an error before `startSettings`: a part of the page that read the settings
+ * sooner would show the defaults rather than the reader's (review fixes of window design ticket 06).
+ */
+function started(): PageSettings {
+  if (current === undefined) {
+    throw new Error("The page hears the settings only after startSettings().");
+  }
+  return current;
 }

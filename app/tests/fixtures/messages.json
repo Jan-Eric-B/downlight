@@ -57,6 +57,7 @@
   "settings": {
     "event": "settings",
     "payload": {
+      "fullWidth": true,
       "zoom": 125
     }
   }

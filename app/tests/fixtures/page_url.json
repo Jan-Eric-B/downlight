@@ -1,4 +1,5 @@
 {
-  "allOff": "index.html?settings=%7B%22zoom%22%3A125%7D",
-  "allOn": "index.html?timing&backdrop&titleBar&settings=%7B%22zoom%22%3A125%7D"
+  "allOff": "index.html?settings=%7B%22zoom%22%3A125%2C%22fullWidth%22%3Atrue%7D",
+  "allOn": "index.html?timing&backdrop&titleBar&settings=%7B%22zoom%22%3A125%2C%22fullWidth%22%3Atrue%7D",
+  "defaults": "index.html?settings=%7B%22zoom%22%3A100%2C%22fullWidth%22%3Afalse%7D"
 }

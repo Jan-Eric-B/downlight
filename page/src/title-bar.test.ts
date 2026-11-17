@@ -1,6 +1,12 @@
 import { clearMocks, mockWindows } from "@tauri-apps/api/mocks";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import type { AnswerOf, ArgsOf, DocumentFile, DocumentToShow } from "./app";
+import {
+  DEFAULT_SETTINGS,
+  type AnswerOf,
+  type ArgsOf,
+  type DocumentFile,
+  type DocumentToShow,
+} from "./app";
 import { startCommands } from "./commands";
 import { startLinks } from "./links";
 import {
@@ -10,13 +16,17 @@ import {
   giveAnotherDocument,
   nextInTurn,
   nextShown,
+  openPageAt,
   openPageWith,
   settle,
   tell,
   titleBarButton,
+  titleBarButtonRow,
   titleBarFileName,
   titleBarLogo,
+  titleBarZoomLevel,
 } from "./test-support";
+import { startSettings } from "./settings";
 import { startTitleBar } from "./title-bar";
 import { startDocumentView } from "./view";
 
@@ -34,7 +44,7 @@ let layOutTitleBar: () => void;
 
 let stop: AbortController;
 
-beforeEach(() => {
+beforeEach(async () => {
   mockWindows("document-0");
   placed = [];
   answers = [];
@@ -55,6 +65,7 @@ beforeEach(() => {
   });
   // The app's flag for a window that has no native frame.
   openPageWith("titleBar");
+  await startSettings();
   stop = new AbortController();
 });
 
@@ -302,6 +313,109 @@ test("a file the app can't reveal shows why in a notice", async () => {
   });
 });
 
+// Open and Edit (window design ticket 05).
+
+test("the bar's buttons come in groups set apart by separators: Open and Edit, Full width and Keep on top, then the window's own", () => {
+  startTitleBar(stop.signal);
+  expect(titleBarButtonRow()).toEqual([
+    "Open",
+    "Edit",
+    "|",
+    "Full width",
+    "Keep on top",
+    "|",
+    "Minimize",
+    "Maximize",
+    "Close",
+  ]);
+});
+
+test("Open and Edit run the commands of Ctrl+O and Ctrl+E", async () => {
+  answers = [shownFrom(README)];
+  await startWithTheDocumentView();
+  startCommands(stop.signal);
+
+  titleBarButton("Open").click();
+  titleBarButton("Edit").click();
+  for (const key of ["o", "e"]) {
+    // Once the first open dialog has closed: Open opens no second one while it is up.
+    await settle();
+    document.body.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        ctrlKey: true,
+        key,
+        code: `Key${key.toUpperCase()}`,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  }
+  await settle();
+  const asked = askedOfTheApp().filter(
+    (command) => command === "open_document" || command === "edit_document",
+  );
+  expect(asked).toEqual([
+    "open_document",
+    "edit_document",
+    "open_document",
+    "edit_document",
+  ]);
+});
+
+test("Open's and Edit's tooltips name the command and its shortcut", () => {
+  startTitleBar(stop.signal);
+  expect(titleBarButton("Open").title).toBe("Open (Ctrl+O)");
+  expect(titleBarButton("Edit").title).toBe("Edit (Ctrl+E)");
+});
+
+test("Edit is disabled in a window without a document, and Open isn't", async () => {
+  answers = [null];
+  startCommands(stop.signal);
+  await startWithTheDocumentView();
+  expect(titleBarButton("Edit").disabled).toBe(true);
+  expect(titleBarButton("Open").disabled).toBe(false);
+});
+
+test("Edit is enabled once the window shows a document, and disabled again without one", async () => {
+  answers = [null, shownFrom(README, 1), null];
+  startCommands(stop.signal);
+  await startWithTheDocumentView();
+
+  let shown = nextShown();
+  await giveAnotherDocument();
+  await shown;
+  expect(titleBarButton("Edit").disabled).toBe(false);
+
+  shown = nextShown();
+  await giveAnotherDocument();
+  await shown;
+  expect(titleBarButton("Edit").disabled).toBe(true);
+});
+
+test("Edit is enabled for a document whose file can't be read, which the editor can still open", async () => {
+  answers = [
+    {
+      showing: 0,
+      file: README,
+      notice: null,
+      steps: { back: false, forward: false },
+      place: "show",
+      heading: null,
+      error: "Can't read README.md: access is denied.",
+    },
+  ];
+  startCommands(stop.signal);
+  await startWithTheDocumentView();
+  expect(titleBarButton("Edit").disabled).toBe(false);
+});
+
+test("Open and Edit are reached with Tab, unlike the window's own buttons", () => {
+  startTitleBar(stop.signal);
+  for (const label of ["Open", "Edit"]) {
+    expect(titleBarButton(label).tabIndex, label).toBe(0);
+  }
+});
+
 test("the logo and the name leave the focus in the document", async () => {
   answers = [shownFrom(README)];
   await startWithTheDocumentView();
@@ -314,4 +428,83 @@ test("the logo and the name leave the focus in the document", async () => {
     element.dispatchEvent(press);
     expect(press.defaultPrevented, element.className).toBe(true);
   }
+});
+
+// The zoom level beside the file name (window design ticket 04, v1 ticket 16).
+
+test("the zoom level is hidden at 100%", async () => {
+  answers = [shownFrom(README)];
+  await startWithTheDocumentView();
+  expect(titleBarZoomLevel().hidden).toBe(true);
+});
+
+test("the zoom level shows beside the name when it isn't 100%, and follows each change", async () => {
+  answers = [shownFrom(README)];
+  await startWithTheDocumentView();
+
+  await tell("settings", { ...DEFAULT_SETTINGS, zoom: 125 });
+  expect(titleBarZoomLevel().hidden).toBe(false);
+  expect(titleBarZoomLevel().textContent).toBe("125%");
+
+  await tell("settings", { ...DEFAULT_SETTINGS, zoom: 90 });
+  expect(titleBarZoomLevel().textContent).toBe("90%");
+
+  await tell("settings", { ...DEFAULT_SETTINGS, zoom: 100 });
+  expect(titleBarZoomLevel().hidden).toBe(true);
+});
+
+test("a window that opens zoomed shows its zoom level at once", async () => {
+  openPageAt(
+    `?titleBar&settings=${encodeURIComponent(JSON.stringify({ ...DEFAULT_SETTINGS, zoom: 150 }))}`,
+  );
+  await startSettings();
+  answers = [shownFrom(README)];
+  await startWithTheDocumentView();
+  expect(titleBarZoomLevel().hidden).toBe(false);
+  expect(titleBarZoomLevel().textContent).toBe("150%");
+});
+
+test("the zoom level is named as Reset zoom, and says its shortcut", async () => {
+  answers = [shownFrom(README)];
+  await startWithTheDocumentView();
+  await tell("settings", { ...DEFAULT_SETTINGS, zoom: 125 });
+  // The level a reader sees is part of its name, as WCAG's label in name asks.
+  expect(titleBarZoomLevel().getAttribute("aria-label")).toBe(
+    "125%, Reset zoom",
+  );
+  expect(titleBarZoomLevel().title).toBe("Reset zoom (Ctrl+0)");
+});
+
+test("a click on the zoom level asks the app to reset the zoom", async () => {
+  const changes: ArgsOf<"change_setting">[] = [];
+  fakeTheApp({
+    render_document: () => nextInTurn(answers) ?? null,
+    change_setting: (args) => {
+      changes.push(args);
+      return null;
+    },
+  });
+  await startSettings();
+  answers = [shownFrom(README)];
+  await startWithTheDocumentView();
+  await tell("settings", { ...DEFAULT_SETTINGS, zoom: 125 });
+
+  titleBarZoomLevel().click();
+  await settle();
+  expect(changes).toEqual([{ change: { setting: "zoom", change: "reset" } }]);
+});
+
+test("the empty window shows no zoom level, as it shows no name", async () => {
+  answers = [null];
+  await startWithTheDocumentView();
+  await tell("settings", { ...DEFAULT_SETTINGS, zoom: 125 });
+  expect(titleBarZoomLevel().hidden).toBe(true);
+});
+
+test("the zoom level leaves the focus in the document, as the logo and the name do", async () => {
+  answers = [shownFrom(README)];
+  await startWithTheDocumentView();
+  await tell("settings", { ...DEFAULT_SETTINGS, zoom: 125 });
+  expect(titleBarZoomLevel().tabIndex).toBe(-1);
+  expect(titleBarZoomLevel().classList.contains("bar-item")).toBe(true);
 });

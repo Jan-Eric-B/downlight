@@ -4,6 +4,7 @@ import readme from "../../core/tests/fixtures/readme.html?raw";
 import type { ArgsOf, MenuEntry } from "./app";
 import { startCommands } from "./commands";
 import { startFind } from "./find";
+import { startSettings } from "./settings";
 import {
   answerAsTheApp,
   askedOfTheApp,
@@ -19,11 +20,12 @@ let stop: AbortController;
 /** How the fake app answers; the tests set a command's answer to make it fail or wait. */
 let app: FakeApp;
 
-beforeEach(() => {
+beforeEach(async () => {
   mockWindows("document-0");
   app = {};
   fakeTheApp(app);
   stop = new AbortController();
+  await startSettings();
   startCommands(stop.signal);
 });
 
@@ -100,12 +102,13 @@ describe("the window stays open", () => {
   });
 
   test.each([
-    ["Shift", { shiftKey: true, key: "W" }],
-    ["Alt", { altKey: true, key: "w" }],
-    ["Meta", { metaKey: true, key: "w" }],
-  ])("on Ctrl+W with %s held too", (_modifier, modifier) => {
+    ["Shift", { shiftKey: true, key: "W" }, []],
+    // Ctrl+Alt+W is Full width's (window design ticket 06).
+    ["Alt", { altKey: true, key: "w" }, ["change_setting"]],
+    ["Meta", { metaKey: true, key: "w" }, []],
+  ])("on Ctrl+W with %s held too", (_modifier, modifier, asked) => {
     press({ ctrlKey: true, code: "KeyW", ...modifier });
-    expect(askedOfTheApp()).toEqual([]);
+    expect(askedOfTheApp()).toEqual(asked);
   });
 });
 
@@ -406,25 +409,50 @@ test("a key that names no shortcut never minimizes or maximizes the window", () 
 });
 
 describe("the right-click menu", () => {
-  test("replaces the webview's menu with Back, Forward, Reload, Find, Edit, Choose editor..., Open, Zoom in, Zoom out, Reset zoom and Copy", () => {
-    let entries: MenuEntry[] = [];
+  /** The entries the page last asked the app to show. */
+  let entries: MenuEntry[];
+
+  beforeEach(() => {
+    entries = [];
     app.show_document_menu = (args) => {
       entries = args.entries;
       return null;
     };
+  });
+
+  /** Right-clicks the document, as the reader would, and returns the event. */
+  function rightClick(): MouseEvent {
     const event = new MouseEvent("contextmenu", {
       bubbles: true,
       cancelable: true,
     });
     document.body.dispatchEvent(event);
+    return event;
+  }
+
+  /** Whether the menu's entry for the command `id` can be chosen. */
+  function enabledInMenu(id: string): boolean | undefined {
+    rightClick();
+    const entry = entries.find(
+      (candidate) => candidate.kind === "command" && candidate.id === id,
+    );
+    return entry?.kind === "command" ? entry.enabled : undefined;
+  }
+
+  test("replaces the webview's menu with Back, Forward, Reload, Find, Edit, Choose editor..., Open, Zoom in, Zoom out, Reset zoom, Full width, Keep on top and Copy", async () => {
+    // A window without a document.
+    app.render_document = () => null;
+    await startDocumentView(0);
+    const event = rightClick();
     expect(event.defaultPrevented).toBe(true);
-    // With nowhere to go back or forward to, Back and Forward are unavailable.
+    // With nowhere to go back or forward to, Back and Forward are unavailable, and without a
+    // document, Edit (window design ticket 05).
     const command = (id: string, label: string, shortcut?: string) => ({
       kind: "command",
       id,
       label,
       shortcut,
-      enabled: id !== "back" && id !== "forward",
+      enabled: !["back", "forward", "edit"].includes(id),
     });
     expect(entries).toEqual([
       command("back", "Back", "Alt+Left"),
@@ -442,8 +470,23 @@ describe("the right-click menu", () => {
       command("zoomOut", "Zoom out", "Ctrl+Minus"),
       command("resetZoom", "Reset zoom", "Ctrl+0"),
       { kind: "separator" },
+      // Off, with its check mark not ticked (window design ticket 06).
+      { ...command("fullWidth", "Full width", "Ctrl+Alt+W"), checked: false },
+      // A new window starts without it (window design ticket 07).
+      {
+        ...command("keepOnTop", "Keep on top", "Ctrl+Alt+T"),
+        checked: false,
+      },
+      { kind: "separator" },
       { kind: "copy" },
     ]);
+  });
+
+  test("offers Edit once the window shows a document", async () => {
+    app.render_document = (args) =>
+      answerAsTheApp(args, () => Promise.resolve(readme));
+    await startDocumentView(0);
+    expect(enabledInMenu("edit")).toBe(true);
   });
 
   test("runs the command the reader chose", async () => {

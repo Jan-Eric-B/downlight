@@ -18,6 +18,14 @@
   "separator": {
     "kind": "separator"
   },
+  "switchedOnCommand": {
+    "checked": true,
+    "enabled": true,
+    "id": "fullWidth",
+    "kind": "command",
+    "label": "Full width",
+    "shortcut": "Ctrl+Alt+W"
+  },
   "unavailableCommand": {
     "enabled": false,
     "id": "back",

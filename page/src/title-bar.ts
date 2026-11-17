@@ -1,6 +1,7 @@
 // The window's title bar, which the page draws in place of the native one (ADR 0005, window
-// design tickets 01 and 04): Downlight's logo, the shown document's file name, a strip to drag
-// the window by, and minimize, maximize or restore, and close.
+// design tickets 01, 04 and 05): Downlight's logo, the shown document's file name and its zoom
+// level when it isn't 100%, a strip to drag the window by, the buttons of the reader's commands
+// in groups, and minimize, maximize or restore, and close.
 // The app turns the native frame off and says so with the `titleBar` flag; without it the window
 // keeps its native title bar, as on other systems until their ports.
 //
@@ -11,16 +12,27 @@
 // Microsoft's Fluent UI System Icons, so the glyphs look like Windows 11's on Windows 10 and the
 // other systems too. Their MIT notice goes into the bundle from vite.config.ts.
 import closeGlyph from "@fluentui/svg-icons/icons/dismiss_16_regular.svg?raw";
+import editGlyph from "@fluentui/svg-icons/icons/edit_16_regular.svg?raw";
+import fullWidthGlyph from "@fluentui/svg-icons/icons/arrow_bidirectional_left_right_16_regular.svg?raw";
+import openGlyph from "@fluentui/svg-icons/icons/folder_open_16_regular.svg?raw";
+import keepOnTopGlyph from "@fluentui/svg-icons/icons/pin_16_regular.svg?raw";
 import maximizeGlyph from "@fluentui/svg-icons/icons/square_16_regular.svg?raw";
 import restoreGlyph from "@fluentui/svg-icons/icons/square_multiple_16_regular.svg?raw";
 import minimizeGlyph from "@fluentui/svg-icons/icons/subtract_16_regular.svg?raw";
 // Inlined rather than loaded: the content security policy's img-src has no 'self' (window design
 // spec). Its ids are prefixed for sharing the page's namespace.
 import logo from "../../app/icons/icon.svg?raw";
-import { askApp, listenToApp, pageFlags, type DocumentFile } from "./app";
-import { commandButton } from "./commands";
+import {
+  askApp,
+  DEFAULT_SETTINGS,
+  listenToApp,
+  pageFlags,
+  type DocumentFile,
+} from "./app";
+import { commandButton, type CommandId } from "./commands";
 import { showingWhy } from "./notice";
-import { whenDocumentShown } from "./view";
+import { settingsNow, whenSettingsChange } from "./settings";
+import { showsDocument, whenDocumentShown } from "./view";
 
 /**
  * Tells the app where the maximize button is, in device pixels, so its window behind the button
@@ -104,6 +116,72 @@ function createFileName(): {
 }
 
 /**
+ * The zoom level beside the file name while it isn't 100%, so a reader notices a zoomed window
+ * (window design ticket 04). It is the Reset zoom command, so a click resets the zoom and its
+ * tooltip teaches Ctrl+0, but it sits with the logo and the name, and as they do, it never takes
+ * the focus and isn't a part of the window to drag it by. `refresh` shows it as the settings and
+ * the document view are now, whenever either may have changed.
+ */
+function createZoomLevel(): {
+  element: HTMLButtonElement;
+  refresh: () => void;
+} {
+  // No glyph: `refresh` writes the level as the text and into the name, as both change with it.
+  const element = commandButton("resetZoom", "");
+  element.classList.add(BAR_ITEM_CLASS, "zoom-level");
+  element.tabIndex = -1;
+  element.hidden = true;
+  return {
+    element,
+    refresh: () => {
+      const { zoom } = settingsNow();
+      // Hidden at the level Reset gives, and in the empty window, which shows only the logo: there
+      // is no document zoomed.
+      element.hidden = zoom === DEFAULT_SETTINGS.zoom || !showsDocument();
+      element.textContent = `${String(zoom)}%`;
+      // The level the reader sees is part of its name (WCAG's label in name).
+      element.setAttribute("aria-label", `${String(zoom)}%, Reset zoom`);
+    },
+  };
+}
+
+/**
+ * The buttons of the reader's commands, in the spec's groups, each group followed by a thin
+ * separator, the last one setting them apart from the window's own buttons (window design ticket
+ * 05). Unlike the window's buttons they are reached with Tab, as a toolbar's are: they have no
+ * system key such as Alt+Space, only shortcuts a reader may not know yet. A click still leaves the
+ * focus in the document (the bar's `mousedown`).
+ */
+function createCommandButtons(): HTMLElement {
+  const groups: [CommandId, string][][] = [
+    [
+      ["open", openGlyph],
+      ["edit", editGlyph],
+    ],
+    // Settings joins them (window design ticket 08).
+    [
+      ["fullWidth", fullWidthGlyph],
+      ["keepOnTop", keepOnTopGlyph],
+    ],
+  ];
+  const row = document.createElement("div");
+  row.className = "command-buttons";
+  for (const group of groups) {
+    for (const [id, glyph] of group) {
+      const button = commandButton(id, glyph);
+      button.classList.add(BAR_ITEM_CLASS, "command-button");
+      row.append(button);
+    }
+    const separator = document.createElement("div");
+    separator.className = "separator";
+    // Only drawn: the buttons' names say what they do.
+    separator.setAttribute("aria-hidden", "true");
+    row.append(separator);
+  }
+  return row;
+}
+
+/**
  * Draws the title bar when the app left it to the page, and keeps it in step with the window:
  * maximize or restore, the maximize button's look while the pointer is on it, and dimmed while the
  * window isn't active. The signal removes the window listeners again, for the tests.
@@ -128,15 +206,27 @@ export function startTitleBar(signal?: AbortSignal): void {
   buttons.className = "window-buttons";
   buttons.append(minimize, maximize, close);
   const fileName = createFileName();
-  bar.append(createLogo(), fileName.element, buttons);
+  const zoomLevel = createZoomLevel();
+  bar.append(
+    createLogo(),
+    fileName.element,
+    zoomLevel.element,
+    createCommandButtons(),
+    buttons,
+  );
   document.body.prepend(bar);
 
   // The name follows whatever the window shows: a link, Open, a drop, and Back and Forward
   // (v1 ticket 12) all go through the document view.
   const stopNaming = whenDocumentShown(({ file }) => {
     fileName.show(file);
+    zoomLevel.refresh();
   });
   signal?.addEventListener("abort", stopNaming);
+
+  // The zoom level follows every change of the settings, from this window or another.
+  const stopFollowingSettings = whenSettingsChange(zoomLevel.refresh);
+  signal?.addEventListener("abort", stopFollowingSettings);
 
   // A press anywhere on the bar leaves the focus in the document.
   bar.addEventListener("mousedown", (event) => {

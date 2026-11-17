@@ -224,6 +224,10 @@ const ROLE_USES: Record<string, string> = {
   ".find-bar input:focus-visible / outline": "emphasis",
   // The find bar's arrow and close buttons (v1 ticket 14).
   ".find-button:focus-visible / outline": "emphasis",
+  // The title bar's command buttons (window design ticket 05).
+  ".command-button:focus-visible / outline": "emphasis",
+  // A switched-on button: Full width and Keep on top (window design tickets 06 and 07).
+  '.command-button[aria-pressed="true"] / color': "emphasis",
 };
 
 /**

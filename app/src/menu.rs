@@ -3,7 +3,7 @@
 //! native menu and tells the page which command the reader chose.
 
 use serde::Deserialize;
-use tauri::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
+use tauri::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tauri::{AppHandle, Manager as _, WebviewWindow};
 
 use crate::documents::Documents;
@@ -16,7 +16,9 @@ use crate::platform;
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum MenuEntry {
     /// A command the page carries out, with the shortcut shown beside it, such as `Ctrl+O`, and
-    /// whether it can run now: Back with nowhere to go is shown unavailable (ticket 12).
+    /// whether it can run now: Back with nowhere to go is shown unavailable (ticket 12). One that
+    /// switches something on and off, such as Full width, says whether it is on, which the menu
+    /// shows as a check mark (window design ticket 06); None for any other.
     Command {
         id: String,
         label: String,
@@ -24,6 +26,9 @@ pub enum MenuEntry {
         #[cfg_attr(test, serde(skip_serializing_if = "Option::is_none"))]
         shortcut: Option<String>,
         enabled: bool,
+        // Left out for a command that switches nothing, so its sample leaves it out too.
+        #[cfg_attr(test, serde(skip_serializing_if = "Option::is_none"))]
+        checked: Option<bool>,
     },
     Separator,
     /// The system's own Copy, which copies the selection as Ctrl+C does.
@@ -43,17 +48,27 @@ pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
         label: "Open...".to_owned(),
         shortcut: shortcut.map(str::to_owned),
         enabled: true,
+        checked: None,
     };
     let back_with_nowhere_to_go = MenuEntry::Command {
         id: "back".to_owned(),
         label: "Back".to_owned(),
         shortcut: Some("Alt+Left".to_owned()),
         enabled: false,
+        checked: None,
+    };
+    let full_width_on = MenuEntry::Command {
+        id: "fullWidth".to_owned(),
+        label: "Full width".to_owned(),
+        shortcut: Some("Ctrl+Alt+W".to_owned()),
+        enabled: true,
+        checked: Some(true),
     };
     Ok(serde_json::json!({
         "command": serde_json::to_value(open(Some("Ctrl+O")))?,
         "commandWithoutShortcut": serde_json::to_value(open(None))?,
         "unavailableCommand": serde_json::to_value(back_with_nowhere_to_go)?,
+        "switchedOnCommand": serde_json::to_value(full_width_on)?,
         "separator": serde_json::to_value(MenuEntry::Separator)?,
         "copy": serde_json::to_value(MenuEntry::Copy)?,
     }))
@@ -71,15 +86,18 @@ pub fn show_document_menu(window: WebviewWindow, entries: Vec<MenuEntry>) -> tau
                 label,
                 shortcut,
                 enabled,
+                checked,
             } => {
                 let (text, shortcut) = platform::menu_item_text(&label, shortcut.as_deref());
-                menu.append(&MenuItem::with_id(
-                    &window,
-                    item_id(window.label(), &id),
-                    text,
-                    enabled,
-                    shortcut,
-                )?)?;
+                let id = item_id(window.label(), &id);
+                match checked {
+                    Some(checked) => menu.append(&CheckMenuItem::with_id(
+                        &window, id, text, enabled, checked, shortcut,
+                    )?)?,
+                    None => {
+                        menu.append(&MenuItem::with_id(&window, id, text, enabled, shortcut)?)?
+                    }
+                }
             }
             MenuEntry::Separator => menu.append(&PredefinedMenuItem::separator(&window)?)?,
             MenuEntry::Copy => menu.append(&PredefinedMenuItem::copy(&window, Some("Copy"))?)?,

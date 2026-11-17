@@ -1,12 +1,17 @@
 import { askApp, listenToApp, type MenuEntry } from "./app";
 import { chooseEditor, edit } from "./edit";
 import { findNext, findPrevious, openFind } from "./find";
+import { isFullWidth, switchFullWidth } from "./full-width";
+import { isKeptOnTop, switchKeepOnTop } from "./keep-on-top";
 import { showingWhy } from "./notice";
 import { open } from "./open";
+import { whenSettingsChange } from "./settings";
 import {
   canStepThroughHistory,
   requestDocument,
+  showsDocument,
   stepThroughHistory,
+  whenDocumentShown,
 } from "./view";
 import { changeZoom } from "./zoom";
 
@@ -17,7 +22,7 @@ import { changeZoom } from "./zoom";
  * nowhere else in the page or the app. The menu entry, the button's tooltip and the shortcut then
  * all come from the one entry (window design spec). The title bar's logo and file name are not
  * commands: they have no shortcut or menu entry, and their name and tooltip come from the window
- * and its document (title-bar.ts).
+ * and its document (title-bar.ts). Its zoom level is the Reset zoom command, showing the level.
  */
 interface Command {
   /** The command's name, as the right-click menu and its button's tooltip show it. */
@@ -42,9 +47,19 @@ interface Command {
   /** Which way the mouse wheel runs it while Ctrl is held: up for Zoom in, down for Zoom out. */
   ctrlWheel?: "up" | "down";
   /**
-   * Whether it can run now, which the right-click menu shows; always, for a command without it.
+   * Whether it can run now, which the right-click menu and its button show; always, for a command
+   * without it. Its button reads it again whenever the window shows a document or the settings
+   * change (`startCommands`), so a command whose state comes from elsewhere refreshes the buttons
+   * itself, as Keep on top does with the app's answer.
    */
   available?(): boolean;
+  /**
+   * Whether a command that switches something on and off has it on now, such as Full width, which
+   * its button shows in the accent color and the right-click menu with a check mark (window design
+   * tickets 05 to 07). A command without it switches nothing. Its button reads it again as it
+   * reads `available`.
+   */
+  pressed?(): boolean;
   run(): void;
 }
 
@@ -106,7 +121,13 @@ const commands = {
     run: findPrevious,
   },
   open: { label: "Open...", shortcuts: [{ ctrl: true, key: "o" }], run: open },
-  edit: { label: "Edit", shortcuts: [{ ctrl: true, key: "e" }], run: edit },
+  // Without a document the app has nothing to open; Ctrl+E still asks it, which says so.
+  edit: {
+    label: "Edit",
+    shortcuts: [{ ctrl: true, key: "e" }],
+    available: showsDocument,
+    run: edit,
+  },
   chooseEditor: { label: "Choose editor...", run: chooseEditor },
   // Ctrl+plus as each layout types it: its own key (German, the number pad), Shift+= (US), and =
   // without Shift, as browsers take it too.
@@ -139,6 +160,21 @@ const commands = {
       changeZoom("reset");
     },
   },
+  fullWidth: {
+    label: "Full width",
+    shortcuts: [{ ctrl: true, alt: true, key: "w" }],
+    pressed: isFullWidth,
+    run: switchFullWidth,
+  },
+  // The window's own state, which no message tells the page: its button shows the app's answer.
+  keepOnTop: {
+    label: "Keep on top",
+    shortcuts: [{ ctrl: true, alt: true, key: "t" }],
+    pressed: isKeptOnTop,
+    run: () => {
+      void switchKeepOnTop().then(refreshCommands);
+    },
+  },
   close: {
     label: "Close",
     shortcuts: [{ ctrl: true, key: "w" }],
@@ -161,7 +197,7 @@ const commands = {
   },
 } satisfies Record<string, Command>;
 
-type CommandId = keyof typeof commands;
+export type CommandId = keyof typeof commands;
 
 /** A line of the right-click menu: a command, a separator, or the system's Copy. */
 type MenuLine = CommandId | "separator" | "copy";
@@ -181,6 +217,9 @@ const menu: MenuLine[] = [
   "zoomOut",
   "resetZoom",
   "separator",
+  "fullWidth",
+  "keepOnTop",
+  "separator",
   "copy",
 ];
 
@@ -195,6 +234,8 @@ function menuEntries(): MenuEntry[] {
       label: command.label,
       shortcut: shortcutOf(command),
       enabled: command.available?.() ?? true,
+      // Only a command that switches something has a check mark, ticked or not.
+      ...(command.pressed && { checked: command.pressed() }),
     };
   });
 }
@@ -202,20 +243,48 @@ function menuEntries(): MenuEntry[] {
 /**
  * A button that runs the command `id`, showing `glyph`, one of the page's own bundled SVGs. A
  * screen reader names it by the command's label, and its tooltip adds the shortcut, as in
- * "Close (Ctrl+W)", so the button teaches the key.
+ * "Close (Ctrl+W)", so the button teaches the key. The label's ellipsis, which marks a menu entry
+ * that asks for more before it acts ("Open..."), is the menu's alone, as in Windows' own tooltips.
+ * It is disabled while its command isn't available, and a command that switches something on and
+ * off makes a toggle button (`aria-pressed`), each as `refreshCommands` last found it.
  */
 export function commandButton(id: CommandId, glyph: string): HTMLButtonElement {
   const command: Command = commands[id];
+  const label = command.label.replace(/\.\.\.$/, "");
   const shortcut = shortcutOf(command);
   const button = document.createElement("button");
   button.type = "button";
-  button.setAttribute("aria-label", command.label);
-  button.title = shortcut ? `${command.label} (${shortcut})` : command.label;
+  button.dataset.command = id;
+  button.setAttribute("aria-label", label);
+  button.title = shortcut ? `${label} (${shortcut})` : label;
   button.innerHTML = glyph;
   button.addEventListener("click", () => {
     command.run();
   });
+  showState(button, command);
   return button;
+}
+
+/** Shows on `button` whether `command` is available, and whether it is on. */
+function showState(button: HTMLButtonElement, command: Command): void {
+  button.disabled = !(command.available?.() ?? true);
+  if (command.pressed)
+    button.setAttribute("aria-pressed", String(command.pressed()));
+}
+
+/**
+ * Shows on every command button whether its command is available now, and whether it is on: run
+ * whenever either may have changed, as when the window shows another document, the settings
+ * change (`startCommands`) or the app answers that a window's own state switched (window design
+ * ticket 05). The right-click menu reads them when it opens, so it needs no refresh.
+ */
+function refreshCommands(): void {
+  for (const button of document.querySelectorAll<HTMLButtonElement>(
+    "button[data-command]",
+  )) {
+    const id = button.dataset.command ?? "";
+    if (isCommandId(id)) showState(button, commands[id]);
+  }
 }
 
 /** The named keys that Windows writes otherwise than `KeyboardEvent.key` names them. */
@@ -253,18 +322,27 @@ function pressesShortcutOf(event: KeyboardEvent, command: Command): boolean {
 }
 
 /**
- * Whether the key pressed is `key`. A letter, on a layout that types Latin letters, goes by the
- * letter the key types, so it follows AZERTY and the like; on other layouts, such as Cyrillic, by
- * the key's place, as other Windows apps do. A digit goes by the digit it types or by the digit
- * key it is on, since AZERTY types `à` on the 0 key without Shift. A named key goes by its name.
+ * Whether the key pressed is `key`. A letter goes by the a-z letter the key types, so it follows
+ * AZERTY and the like; a key that types a letter outside the Latin script, as on Cyrillic, goes by
+ * its place, as other Windows apps do. Any other key is never a letter's shortcut: Windows reports
+ * AltGr as Ctrl+Alt, so AltGr+W, which types `|` on Czech and `å` on US-International or is a dead
+ * key, would otherwise be Ctrl+Alt+W and lose what the reader typed (window design ticket 06). A
+ * digit goes by the digit it types or by the digit key it is on, since AZERTY types `à` on the 0
+ * key without Shift. A named key goes by its name.
  */
 function pressesKey(event: KeyboardEvent, key: string): boolean {
   if (/^\d$/.test(key))
     return event.key === key || event.code === `Digit${key}`;
   if (!isLetter(key)) return event.key === key;
-  return /^[a-z]$/i.test(event.key)
-    ? event.key.toLowerCase() === key
-    : event.code === `Key${key.toUpperCase()}`;
+  if (/^[a-z]$/i.test(event.key)) return event.key.toLowerCase() === key;
+  return (
+    typesANonLatinLetter(event) && event.code === `Key${key.toUpperCase()}`
+  );
+}
+
+/** Whether the key pressed types one letter of a script other than Latin, such as Cyrillic. */
+function typesANonLatinLetter(event: KeyboardEvent): boolean {
+  return /^\p{L}$/u.test(event.key) && !/^\p{Script=Latin}$/u.test(event.key);
 }
 
 function isLetter(key: string): boolean {
@@ -283,10 +361,18 @@ function isCommandId(id: string): id is CommandId {
 
 /**
  * Runs a command when its shortcut is pressed, its mouse button released or it is chosen in the
- * right-click menu, and shows that menu on a right-click. The signal removes the key, button and
- * right-click listeners again, for the tests.
+ * right-click menu, shows that menu on a right-click, and keeps the command buttons in step with
+ * the document and the settings. After `startSettings`. The signal removes the listeners again,
+ * for the tests.
  */
 export function startCommands(signal?: AbortSignal): void {
+  // Edit can run only with a document, and Full width is a setting: the table knows what its
+  // commands' states follow, so the title bar needn't (review fixes of window design ticket 05).
+  const stopFollowingDocument = whenDocumentShown(refreshCommands);
+  signal?.addEventListener("abort", stopFollowingDocument);
+  const stopFollowingSettings = whenSettingsChange(refreshCommands);
+  signal?.addEventListener("abort", stopFollowingSettings);
+
   addEventListener(
     "keydown",
     (event) => {

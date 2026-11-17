@@ -130,6 +130,7 @@ export function whenDocumentShown(listener: ShownListener): () => void {
 interface StartedView {
   request: () => Promise<void>;
   showing: () => number | null;
+  file: () => DocumentFile | null;
   step: (step: Step) => void;
   canStep: (step: Step) => boolean;
   visitHeading: (heading: string | null) => Promise<void>;
@@ -155,6 +156,14 @@ export function requestDocument(): Promise<void> {
  */
 export function showingInView(): number | null {
   return theView?.showing() ?? null;
+}
+
+/**
+ * Whether the window shows a document, also one whose file can't be read, for Edit (window design
+ * ticket 05); false while it shows none or hasn't started.
+ */
+export function showsDocument(): boolean {
+  return (theView?.file() ?? null) !== null;
 }
 
 /**
@@ -700,6 +709,7 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
   theView = {
     request,
     showing: () => showing,
+    file: () => file,
     step,
     canStep: (to) => history.canStep(showing, to),
     visitHeading: visitHeadingInView,
