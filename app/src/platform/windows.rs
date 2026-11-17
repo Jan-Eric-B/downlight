@@ -27,8 +27,8 @@ use windows_sys::Win32::UI::Shell::{
     ShellExecuteW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    IDYES, MB_DEFBUTTON2, MB_ICONERROR, MB_ICONWARNING, MB_OK, MB_SETFOREGROUND, MB_YESNO,
-    MessageBoxW, SW_SHOWNORMAL,
+    IDYES, MB_DEFBUTTON2, MB_ICONERROR, MB_ICONWARNING, MB_OK, MB_SETFOREGROUND, MB_TOPMOST,
+    MB_YESNO, MessageBoxW, SW_SHOWNORMAL,
 };
 
 use crate::APP_NAME;
@@ -126,7 +126,8 @@ pub fn fold_case(path: PathBuf) -> PathBuf {
 
 /// Shows an error in a message box and returns once the reader has dismissed it. It needs no
 /// window of Downlight's, so it works when no window could open, and release builds have no
-/// console to print to.
+/// console to print to. Topmost, since belonging to no window it would otherwise open behind a
+/// window kept on top (window design ticket 07), as a second launch's failures do.
 pub fn show_error(message: &str) {
     let text = wide(message);
     let caption = wide(APP_NAME);
@@ -137,7 +138,7 @@ pub fn show_error(message: &str) {
             std::ptr::null_mut(),
             text.as_ptr(),
             caption.as_ptr(),
-            MB_OK | MB_ICONERROR | MB_SETFOREGROUND,
+            MB_OK | MB_ICONERROR | MB_SETFOREGROUND | MB_TOPMOST,
         );
     }
 }
