@@ -47,6 +47,7 @@ import {
   settingChangeSamples,
   settle,
   spyOnHeadingScrolls,
+  shownWaitNote,
   spyOnScrollsToTop,
   tell,
   tellAsSampled,
@@ -55,6 +56,7 @@ import {
   titleBarFileName,
   titleBarSample,
   titleBarZoomLevel,
+  waitNoteSample,
 } from "./test-support";
 import {
   requestDocument,
@@ -301,6 +303,44 @@ test.each(["showAtTop", "unreadShow"])(
     expect(titleBarFileName().title).toBe(sample?.file.path);
   },
 );
+
+// `wait_note.json`
+
+/** Starts the view on a document that never arrives, with the app's wait note sample `name`. */
+function startWaitingWith(name: string): void {
+  fakeTheApp({
+    render_document: () => new Promise<never>(() => undefined),
+    wait_note: () => waitNoteSample(name),
+  });
+  void startDocumentView(0);
+}
+
+test.each([
+  ["withSize", "Showing a.md (100 MB) ..."],
+  ["withoutSize", "Showing a.md ..."],
+])(
+  "the app's wait note %s names the document's file while it is on its way",
+  async (name, text) => {
+    startWaitingWith(name);
+
+    await vi.waitFor(() => {
+      expect(shownWaitNote()?.textContent).toBe(text);
+    });
+    expect(shownWaitNote()?.querySelector("strong")?.textContent).toBe(
+      waitNoteSample(name)?.file.name,
+    );
+  },
+);
+
+test("the app's wait note for a window with no document shows nothing", async () => {
+  startWaitingWith("noDocument");
+
+  await vi.waitFor(() => {
+    expect(askedOfTheApp()).toContain("wait_note");
+  });
+  await settle();
+  expect(shownWaitNote()).toBeNull();
+});
 
 // `messages.json`
 

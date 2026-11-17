@@ -52,6 +52,14 @@ _Avoid_: Visit, session, generation
 A document's file turned into the sanitized HTML the page shows. Only the core makes one.
 _Avoid_: Output, HTML string
 
+**Wait note**:
+What a window shows while its document takes longer than half a second to arrive, as a large one does: "Showing **a.md** (100 MB) ...", the file's name and size, until the document replaces it. Every document is shown, however large.
+_Avoid_: Spinner, loading screen, progress
+
+**Highlight limit**:
+How much code a document has highlighted. A code block that is too large or has a line too long shows as plain code, as GitHub shows a large file, and so does every block after the document's code has used up the limit, in size or in time.
+_Avoid_: Highlight budget
+
 **Line number**:
 The line of the file where a rendered block starts, shown in the margin. The rendered page has no line numbers of its own.
 _Avoid_: Row, source line

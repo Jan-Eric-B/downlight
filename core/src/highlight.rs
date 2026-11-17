@@ -8,7 +8,8 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::{self, Write};
 use std::str::FromStr;
-use std::sync::LazyLock;
+use std::sync::{LazyLock, Mutex, PoisonError};
+use std::time::{Duration, Instant};
 
 use comrak::adapters::SyntaxHighlighterAdapter;
 use comrak::html::{escape, write_opening_tag};
@@ -138,9 +139,91 @@ pub(crate) fn is_highlight_class(class: &str) -> bool {
         .any(|(_, rule_class)| *rule_class == Some(class))
 }
 
+/// How much code a render highlights (glossary: Highlight limit); code beyond it shows plain, as
+/// GitHub shows a large file. Highlighting holds up the render thread and so first paint: bat's
+/// slowest grammars take over 20 s for a MB of code, the median one about 1 s (ticket 31's
+/// Results, from `tests/highlight_cost.rs`).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct HighlightLimit {
+    /// The largest code block highlighted, in bytes.
+    pub(crate) block: usize,
+    /// The longest line a highlighted block may have, in bytes. The time limit is looked at
+    /// between lines, so this bounds how far one line can run past it; minified code shows plain.
+    pub(crate) line: usize,
+    /// How many bytes of code one document highlights in all; the blocks after them show plain,
+    /// so a large document's code turns plain at the same place on every machine.
+    pub(crate) document: usize,
+    /// How long one document's highlighting may take, for a slow grammar or input it backtracks
+    /// on. A block it runs out in shows plain, as do the blocks after.
+    pub(crate) time: Duration,
+}
+
+/// 512 KB of code is about three times what the 1 MB test document has, and the 1.5 s leave a
+/// 1 MB document room to be fully shown within the spec's 2 s. A debug build, which the tests and
+/// `npm run tauri dev` run, highlights many times slower, compiling a grammar's patterns too, so
+/// its time is longer by as much: otherwise the rendered fixtures would turn plain on a slow day.
+pub(crate) const HIGHLIGHT_LIMIT: HighlightLimit = HighlightLimit {
+    block: 128 * 1024,
+    line: 4 * 1024,
+    document: 512 * 1024,
+    time: Duration::from_millis(if cfg!(debug_assertions) { 30_000 } else { 1500 }),
+};
+
 /// comrak's highlighter plugin, writing GitHub's classes. Unlike comrak's own syntect adapter, it
-/// keeps comrak's attributes on `pre` and `code`: the line number and the language class.
-pub(crate) struct GithubHighlighter;
+/// keeps comrak's attributes on `pre` and `code`: the line number and the language class. One
+/// highlights one document, whose highlight limit it keeps count of.
+pub(crate) struct GithubHighlighter {
+    limit: HighlightLimit,
+    budget: Mutex<Budget>,
+}
+
+/// What is left of a document's highlight limit.
+struct Budget {
+    bytes: usize,
+    time: Duration,
+}
+
+impl GithubHighlighter {
+    /// A highlighter for one document, within `limit`: [`HIGHLIGHT_LIMIT`], or a test's own,
+    /// since a test build highlights many times slower than the app's.
+    pub(crate) fn within(limit: HighlightLimit) -> Self {
+        Self {
+            limit,
+            budget: Mutex::new(Budget {
+                bytes: limit.document,
+                time: limit.time,
+            }),
+        }
+    }
+
+    /// `code` highlighted in `syntax`, or None when the highlight limit leaves it plain: a block
+    /// too large or with a line too long, or one beyond what the document may highlight. Once the
+    /// document's limit is spent, every block after shows plain, so plain code starts at one
+    /// place rather than here and there.
+    fn highlighted_within_limit(&self, code: &str, syntax: &SyntaxReference) -> Option<String> {
+        if code.len() > self.limit.block || code.lines().any(|line| line.len() > self.limit.line) {
+            return None;
+        }
+        // comrak writes one block at a time, so the lock is never waited for, and the count in a
+        // poisoned one is still good.
+        let mut budget = self.budget.lock().unwrap_or_else(PoisonError::into_inner);
+        let Some(bytes_left) = budget.bytes.checked_sub(code.len()) else {
+            budget.bytes = 0;
+            return None;
+        };
+        let started = Instant::now();
+        let html = highlighted(code, syntax, started + budget.time);
+        // A block its grammar can't parse shows plain, and spends only the time it took.
+        if html.is_some() {
+            budget.bytes = bytes_left;
+        }
+        budget.time = budget.time.saturating_sub(started.elapsed());
+        if budget.time.is_zero() {
+            budget.bytes = 0;
+        }
+        html
+    }
+}
 
 impl SyntaxHighlighterAdapter for GithubHighlighter {
     fn write_highlighted(
@@ -157,7 +240,7 @@ impl SyntaxHighlighterAdapter for GithubHighlighter {
         let syntax = (!token.is_empty())
             .then(|| SYNTAXES.find_syntax_by_token(token))
             .flatten();
-        let highlighted = syntax.and_then(|syntax| highlighted(code, syntax));
+        let highlighted = syntax.and_then(|syntax| self.highlighted_within_limit(code, syntax));
         match highlighted {
             Some(html) => output.write_str(&html),
             None => escape(output, code),
@@ -182,13 +265,16 @@ impl SyntaxHighlighterAdapter for GithubHighlighter {
 }
 
 /// `code` as HTML with a span for each run of text in one class, or None if its grammar can't
-/// parse a line, so the block shows plain.
-fn highlighted(code: &str, syntax: &SyntaxReference) -> Option<String> {
+/// parse a line or it isn't done by `until`, so the block shows plain.
+fn highlighted(code: &str, syntax: &SyntaxReference, until: Instant) -> Option<String> {
     let highlighter = Highlighter::new(&THEME);
     let mut parse_state = ParseState::new(syntax);
     let mut highlight_state = HighlightState::new(&highlighter, ScopeStack::new());
     let mut html = Spans::with_capacity(code.len() * 2);
     for line in LinesWithEndings::from(code) {
+        if Instant::now() >= until {
+            return None;
+        }
         let changes = parse_state.parse_line(line, &SYNTAXES).ok()?;
         for (style, text) in
             HighlightIterator::new(&mut highlight_state, &changes, line, &highlighter)
@@ -240,10 +326,12 @@ impl Spans {
 #[cfg(test)]
 mod tests {
     use std::path::Path;
+    use std::time::Duration;
 
-    use super::{RULES, THEME};
+    use super::{HIGHLIGHT_LIMIT, HighlightLimit, RULES, THEME};
     use crate::files::fake::FakeFiles;
     use crate::render;
+    use crate::render::render_within;
 
     fn html_of(markdown: &str) -> String {
         render(
@@ -336,6 +424,103 @@ mod tests {
         // comrak ends the block's lines with `\n`, and its last line too.
         let expected = format!("{}\n", code.replace("\r\n", "\n"));
         assert_eq!(text_of_code(&html), expected, "{html}");
+    }
+
+    /// A highlight limit small enough for a test build, which highlights many times slower than
+    /// the app, and with time enough that only its sizes count.
+    const TEST_LIMIT: HighlightLimit = HighlightLimit {
+        block: 2048,
+        line: 100,
+        document: 8192,
+        time: Duration::from_secs(60),
+    };
+
+    fn html_within(markdown: &str, limit: HighlightLimit) -> String {
+        render_within(
+            markdown.as_bytes(),
+            Path::new("README.md"),
+            "http://image.localhost",
+            FakeFiles::default(),
+            limit,
+        )
+        .as_str()
+        .to_owned()
+    }
+
+    /// `lines` lines of Rust, each `line_size` bytes long without its line ending.
+    fn rust_lines(lines: usize, line_size: usize) -> String {
+        let line = format!("let a = 1; // {}\n", "x".repeat(line_size - 14));
+        line.repeat(lines)
+    }
+
+    /// A Rust code block of `code`.
+    fn rust_block(code: &str) -> String {
+        format!("```rust\n{code}```\n\n")
+    }
+
+    /// Whether each of the document's code blocks is highlighted, in order.
+    fn highlighted_blocks(html: &str) -> Vec<bool> {
+        html.split("<pre ")
+            .skip(1)
+            .map(|block| block.contains(r#"<span class="pl-k">let</span>"#))
+            .collect()
+    }
+
+    #[test]
+    fn code_block_over_the_highlight_limit_shows_as_plain_code() {
+        // 20 lines of 101 bytes fit in 2048, 21 don't.
+        let html = html_within(
+            &[rust_lines(20, 100), rust_lines(21, 100)]
+                .map(|code| rust_block(&code))
+                .concat(),
+            TEST_LIMIT,
+        );
+        assert_eq!(highlighted_blocks(&html), [true, false]);
+    }
+
+    #[test]
+    fn code_block_over_the_apps_highlight_limit_shows_as_plain_code_with_its_text() {
+        let code = rust_lines(HIGHLIGHT_LIMIT.block / 100 + 1, 100);
+        let html = html_of(&rust_block(&code));
+        assert!(!html.contains("<span"), "{}", &html[..200]);
+        assert_eq!(text_of_code(&html), code);
+    }
+
+    #[test]
+    fn code_block_with_a_line_over_the_highlight_limit_shows_as_plain_code() {
+        // The shape of minified code; the block is small, but one line is too long.
+        let one_line_over = format!("let a = 1;\n{}", rust_lines(1, 101));
+        let html = html_within(&rust_block(&one_line_over), TEST_LIMIT);
+        assert_eq!(highlighted_blocks(&html), [false]);
+        assert_eq!(text_of_code(&html), one_line_over);
+    }
+
+    #[test]
+    fn code_blocks_after_the_documents_highlight_limit_is_spent_show_as_plain_code() {
+        // Four blocks of 2020 bytes fit in 8192, a fifth doesn't, and the small one after it
+        // shows plain too, so plain code starts at one place.
+        let mut blocks = vec![rust_lines(20, 100); 5];
+        blocks.push(rust_lines(1, 100));
+        let markdown = blocks
+            .iter()
+            .map(|code| rust_block(code))
+            .collect::<String>();
+        let html = html_within(&markdown, TEST_LIMIT);
+        assert_eq!(
+            highlighted_blocks(&html),
+            [true, true, true, true, false, false]
+        );
+    }
+
+    #[test]
+    fn code_blocks_show_as_plain_code_once_the_documents_highlight_time_is_spent() {
+        let spent = HighlightLimit {
+            time: Duration::ZERO,
+            ..TEST_LIMIT
+        };
+        let markdown = [rust_lines(1, 100), rust_lines(1, 100)].map(|code| rust_block(&code));
+        let html = html_within(&markdown.concat(), spent);
+        assert_eq!(highlighted_blocks(&html), [false, false]);
     }
 
     /// The text of the first `code` element, as the page's `textContent` gives it.

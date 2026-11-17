@@ -36,6 +36,13 @@ export type Steps = Record<Step, boolean>;
 export type DocumentFile = { name: string; path: string };
 
 /**
+ * What the wait note names while the window's document is on its way (`WaitNote` in
+ * `app/src/documents/handover.rs`, ticket 31): the document's file, and its size as the reader
+ * is told it, such as "100 MB", or null when it can't be told.
+ */
+export type WaitNote = { file: DocumentFile; size: string | null };
+
+/**
  * A file or folder a notice names (`NamedFile` in `app/src/notice.rs`, window design ticket 11):
  * its name, shown in bold, and its folder after it, or null for a drive's root. The folder opens
  * from the notice (`open_named_folder`) when `folderOpens`: the file is missing and its folder is
@@ -262,6 +269,11 @@ export type Commands = {
     args: { showing: number | null };
     answer: DocumentToShow;
   };
+  /**
+   * What the wait note names, asked for when `render_document` hasn't answered within half a
+   * second; null while the window shows no document.
+   */
+  wait_note: { args: undefined; answer: WaitNote | null };
   follow_link: {
     /**
      * The showing whose document the link is in, the link target as the document wrote it, and

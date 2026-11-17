@@ -44,7 +44,7 @@ mod show;
 mod watching;
 
 #[cfg(test)]
-pub use handover::contract_samples;
+pub use handover::{contract_samples, wait_note_samples};
 use history::History;
 pub use place::{Area, Point, WindowPlace, WindowSize};
 pub use show::{NewWindow, ShowError, WindowError, Windows};

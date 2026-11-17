@@ -18,12 +18,14 @@ import {
   saveTheFile,
   scrollAsTheApp,
   settle,
+  shownWaitNote,
   spyOnHeadingScrolls,
   spyOnScrollsToTop,
   tell,
   type AtHeading,
   type Read,
 } from "./test-support";
+import type { WaitNote } from "./app";
 import { afterNextFrame } from "./reading-position";
 import {
   requestDocument,
@@ -50,6 +52,12 @@ let documents: (Read | NoAnswer)[] = [];
 /** The page's text when it asked the app to show its window, or undefined until then. */
 let textWhenShown: string | undefined;
 
+/** What the fake app's wait note names. */
+const BIG_DOCUMENT: WaitNote = {
+  file: { name: "big.md", path: "C:\\docs\\big.md" },
+  size: "100 MB",
+};
+
 beforeEach(() => {
   mockWindows("document-0");
   documents = [];
@@ -59,6 +67,7 @@ beforeEach(() => {
       textWhenShown = document.body.textContent;
       return null;
     },
+    wait_note: () => BIG_DOCUMENT,
     render_document: (args) => {
       const next = nextInTurn(documents);
       if (typeof next === "object")
@@ -182,6 +191,85 @@ test("a window whose document can't be read shows once it says why", async () =>
   await vi.waitFor(() => {
     expect(textWhenShown).toContain("Can't read C:\\docs\\gone.md");
   });
+});
+
+/** A read that gives the HTML the test sends through the function it hands `send`. */
+function readSentLater(send: (deliver: (html: string) => void) => void): Read {
+  return () =>
+    new Promise((resolve) => {
+      send(resolve);
+    });
+}
+
+test("a document that takes longer than half a second to arrive shows a wait note naming its file and size", async () => {
+  let deliver: (html: string) => void = () => {};
+  documents = [readSentLater((send) => (deliver = send))];
+  void startDocumentView(0);
+
+  await vi.waitFor(() => {
+    expect(shownWaitNote()?.textContent).toBe("Showing big.md (100 MB) ...");
+  });
+  expect(shownWaitNote()?.querySelector("strong")?.textContent).toBe("big.md");
+  expect(shownWaitNote()?.getAttribute("role")).toBe("status");
+  deliver(readme);
+  await vi.waitFor(() => {
+    expect(document.querySelector("article")?.textContent).toContain(
+      "Lamplighter",
+    );
+  });
+  expect(shownWaitNote()).toBeNull();
+});
+
+test("a window whose document is slow to arrive shows with the wait note rather than staying hidden", async () => {
+  let deliver: (html: string) => void = () => {};
+  documents = [readSentLater((send) => (deliver = send))];
+  void startDocumentView(0);
+
+  await vi.waitFor(() => {
+    expect(textWhenShown).toContain("Showing big.md (100 MB) ...");
+  });
+  deliver(readme);
+  await settle();
+  expect(askedOfTheApp().filter((c) => c === "show_window")).toHaveLength(1);
+});
+
+test("a document that arrives within half a second shows no wait note", async () => {
+  documents = [
+    () =>
+      new Promise((resolve) => {
+        setTimeout(() => {
+          resolve(readme);
+        }, 100);
+      }),
+  ];
+  await startDocumentView(0);
+  await new Promise((resolve) => setTimeout(resolve, 600));
+
+  expect(askedOfTheApp()).not.toContain("wait_note");
+  expect(shownWaitNote()).toBeNull();
+});
+
+test("a document given while another is in view shows the wait note over it until it arrives", async () => {
+  let deliver: (html: string) => void = () => {};
+  documents = [
+    () => Promise.resolve(readme),
+    readSentLater((send) => (deliver = send)),
+  ];
+  await startDocumentView(0);
+  await settle();
+
+  await giveAnotherDocument();
+  await vi.waitFor(() => {
+    expect(shownWaitNote()).not.toBeNull();
+  });
+  expect(document.querySelector("article")?.textContent).toContain(
+    "Lamplighter",
+  );
+  deliver(notes);
+  await vi.waitFor(() => {
+    expect(heading()).toBe("Field notes");
+  });
+  expect(shownWaitNote()).toBeNull();
 });
 
 /** The element the document scrolls in, below the title bar. */

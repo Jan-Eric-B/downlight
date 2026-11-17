@@ -1,0 +1,17 @@
+{
+  "noDocument": null,
+  "withSize": {
+    "file": {
+      "name": "a.md",
+      "path": "C:\\docs\\a.md"
+    },
+    "size": "100 MB"
+  },
+  "withoutSize": {
+    "file": {
+      "name": "a.md",
+      "path": "C:\\docs\\a.md"
+    },
+    "size": null
+  }
+}

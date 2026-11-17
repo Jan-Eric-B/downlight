@@ -13,6 +13,7 @@ import renderDocumentSamples from "../../app/tests/fixtures/render_document.json
 import settingChangeSamplesJson from "../../app/tests/fixtures/setting_changes.json?raw";
 import timingReportSamples from "../../app/tests/fixtures/timing_reports.json?raw";
 import titleBarSamples from "../../app/tests/fixtures/title_bar.json?raw";
+import waitNoteSamples from "../../app/tests/fixtures/wait_note.json?raw";
 import type {
   AnswerOf,
   ArgsOf,
@@ -31,6 +32,7 @@ import type {
   Place,
   ReloadMarks,
   SettingChange,
+  WaitNote,
 } from "./app";
 import { SCROLLER_SELECTOR, whenDocumentShown } from "./view";
 import { ZOOM_VARIABLE } from "./zoom";
@@ -168,6 +170,11 @@ function sampleIn(json: string, name: string): unknown {
 /** A sample of the app's answers to `render_document`, by name. */
 export function renderDocumentSample(name: string): DocumentToShow {
   return sampleIn(renderDocumentSamples, name) as DocumentToShow;
+}
+
+/** A sample of the app's answers to `wait_note`, by name. */
+export function waitNoteSample(name: string): WaitNote | null {
+  return sampleIn(waitNoteSamples, name) as WaitNote | null;
 }
 
 /** A sample of the app's answers to `follow_link`, by name. */
@@ -446,6 +453,12 @@ export function emptyWindow(): HTMLElement | null {
 /** The 'File deleted or moved' bar over the document. */
 export function goneBar(): HTMLElement | null {
   return document.querySelector<HTMLElement>(".file-gone");
+}
+
+/** The wait note, which says the window's document is on its way (ticket 31), while it shows. */
+export function shownWaitNote(): HTMLElement | null {
+  const note = document.querySelector<HTMLElement>(".wait-note");
+  return note && !note.hidden ? note : null;
 }
 
 /**

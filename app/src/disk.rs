@@ -1,8 +1,9 @@
 //! The file system the core's link resolution and local images look at, since the core reads no
 //! files: whether a path is a file or a folder, what a link along it points to, and when a file was
-//! last saved.
+//! last saved. And reading a local image's file only if it isn't pathologically large (ticket 31).
 
-use std::io;
+use std::fs::File;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -45,11 +46,47 @@ impl FileSystem for Disk {
     }
 }
 
+/// Reads the file at `path` whole if it is no larger than `largest` bytes, and otherwise fails
+/// with [`io::ErrorKind::FileTooLarge`] having read no more of it than that. A failed allocation
+/// aborts the process, which closes every window (ADR 0001), so a file of many GB must never be
+/// read whole: a downloaded archive can carry one that compresses to almost nothing.
+pub fn read_no_larger_than(path: &Path, largest: u64) -> io::Result<Vec<u8>> {
+    let file = File::open(path)?;
+    let size = file.metadata()?.len();
+    if size > largest {
+        return Err(io::ErrorKind::FileTooLarge.into());
+    }
+    read_up_to(file, size, largest)
+}
+
+/// Reads `reader` to its end, if that comes within `largest` bytes. The file's `size` said it
+/// would, but a file can grow while it is read, or be a device that never ends, so the read stops
+/// one byte past `largest` whatever the size said.
+fn read_up_to(reader: impl Read, size: u64, largest: u64) -> io::Result<Vec<u8>> {
+    let mut bytes = Vec::with_capacity(usize::try_from(size).unwrap_or(0));
+    reader
+        .take(largest.saturating_add(1))
+        .read_to_end(&mut bytes)?;
+    if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > largest {
+        return Err(io::ErrorKind::FileTooLarge.into());
+    }
+    Ok(bytes)
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
 
     use super::*;
+
+    #[test]
+    fn read_of_a_file_that_never_ends_stops_past_the_largest_size() {
+        let read = read_up_to(io::repeat(b'#'), 0, 1024);
+        assert_eq!(
+            read.map_err(|error| error.kind()),
+            Err(io::ErrorKind::FileTooLarge)
+        );
+    }
 
     /// A folder of its own under the temp folder, empty.
     fn temp_folder(test: &str) -> PathBuf {

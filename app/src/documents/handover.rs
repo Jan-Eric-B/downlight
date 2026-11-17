@@ -194,6 +194,86 @@ enum Content {
     Error(Notice),
 }
 
+/// What the page's wait note names while the window's document is on its way (ticket 31): the
+/// document's file, and its size as the reader is told it, or None when it can't be told. Every
+/// document is shown however large, and a large one takes seconds to read, render and lay out,
+/// so the note says it is coming.
+#[derive(Debug, serde::Serialize)]
+pub struct WaitNote {
+    file: DocumentFile,
+    size: Option<String>,
+}
+
+impl WaitNote {
+    /// The note for the document at `path`. Looks at the file system, so it is made on a blocking
+    /// thread.
+    fn of(path: &Path) -> Self {
+        Self {
+            file: DocumentFile::of(path),
+            size: std::fs::metadata(path)
+                .ok()
+                .map(|metadata| size_shown(metadata.len())),
+        }
+    }
+}
+
+/// A file's size as the reader is told it, in Explorer's units: whole KB, then MB and GB, with
+/// one decimal below 10.
+fn size_shown(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = 1024 * KB;
+    const GB: u64 = 1024 * MB;
+    let (unit, name) = match bytes {
+        ..MB => return format!("{} KB", bytes.div_ceil(KB)),
+        MB..GB => (MB, "MB"),
+        GB.. => (GB, "GB"),
+    };
+    // As f64 only to be shown, where a file of over 2^53 bytes losing its last bytes is no loss.
+    #[allow(clippy::cast_precision_loss)]
+    let size = bytes as f64 / unit as f64;
+    if size < 10.0 {
+        format!("{size:.1} {name}")
+    } else {
+        format!("{size:.0} {name}")
+    }
+}
+
+/// What the page's wait note names for the calling window's document, or None while it shows
+/// none. The page asks when `render_document` hasn't answered within half a second. The path
+/// comes from the app's own state, as for every command; the file's size is looked at on a
+/// blocking thread, since a file on a share can take a while to answer.
+#[tauri::command]
+pub async fn wait_note(
+    window: WebviewWindow,
+    documents: State<'_, Documents>,
+) -> Result<Option<WaitNote>, ()> {
+    let Some(path) = documents.document_path(window.label()) else {
+        return Ok(None);
+    };
+    // A blocking task that stopped leaves the note unsaid; the document still comes.
+    Ok(
+        tauri::async_runtime::spawn_blocking(move || WaitNote::of(&path))
+            .await
+            .ok(),
+    )
+}
+
+/// A sample of each answer [`wait_note`] gives, by name, which the page's tests read
+/// (`app/src/contract.rs`): with the document's size, without it, and for a window with no
+/// document.
+#[cfg(test)]
+pub fn wait_note_samples() -> serde_json::Result<serde_json::Value> {
+    let file = || DocumentFile {
+        name: "a.md".to_owned(),
+        path: r"C:\docs\a.md".to_owned(),
+    };
+    Ok(serde_json::json!({
+        "withSize": serde_json::to_value(WaitNote { file: file(), size: Some("100 MB".to_owned()) })?,
+        "withoutSize": serde_json::to_value(WaitNote { file: file(), size: None })?,
+        "noDocument": serde_json::to_value(None::<WaitNote>)?,
+    }))
+}
+
 /// A sample of each answer [`render_document`] gives, by name, which the page's tests read
 /// (`app/src/contract.rs`, ticket 27): the rendered document goes as its HTML, the heading only
 /// with a show, a read that fails as why, the document's file with each, a held notice with the
@@ -272,4 +352,61 @@ pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
         "unreadReload": answer(Place::Reload, unread())?,
         "noDocument": serde_json::to_value(None::<DocumentToShow>)?,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+
+    /// A folder of its own under the temp folder, empty.
+    fn temp_folder(test: &str) -> PathBuf {
+        let folder =
+            std::env::temp_dir().join(format!("downlight-handover-{}-{test}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).unwrap();
+        folder
+    }
+
+    #[test]
+    fn wait_note_names_the_documents_file_and_its_size() {
+        let folder = temp_folder("sized");
+        let path = folder.join("big.md");
+        std::fs::write(&path, vec![b'#'; 2 * 1024 * 1024 + 300 * 1024]).unwrap();
+        let note = serde_json::to_value(WaitNote::of(&path)).unwrap();
+        std::fs::remove_dir_all(&folder).unwrap();
+        assert_eq!(
+            note,
+            serde_json::json!({
+                "file": { "name": "big.md", "path": path.display().to_string() },
+                "size": "2.3 MB",
+            })
+        );
+    }
+
+    #[test]
+    fn wait_note_for_a_file_whose_size_cant_be_told_names_no_size() {
+        let folder = temp_folder("gone");
+        let note = WaitNote::of(&folder.join("gone.md"));
+        std::fs::remove_dir_all(&folder).unwrap();
+        assert_eq!(
+            serde_json::to_value(note).unwrap()["size"],
+            serde_json::Value::Null
+        );
+    }
+
+    #[test]
+    fn sizes_are_told_in_explorers_units() {
+        for (bytes, shown) in [
+            (1, "1 KB"),
+            (1024, "1 KB"),
+            (1025, "2 KB"),
+            (1024 * 1024, "1.0 MB"),
+            (15 * 1024 * 1024 + 600 * 1024, "16 MB"),
+            (5 * 1024 * 1024 * 1024, "5.0 GB"),
+        ] {
+            assert_eq!(size_shown(bytes), shown, "{bytes}");
+        }
+    }
 }

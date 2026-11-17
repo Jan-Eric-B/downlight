@@ -6,7 +6,7 @@ use comrak::{Arena, Options, format_html_with_plugins, parse_document};
 
 use crate::decode::decode;
 use crate::files::FileSystem;
-use crate::highlight::GithubHighlighter;
+use crate::highlight::{GithubHighlighter, HIGHLIGHT_LIMIT, HighlightLimit};
 use crate::image::ImageSources;
 use crate::sanitize::{drop_filtered_tags, sanitize};
 
@@ -45,11 +45,27 @@ impl serde::Serialize for RenderedDocument {
 /// `http://image.localhost`. A local image's URL names when its file was last saved, as `files`
 /// tells it, so that a render after the file changed loads it anew while an unchanged one keeps
 /// its URL and the page shows it from memory (ticket 32). Markdown is the only format in v1.
+///
+/// Code blocks with a language are highlighted within the highlight limit: a block too large or
+/// with a line too long, and every block after the document's code used up the limit, shows as
+/// plain code (ticket 31).
 pub fn render(
     bytes: &[u8],
     path: &Path,
     image_origin: &str,
     files: impl FileSystem + Send + 'static,
+) -> RenderedDocument {
+    render_within(bytes, path, image_origin, files, HIGHLIGHT_LIMIT)
+}
+
+/// [`render`] within a highlight limit of the caller's, so a test can render at the limits
+/// without highlighting as much code as the app's limit allows.
+pub(crate) fn render_within(
+    bytes: &[u8],
+    path: &Path,
+    image_origin: &str,
+    files: impl FileSystem + Send + 'static,
+    highlight_limit: HighlightLimit,
 ) -> RenderedDocument {
     let text = decode(bytes);
     let options = github_options();
@@ -59,7 +75,8 @@ pub fn render(
     keep_line_numbers_on_blocks_only(root);
     drop_filtered_tags(root);
     let mut plugins = Plugins::default();
-    plugins.render.codefence_syntax_highlighter = Some(&GithubHighlighter);
+    let highlighter = GithubHighlighter::within(highlight_limit);
+    plugins.render.codefence_syntax_highlighter = Some(&highlighter);
     let mut html = String::new();
     // Writing to a String never fails, so there is no error to pass on.
     let _ = format_html_with_plugins(root, &options, &mut html, &plugins);

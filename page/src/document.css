@@ -265,6 +265,24 @@ article.markdown-body {
   display: none;
 }
 
+/* The wait note (view.ts, ticket 31): a document that takes over half a second to arrive is on its
+   way. Like the bar above it stays at the top, over the document the window shows meanwhile, if
+   any, on a solid background. */
+.wait-note {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  max-width: none;
+  padding: 8px 32px;
+  border-bottom: 1px solid var(--borderColor-default);
+  background: var(--bgColor-default);
+  color: var(--fgColor-muted);
+}
+
+.wait-note[hidden] {
+  display: none;
+}
+
 /* A short message at the bottom of the window, such as why a dropped file didn't open. It sits on
    a solid background, since the document may be under it. */
 .notice {
