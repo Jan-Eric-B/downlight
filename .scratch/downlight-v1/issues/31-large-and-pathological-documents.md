@@ -152,10 +152,34 @@ Decisions taken with a default, for the owner to overrule:
 
 Hand checks for the owner:
 
-- Open a 20 MB and a 100 MB document from the file manager (`npm run documents` writes `target/documents/mixed-20mb.md` and `mixed-100mb.md`). The window should appear within about 2 s with "Showing **mixed-100mb.md** (100 MB) ...", stay still while the page takes the document in, and then show the document in place of the note.
+- Run `npm run documents -- large` first, which writes `target/documents/mixed-20mb.md` and `mixed-100mb.md` (about 375 MB of large documents in all). Then open the 20 MB and the 100 MB document from the file manager. The window should appear within about 2 s with "Showing **mixed-100mb.md** (100 MB) ...", stay still while the page takes the document in, and then show the document in place of the note.
 - Follow a link to a large document from a small one: the note shows over the small document until the large one replaces it.
 - A document with a code block over 128 KB in a slow grammar (TypeScript) shows that block as plain code, and the blocks before it highlighted.
 - A local image larger than 256 MB shows as missing (its alt text) and the window stays open; a normal large image (20 to 100 MB) loads.
 - Measure the 100 KB first paint again on an idle machine (`npm run measure`): this session's 1040 ms came with a loaded machine.
 
 **2026-11-17, decided by the repo owner.** A reload shows no wait note: the note shows only while the window has no document yet or waits for a different one (a link, Open, a drop, Back or Forward). A reload keeps the document in view untouched until the new one replaces it. To be built with the review fixes.
+
+**2026-11-17, review fixes (images and tooling).** What changed and where:
+
+- The bounded read of a local image moved from `app/src/disk.rs` into the image scheme, `app/src/image.rs`, as the private `read_no_larger_than` and `read_up_to`, with its test `read_of_a_file_that_never_ends_stops_past_the_largest_size`. The image scheme is its only caller, and `disk.rs` is again only the core's `FileSystem` on this computer's disk.
+- `image_larger_than_the_largest_served_is_not_served_and_not_read_whole` is now `image_larger_than_the_largest_served_is_not_served`: it checks the Not Found. The bounded read is proven by `read_of_a_file_that_never_ends_stops_past_the_largest_size`.
+- The large documents are opt-in. `npm run documents` writes the 100 KB and 1 MB documents as before. `npm run documents -- large` also writes the 5, 20 and 100 MB ones, about 375 MB, and `npm run measure -- large` writes them before it measures (`scripts/generate-documents.js`, CLAUDE.md).
+- `scripts/measure.js` waits for leftover Downlight processes once before the first run, then only at the end of each run. It reads the app's identifier from `app/tauri.conf.json` instead of keeping its own copy.
+- `core/tests/highlight_cost.rs` says how to measure with the highlight limit lifted: raise `HIGHLIGHT_LIMIT`'s `block`, `line` and `time` in `core/src/highlight.rs` for the run, and set the test's sizes to match. It also says that its block and line sizes must stay just under the limit's. Its empty file system is shared with the rendered fixtures' test through `core/tests/common/mod.rs`.
+- Nothing the reader sees changed. The rendered fixtures are the same.
+
+**2026-11-17, review fixes (wait note).** What changed and where:
+
+- **A reload shows no wait note** (the owner's decision above). The page can't tell a reload from a show until the answer comes, so the app tells it, as it decides the place. The page's `wait_note` request now names the showing its slow request named, and the app (`Documents::awaited_file` in `app/src/documents/handover.rs`) names nothing when the window is still at that showing, which is a reload. The document in view then stays untouched until the new render replaces it. A first show, a link, Open, a drop, Back and Forward still show the note. GLOSSARY's Wait note says so.
+- **The page's wait note is a module of its own**, `page/src/wait-note.ts`. `createWaitNote()` gives the note's element, `during` for each request (the half-second timer and the app's `wait_note`), `hide` once the latest request ends, and `shown` the first time it shows. `startDocumentView` in `page/src/view.ts` keeps none of the note's state.
+- **The window shows by one path.** Two waits race: the frame after the document, the empty state or the error (which marks first paint), and the frame after the wait note. The window shows when the first of them comes. The behaviour is as before.
+- **A size that rounds up to 10 drops its decimal**, so a file just under 10 MB is "10 MB", not "10.0 MB" (`size_shown`).
+- **The view's tests are split by feature:** `page/src/first-show.test.ts`, `page/src/wait-note.test.ts` and `page/src/reload.test.ts` beside `page/src/view.test.ts` (1027 lines down to 657). The fake app they share is `fakeTheAppReading` in `page/src/test-support.ts`. The wait note tests, and the wait note contract tests, let the half second pass on fake timers rather than the clock, so a loaded machine can't make them late.
+- **Tests.** Added, each written before its code: in `app/src/documents/tests/handover.rs`, `wait_note_names_the_document_a_page_waits_for`, `reload_has_no_wait_note` and `window_without_a_document_has_no_wait_note`; a case just under 10 MB and one just under 10 GB in `sizes_are_told_in_explorers_units`; in `page/src/wait-note.test.ts`, a reload slower than half a second shows no wait note and keeps the document in view. Moved with their names and assertions: the window's first show tests, the wait note tests, and the reload and reading position tests. Changed for the interfaces they drive: the fake app answers `wait_note` as the app does, with nothing for a reload; the page's text when its window showed is read through the shared fake app; the wait note tests advance fake timers instead of waiting the real half second.
+
+The default "The wait note shows for any request slower than 500 ms, a reload too" is overruled by the owner's decision above, and the Results' note of a wait note during a 1 MB reload describes the build before it.
+
+New hand check:
+
+- Open a 20 MB document and wait until it shows, then save it from the editor: no wait note shows during the reload, and the document stays in view, still and at its reading position, until the new render replaces it.

@@ -53,7 +53,7 @@ A document's file turned into the sanitized HTML the page shows. Only the core m
 _Avoid_: Output, HTML string
 
 **Wait note**:
-What a window shows while its document takes longer than half a second to arrive, as a large one does: "Showing **a.md** (100 MB) ...", the file's name and size, until the document replaces it. Every document is shown, however large.
+What a window shows while its document takes longer than half a second to arrive, as a large one does: "Showing **a.md** (100 MB) ...", the file's name and size, until the document replaces it. A reload shows none: the document in view stays until its new render replaces it. Every document is shown, however large.
 _Avoid_: Spinner, loading screen, progress
 
 **Highlight limit**:
