@@ -1,6 +1,8 @@
 // Writes the test documents that performance is measured on (ticket 02) to target/documents/:
 // 100 KB and 1 MB of Markdown with a table and a code block about every 30 lines, a second
-// 100 KB document of that kind for a further window, and 1 MB of prose only. The text is
+// 100 KB document of that kind for a further window, and 1 MB of prose only. The large documents
+// (ticket 31) are 5, 20 and 100 MB of each kind, for choosing the size limits; `npm run measure`
+// writes them only for `npm run measure -- large`, since they take a while. The text is
 // pseudo-random from a fixed seed, so every run writes the same files.
 
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -17,6 +19,13 @@ export const DOCUMENTS = {
   mixed1mb: join(DOCUMENTS_FOLDER, "mixed-1mb.md"),
   prose1mb: join(DOCUMENTS_FOLDER, "prose-1mb.md"),
 };
+
+/** The large documents, each size as mixed and as prose. */
+export const LARGE_DOCUMENTS = [5, 20, 100].map((mb) => ({
+  mb,
+  mixed: join(DOCUMENTS_FOLDER, `mixed-${mb}mb.md`),
+  prose: join(DOCUMENTS_FOLDER, `prose-${mb}mb.md`),
+}));
 
 const WORDS = (
   "the a reader window document file viewer render page line block heading table code list " +
@@ -146,15 +155,21 @@ function generate(size, seed, block) {
   return lines.join("\n");
 }
 
-export function writeDocuments() {
+/** Writes the test documents, and the large ones too when `large`. */
+export function writeDocuments({ large = false } = {}) {
   mkdirSync(DOCUMENTS_FOLDER, { recursive: true });
   writeFileSync(DOCUMENTS.mixed100kb, generate(100 * KB, 1, mixedSection));
   writeFileSync(DOCUMENTS.mixed1mb, generate(MB, 2, mixedSection));
   writeFileSync(DOCUMENTS.prose1mb, generate(MB, 3, proseParagraph));
   writeFileSync(DOCUMENTS.mixed100kbOther, generate(100 * KB, 4, mixedSection));
+  if (!large) return;
+  for (const { mb, mixed, prose } of LARGE_DOCUMENTS) {
+    writeFileSync(mixed, generate(mb * MB, 10 + mb, mixedSection));
+    writeFileSync(prose, generate(mb * MB, 20 + mb, proseParagraph));
+  }
 }
 
 if (import.meta.main) {
-  writeDocuments();
+  writeDocuments({ large: true });
   console.log(`Wrote the test documents to ${DOCUMENTS_FOLDER}`);
 }

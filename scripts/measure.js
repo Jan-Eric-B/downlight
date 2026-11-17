@@ -2,14 +2,19 @@
 // (ticket 02): run `npm run tauri build`, then `npm run measure`. Each case starts a new process
 // on the test documents, reads the app's timing reports from stderr, and gives the median of
 // five runs. One run before each case is discarded, so the first start after a build, when
-// Windows scans the new executable, doesn't count.
+// Windows scans the new executable, doesn't count. `npm run measure -- large` measures the 1 MB
+// documents and the large ones instead (ticket 31).
 
 import { execFileSync, spawn } from "node:child_process";
 import { appendFileSync, copyFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { setTimeout as sleep } from "node:timers/promises";
-import { DOCUMENTS, writeDocuments } from "./generate-documents.js";
+import {
+  DOCUMENTS,
+  LARGE_DOCUMENTS,
+  writeDocuments,
+} from "./generate-documents.js";
 
 const EXECUTABLE = join(
   import.meta.dirname,
@@ -20,6 +25,9 @@ const EXECUTABLE = join(
 );
 const RUNS = 5;
 const RUN_TIMEOUT_MS = 20_000;
+// The large documents (`npm run measure -- large`): fewer runs, and longer to wait for each.
+const LARGE_RUNS = 3;
+const LARGE_RUN_TIMEOUT_MS = 180_000;
 // Long tasks and frames after first paint, such as layout that a large document leaves for
 // later, still count; this is how long a run keeps listening after the last first paint.
 const SETTLE_MS = 3_000;
@@ -38,8 +46,9 @@ const RELOAD_DOCUMENT = DOCUMENTS.mixed1mb.replace(/\.md$/, "-reload.md");
  */
 async function run(
   documents,
-  { afterPaint, laterDocuments = [], prepare } = {},
+  { afterPaint, laterDocuments = [], prepare, timeoutMs = RUN_TIMEOUT_MS } = {},
 ) {
+  await untilNoDownlight();
   prepare?.();
   const env = { ...process.env, DOWNLIGHT_TIMING: "1" };
   if (afterPaint) {
@@ -63,14 +72,14 @@ async function run(
     }
   });
   try {
-    const deadline = Date.now() + RUN_TIMEOUT_MS;
+    const deadline = Date.now() + timeoutMs;
     const painted = async (count) => {
       // A window counts once it has painted and been shown.
       const done = (event) => reports.filter((r) => r.event === event).length;
       while (done("first-paint") < count || done("window-shown") < count) {
         if (Date.now() > deadline)
           throw new Error(
-            `No first paint or shown window within ${RUN_TIMEOUT_MS} ms`,
+            `No first paint or shown window within ${timeoutMs} ms`,
           );
         if (child.exitCode !== null)
           throw new Error(`Downlight exited with ${child.exitCode}`);
@@ -87,11 +96,68 @@ async function run(
     await sleep(SETTLE_MS);
     return { reports, memory: memoryOf(child.pid), launches, after };
   } finally {
-    execFileSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
-      stdio: "ignore",
-    });
-    // Lets WebView2 release its user data folder before the next run starts.
-    await sleep(1_000);
+    // taskkill fails when a process in the tree exits while it ends them, which WebView2's do
+    // once their browser process is gone, so its failure says nothing: the wait below checks.
+    try {
+      execFileSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
+        stdio: "ignore",
+      });
+    } catch {
+      // Checked by `untilNoDownlight`.
+    }
+    await untilNoDownlight();
+  }
+}
+
+/** Downlight's user data folder for WebView2 is named after the app's identifier. */
+const APP_IDENTIFIER = "io.github.jan-eric-b.downlight";
+
+/** How long to wait for Downlight and its WebView2 processes to be gone. */
+const GONE_TIMEOUT_MS = 60_000;
+
+/**
+ * Every Downlight process, and every WebView2 process on Downlight's user data folder, whoever
+ * started it: another Downlight process would take a run's launch as a second launch (ADR 0001),
+ * and a WebView2 process still on the folder, such as one shutting down after a run was ended,
+ * makes the next window fail with "The requested resource is in use" in an error box that waits
+ * for a click.
+ */
+function downlightProcesses() {
+  const json = execFileSync(
+    "powershell",
+    [
+      "-NoProfile",
+      "-Command",
+      "Get-CimInstance Win32_Process -Filter \"Name = 'downlight.exe' OR Name = 'msedgewebview2.exe'\" | Select-Object ProcessId,Name,CommandLine | ConvertTo-Json -Compress",
+    ],
+    { encoding: "utf8" },
+  ).trim();
+  const processes = json === "" ? [] : [JSON.parse(json)].flat();
+  return processes.filter(
+    (p) =>
+      p.Name.toLowerCase() === "downlight.exe" ||
+      (p.CommandLine ?? "").includes(APP_IDENTIFIER),
+  );
+}
+
+/**
+ * Waits until no Downlight process and no WebView2 process on its user data folder is left
+ * (`downlightProcesses`). If one stays, the measurement stops rather than start a run that would
+ * hand its documents to that process or fail with an error box; it ends no process it didn't
+ * start, since one left may be the reader's or another build's.
+ */
+async function untilNoDownlight() {
+  const deadline = Date.now() + GONE_TIMEOUT_MS;
+  for (;;) {
+    const left = downlightProcesses();
+    if (left.length === 0) return;
+    if (Date.now() > deadline) {
+      console.error(
+        `Downlight processes still running after ${GONE_TIMEOUT_MS} ms: ${left.map((p) => `${p.Name} ${p.ProcessId}`).join(", ")}. Close them, then measure again.`,
+      );
+      process.exit(1);
+    }
+    await sleep(500);
   }
 }
 
@@ -361,12 +427,15 @@ function median(values) {
     : (sorted[middle - 1] + sorted[middle]) / 2;
 }
 
-/** Runs a case RUNS times after one discarded run and returns the measures of each run. */
-async function measure(name, documents, measures, options) {
+/**
+ * Runs a case `runs` times (RUNS unless the options say) after one discarded run and returns the
+ * measures of each run.
+ */
+async function measure(name, documents, measures, options = {}) {
   console.error(`${name}: warming up`);
   await run(documents, options);
   const runs = [];
-  for (let i = 1; i <= RUNS; i++) {
+  for (let i = 1; i <= (options.runs ?? RUNS); i++) {
     const result = await run(documents, options);
     const values = measures(result);
     console.error(`${name}: run ${i}: ${JSON.stringify(values)}`);
@@ -445,6 +514,80 @@ function firstWindow({ reports, memory }) {
   };
 }
 
+/**
+ * Where a large document's time goes (ticket 31): the app's read and render, sending the HTML to
+ * the page (from the render's end until the page has it), inserting it, and the frame after, to
+ * first paint. The window is shown at first paint, or before it with the wait note when the
+ * document takes over half a second to arrive.
+ */
+function largeDocument({ reports, memory }) {
+  const [shown] = reportsOf(reports, "document-0", "window-shown");
+  const [paint] = reportsOf(reports, "document-0", "first-paint");
+  const [readAndRender] = reportsOf(reports, "document-0", "read-and-render");
+  const longestTask = Math.max(
+    0,
+    ...reports
+      .filter((r) => r.event === "long-task" || r.event === "long-frame")
+      .map((r) => r.duration),
+  );
+  return {
+    read: readAndRender.read,
+    render: readAndRender.render,
+    // The render starts ahead, while the webview starts, so a small one is done before the page
+    // asks; the HTML is on its way from the later of the two.
+    ipc:
+      paint.received -
+      Math.max(
+        paint.requested,
+        readAndRender.at + readAndRender.read + readAndRender.render,
+      ),
+    insert: paint.inserted - paint.received,
+    frameAfterInsert: paint.at - paint.inserted,
+    shown: shown.at,
+    firstPaint: paint.at,
+    longestTask,
+    workingSetMb: memory.workingSet,
+    privateMb: memory.privateBytes,
+  };
+}
+
+/**
+ * `npm run measure -- large`: the 1 MB documents and the large ones (ticket 31), with three runs
+ * each beyond 1 MB, since a 100 MB run takes a while. A case that fails, by a crash or no window
+ * shown in time, is reported as failed rather than stopping the rest.
+ */
+async function measureLarge() {
+  const attempt = async (name, document, runs) => {
+    try {
+      return await measure(name, [document], largeDocument, {
+        timeoutMs: LARGE_RUN_TIMEOUT_MS,
+        runs,
+      });
+    } catch (error) {
+      console.error(`${name}: failed: ${error.message}`);
+      return { name, failed: error.message };
+    }
+  };
+  const results = [];
+  for (const kind of ["mixed", "prose"]) {
+    const oneMb = kind === "mixed" ? DOCUMENTS.mixed1mb : DOCUMENTS.prose1mb;
+    results.push(await attempt(`1 MB ${kind}`, oneMb, RUNS));
+    for (const large of LARGE_DOCUMENTS) {
+      results.push(
+        await attempt(`${large.mb} MB ${kind}`, large[kind], LARGE_RUNS),
+      );
+    }
+  }
+  const measured = results.filter((r) => !r.failed);
+  console.log(
+    "Large documents, ms since the process started for firstPaint and shown:",
+  );
+  console.log();
+  if (measured.length > 0) console.log(table(measured));
+  for (const { name, failed } of results.filter((r) => r.failed))
+    console.log(`- ${name}: failed: ${failed}`);
+}
+
 function secondWindow({ reports, memory, launches }) {
   const { paint, measures } = windowMeasures(reports, memory, "document-1");
   const [opening] = reportsOf(reports, "document-1", "window-opening");
@@ -506,7 +649,7 @@ function typed({ reports, after: found }) {
 function table(cases) {
   const keys = [...new Set(cases.flatMap((c) => Object.keys(c.runs[0])))];
   const lines = [
-    `| Measure (median of ${RUNS}) | ${cases.map((c) => c.name).join(" | ")} |`,
+    `| Measure (median of ${[...new Set(cases.map((c) => c.runs.length))].join(" or ")}) | ${cases.map((c) => c.name).join(" | ")} |`,
     `| --- |${cases.map(() => " ---: |").join("")}`,
   ];
   for (const key of keys) {
@@ -527,6 +670,11 @@ function table(cases) {
 if (!existsSync(EXECUTABLE)) {
   console.error(`No ${EXECUTABLE}. Run npm run tauri build first.`);
   process.exit(1);
+}
+if (process.argv.includes("large")) {
+  writeDocuments({ large: true });
+  await measureLarge();
+  process.exit(0);
 }
 writeDocuments();
 const cases = [
