@@ -6,16 +6,16 @@ Spec: [Window design](../spec.md)
 
 **Blocked by:** 01 (Spike: the page draws the title bar), 02 (The amber icon and the accent scale), v1 [16](../../downlight-v1/issues/16-zoom-and-window-size.md) (Zoom and window size)
 
-**Status:** ready-for-agent
+**Status:** ready-for-human
 
 - [x] The logo is the icon's SVG inlined into the page (the content security policy has no `'self'` in `img-src`). Its tooltip is "Downlight", and a click opens the window menu, as Alt+Space does. (Built, and tested up to the app's `show_window_menu`; the menu itself is hand check 1.)
 - [x] The file name shows the shown document's file name and follows it on links, Back, Forward, Open and drops. The empty window shows only the logo. (Back and Forward don't exist yet, v1 ticket 12; they will show their documents the same way, so the name follows them with no change here.)
 - [x] Hovering the name shows the full path. A click reveals the file in Explorer through the app's `reveal_file`; a missing file shows a notice instead.
-- [ ] The zoom level (`125%`) shows next to the name only when it isn't 100%, and a click resets it. (Waits for v1 ticket 16.)
+- [x] The zoom level (`125%`) shows next to the name only when it isn't 100%, and a click resets it. (Built and tested; its look is hand check 7.)
 - [x] A long file name is cut with an ellipsis before it pushes the buttons. (Built; hand check 3.)
 - [x] The window's OS title stays "README.md - docs - Downlight" (v1 story 10). (Unchanged: `title_of` in `app/src/window.rs` now takes its names from `file_name_shown`, and its tests pass unchanged.)
-- [x] The logo, name and zoom level are not part of the drag region; the rest of the left side is. (Built for the logo and the name; hand check 4.)
-- [ ] Page tests: the name and its tooltip after a show and after a link; the reveal request on a click; the zoom level hidden at 100%, shown otherwise, and reset on a click. (All but the zoom level's, which wait for v1 ticket 16.)
+- [x] The logo, name and zoom level are not part of the drag region; the rest of the left side is. (Built for the logo, the name and the zoom level; hand checks 4 and 7.)
+- [x] Page tests: the name and its tooltip after a show and after a link; the reveal request on a click; the zoom level hidden at 100%, shown otherwise, and reset on a click.
 
 ## Comments
 
@@ -45,3 +45,16 @@ Spec: [Window design](../spec.md)
 6. Light, dark and a real contrast theme: the name is legible, dims when the window isn't active, and the logo stays amber.
 
 **2026-11-16, checked by hand.** The reader went through the six hand checks above on the release build and found them fine, with one change: the logo had too much room beside it, so its padding went from 14 px left and 8 px right to 10 px and 2 px (`page/src/title-bar.css`; the drawing already leaves about 3 px empty on each side). Their wish to open the folder of a missing file, and to tell the path apart from the rest of a notice, became ticket 11. Only the zoom level is left, so the status is back to ready-for-agent, blocked by v1 ticket 16.
+
+**2026-11-17, the zoom level built; its hand check is left.** v1 ticket 16 is built, so the zoom level is too:
+
+- **It is the Reset zoom command.** `createZoomLevel` in `page/src/title-bar.ts` makes it with `commandButton("resetZoom", "")` and writes the level as its text, so a click runs the same command as Ctrl+0 and the right-click menu's Reset zoom, and its tooltip is "Reset zoom (Ctrl+0)". Its accessible name is "125%, Reset zoom": WCAG's label in name asks that the text a reader sees is part of the name. `commands.ts`'s comment now says so beside the logo and the name, which stay no commands.
+- **It follows the settings snapshot** (ticket 12): the title bar has a `whenSettingsChange` listener, so the level shows from the page's URL when a zoomed window opens, and follows every zoom from any window. It hides at 100%, and in the empty window, which shows only the logo (box 2) and has no document to zoom.
+- **It sits with the logo and the name**: right of the name, a `bar-item` and so not part of the drag region, never in the focus (`tabindex="-1"`; Ctrl+0 is the keyboard's way), in the name's caption font and hover fill, at 70% opacity so the name stays what the eye finds first, full opacity under the pointer and in high contrast.
+- **Tests** (written first, failing): hidden at 100%, shown and following each change, shown at once in a window that opens zoomed, its name and tooltip, a click asks `change_zoom` with `reset`, hidden in the empty window, never in the focus. The contract tests drive the sampled `settings` message (125%) into it. The title bar's tests now start the settings first, as `main.ts` does, since the bar listens to them.
+
+**Hand checks** (on the release build), to record here:
+
+7. Ctrl+plus shows "110%" right of the file name, at a quieter shade than the name; Ctrl+0 or a click on it takes it back to 100% and hides it; a second window opened while zoomed shows the level at once. Pressing on it and dragging doesn't move the window. Light, dark and a real contrast theme.
+
+**2026-11-17, review fixes.** The zoom level's CSS shares the name's caption font, margin, padding, corner radius, hidden rule and hover fills (`.title-bar :is(.file-name, .zoom-level)` in `page/src/title-bar.css`) and keeps only its own `flex` and 70% opacity; it looks as before. `createZoomLevel` still makes it with `commandButton("resetZoom", "")`: `commandButton` takes an SVG glyph as markup, and the level's text and name change with every zoom, so `refresh` writes them; a comment says so. No test changed.
