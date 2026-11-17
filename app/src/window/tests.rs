@@ -91,54 +91,57 @@ fn launch_without_failures_has_nothing_to_report() {
 
 #[test]
 fn page_url_tells_the_page_about_timing_backdrop_and_title_bar() {
-    let plain = WindowLook {
-        backdrop: false,
+    let plain = PageFlags {
+        timing: false,
+        backdrop_supported: false,
         title_bar: false,
     };
-    let backdrop = WindowLook {
-        backdrop: true,
+    let timing = PageFlags {
+        timing: true,
         ..plain
     };
-    let title_bar = WindowLook {
+    let backdrop_supported = PageFlags {
+        backdrop_supported: true,
+        ..plain
+    };
+    let title_bar = PageFlags {
         title_bar: true,
         ..plain
     };
-    let both = WindowLook {
-        backdrop: true,
+    let all = PageFlags {
+        timing: true,
+        backdrop_supported: true,
         title_bar: true,
     };
-    let url = |timing, look| page_url(timing, look, PageSettings::default()).unwrap();
+    let url = |flags| page_url(flags, PageSettings::default()).unwrap();
     // The settings come last, after the flags, as the URL without flags has them;
     // `page_url_gives_the_page_the_settings_it_starts_with` checks what they say.
-    let plain_url = url(false, plain);
+    let plain_url = url(plain);
     let settings = plain_url
         .strip_prefix("index.html?")
         .filter(|query| query.starts_with("settings=") && !query.contains('&'))
         .unwrap_or_else(|| panic!("a URL without flags gives only the settings: {plain_url}"));
-    assert_eq!(url(true, plain), format!("index.html?timing&{settings}"));
+    assert_eq!(url(timing), format!("index.html?timing&{settings}"));
     assert_eq!(
-        url(false, backdrop),
-        format!("index.html?backdrop&{settings}")
+        url(backdrop_supported),
+        format!("index.html?backdropSupported&{settings}")
     );
+    assert_eq!(url(title_bar), format!("index.html?titleBar&{settings}"));
     assert_eq!(
-        url(false, title_bar),
-        format!("index.html?titleBar&{settings}")
-    );
-    assert_eq!(
-        url(true, both),
-        format!("index.html?timing&backdrop&titleBar&{settings}")
+        url(all),
+        format!("index.html?timing&backdropSupported&titleBar&{settings}")
     );
 }
 
 #[test]
 fn page_url_gives_the_page_the_settings_it_starts_with() {
-    let plain = WindowLook {
-        backdrop: false,
+    let plain = PageFlags {
+        timing: false,
+        backdrop_supported: false,
         title_bar: false,
     };
     assert_eq!(
         page_url(
-            false,
             plain,
             PageSettings {
                 zoom: Zoom::from(150),
@@ -160,12 +163,12 @@ fn only_the_page_itself_may_load_in_a_window() {
         ),
         (
             "http://tauri.localhost",
-            "http://tauri.localhost/index.html?timing&backdrop",
+            "http://tauri.localhost/index.html?timing&backdropSupported",
         ),
         ("http://localhost:5173", "http://localhost:5173/"),
         (
             "http://localhost:5173",
-            "http://localhost:5173/index.html?backdrop",
+            "http://localhost:5173/index.html?backdropSupported",
         ),
     ] {
         let url = tauri::Url::parse(url).unwrap();

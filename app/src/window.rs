@@ -177,32 +177,36 @@ fn work_area_of(monitor: &Monitor, scale: f64) -> Area {
     }
 }
 
-/// What a window leaves for its page to draw, decided once when it opens.
+/// What the OS and the process tell a window's page in its URL, decided once when the window
+/// opens: the page's `PageFlags` in `page/src/app.ts`. The reader's choices are no flags: they
+/// come with the settings.
 #[derive(Debug, Clone, Copy)]
-struct WindowLook {
-    /// The window is transparent over the system's backdrop (Mica on Windows), so the page draws
-    /// no background of its own.
-    backdrop: bool,
+struct PageFlags {
+    /// The timing switch is on, so the page sends its timing reports.
+    timing: bool,
+    /// The system can show a backdrop (Mica on Windows 11), and the window is transparent over
+    /// it, so the page draws no background of its own.
+    backdrop_supported: bool,
     /// The window has no native frame, so the page draws the title bar and the window's buttons
     /// (ADR 0005).
     title_bar: bool,
 }
 
-/// The page and what it is told in its query: `timing` turns on its timing reports, the window's
-/// look (`backdrop`, `titleBar`) says what the page draws, and `settings` is the first snapshot
-/// of the settings the page shows, as JSON (window design ticket 12), so first paint waits for no
-/// round trip. The page reads them in one place (`pageFlags` and `firstSettings` in
-/// `page/src/app.ts`), against this function's contract sample.
-fn page_url(timing: bool, look: WindowLook, settings: PageSettings) -> tauri::Result<String> {
+/// The page and what it is told in its query: the `flags` (`timing`, `backdropSupported`,
+/// `titleBar`), and `settings`, the first snapshot of the settings the page shows, as JSON
+/// (window design ticket 12), so first paint waits for no round trip. The page reads them in one
+/// place (`pageFlags` and `firstSettings` in `page/src/app.ts`), against this function's contract
+/// sample.
+fn page_url(flags: PageFlags, settings: PageSettings) -> tauri::Result<String> {
     // Only the query is kept, so any URL does as the base: Tauri resolves the page's path
     // against its own origin.
     let mut url = Url::parse("tauri://localhost/").map_err(tauri::Error::InvalidUrl)?;
     {
         let mut query = url.query_pairs_mut();
         let flags = [
-            ("timing", timing),
-            ("backdrop", look.backdrop),
-            ("titleBar", look.title_bar),
+            ("timing", flags.timing),
+            ("backdropSupported", flags.backdrop_supported),
+            ("titleBar", flags.title_bar),
         ];
         for (flag, on) in flags {
             if on {
@@ -225,19 +229,18 @@ pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
     use serde::ser::Error as _;
 
     // A struct literal names every field, so a new flag stops the build here until it is sampled.
-    let every = |on| WindowLook {
-        backdrop: on,
+    let every = |on| PageFlags {
+        timing: on,
+        backdrop_supported: on,
         title_bar: on,
     };
-    let url = |timing, look, settings| {
-        page_url(timing, look, settings).map_err(serde_json::Error::custom)
-    };
+    let url = |flags, settings| page_url(flags, settings).map_err(serde_json::Error::custom);
     // The snapshot of the `settings` message's sample (`message::contract_samples`).
     let sample = PageSettings::sample();
     Ok(serde_json::json!({
-        "allOn": url(true, every(true), sample)?,
-        "allOff": url(false, every(false), sample)?,
-        "defaults": url(false, every(false), PageSettings::default())?,
+        "allOn": url(every(true), sample)?,
+        "allOff": url(every(false), sample)?,
+        "defaults": url(every(false), PageSettings::default())?,
     }))
 }
 
@@ -256,11 +259,12 @@ fn open_window(app: &AppHandle, label: &str, new_window: &NewWindow) -> tauri::R
     timing.window_opening(label);
     // Decided once, so the page drops its background exactly when the window is transparent, and
     // draws the title bar exactly when the window has no frame.
-    let look = WindowLook {
-        backdrop: platform::has_backdrop(),
+    let flags = PageFlags {
+        timing: timing.is_on(),
+        backdrop_supported: platform::has_backdrop(),
         title_bar: platform::draws_own_title_bar(),
     };
-    let url = WebviewUrl::App(page_url(timing.is_on(), look, new_window.settings)?.into());
+    let url = WebviewUrl::App(page_url(flags, new_window.settings)?.into());
     let page = page_origin(app);
     let size = new_window.size;
     let builder = WebviewWindowBuilder::new(app, label, url)
@@ -273,21 +277,21 @@ fn open_window(app: &AppHandle, label: &str, new_window: &NewWindow) -> tauri::R
         None => builder,
     };
     let builder = builder
-        .decorations(!look.title_bar)
+        .decorations(!flags.title_bar)
         .visible(false)
         // Links never navigate the webview or open one of its own windows: the page follows them
         // through the app (ticket 11). These stop whatever still tries, such as a link the page
         // missed, from loading another site or a file in the window.
         .on_navigation(move |url| is_the_page(url, &page))
         .on_new_window(|_, _| NewWindowResponse::Deny);
-    let builder = if look.backdrop {
+    let builder = if flags.backdrop_supported {
         platform::with_backdrop(builder)
     } else {
         builder
     };
     let window = platform::with_browser_arguments(builder).build()?;
     platform::leave_keys_to_the_page(&window);
-    if look.title_bar {
+    if flags.title_bar {
         title_bar::add_maximize_button(&window);
     }
     std::thread::spawn(move || {

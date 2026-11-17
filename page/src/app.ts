@@ -180,8 +180,11 @@ export type ButtonRect = {
 export type PageFlags = {
   /** The timing switch is on, so the page sends its timing reports. */
   timing: boolean;
-  /** The window sits on the system's backdrop, so the page draws no background of its own. */
-  backdrop: boolean;
+  /**
+   * The system can show a backdrop (Mica on Windows 11) and the window sits on it, so the page
+   * draws no background of its own.
+   */
+  backdropSupported: boolean;
   /** The window has no native frame, so the page draws the title bar (ADR 0005). */
   titleBar: boolean;
 };
@@ -195,7 +198,7 @@ export function pageFlags(): PageFlags {
   const query = new URLSearchParams(location.search);
   return {
     timing: query.has("timing"),
-    backdrop: query.has("backdrop"),
+    backdropSupported: query.has("backdropSupported"),
     titleBar: query.has("titleBar"),
   };
 }

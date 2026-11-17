@@ -6,5 +6,8 @@ import { pageFlags } from "./app";
  * solid background.
  */
 export function applyBackdrop(): void {
-  document.documentElement.classList.toggle("backdrop", pageFlags().backdrop);
+  document.documentElement.classList.toggle(
+    "backdrop",
+    pageFlags().backdropSupported,
+  );
 }
