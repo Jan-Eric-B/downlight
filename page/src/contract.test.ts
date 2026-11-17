@@ -22,6 +22,7 @@ import { startLinks } from "./links";
 import { showNotice } from "./notice";
 import { startSettings } from "./settings";
 import { startTitleBar } from "./title-bar";
+import { WAIT_NOTE_MS } from "./wait-note";
 import { ZOOM_VARIABLE } from "./zoom";
 import {
   askedOfTheApp,
@@ -86,6 +87,7 @@ beforeEach(() => {
 
 afterEach(() => {
   stopPage.abort();
+  vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   clearMocks();
@@ -306,13 +308,19 @@ test.each(["showAtTop", "unreadShow"])(
 
 // `wait_note.json`
 
-/** Starts the view on a document that never arrives, with the app's wait note sample `name`. */
-function startWaitingWith(name: string): void {
+/**
+ * Starts the view on a document that never arrives, with the app's wait note sample `name`, and
+ * lets the note's half second pass, when the test says rather than by a clock a loaded machine
+ * can make late.
+ */
+async function startWaitingWith(name: string): Promise<void> {
   fakeTheApp({
     render_document: () => new Promise<never>(() => undefined),
     wait_note: () => waitNoteSample(name),
   });
+  vi.useFakeTimers({ shouldAdvanceTime: true });
   void startDocumentView(0);
+  await vi.advanceTimersByTimeAsync(WAIT_NOTE_MS);
 }
 
 test.each([
@@ -321,7 +329,7 @@ test.each([
 ])(
   "the app's wait note %s names the document's file while it is on its way",
   async (name, text) => {
-    startWaitingWith(name);
+    await startWaitingWith(name);
 
     await vi.waitFor(() => {
       expect(shownWaitNote()?.textContent).toBe(text);
@@ -333,7 +341,7 @@ test.each([
 );
 
 test("the app's wait note for a window with no document shows nothing", async () => {
-  startWaitingWith("noDocument");
+  await startWaitingWith("noDocument");
 
   await vi.waitFor(() => {
     expect(askedOfTheApp()).toContain("wait_note");

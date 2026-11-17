@@ -429,6 +429,57 @@ export function nextInTurn<T>(answers: T[]): T | undefined {
   return answers.length > 1 ? answers.shift() : answers[0];
 }
 
+/**
+ * A `render_document` call that fails before the app can answer it, so `invoke` itself rejects,
+ * with why as Tauri gives it.
+ */
+export interface NoAnswer {
+  noAnswer: string;
+}
+
+/** The fake app of the document view's tests (`fakeTheAppReading`). */
+export interface FakeDocumentApp {
+  /** The page's text when it asked the app to show its window, or undefined until then. */
+  textWhenShown: () => string | undefined;
+}
+
+/**
+ * Stands in for the app for the document view's tests (`fakeTheApp`): `render_document` answers
+ * as the app does (`answerAsTheApp`) with the next of `documents()` in turn (`nextInTurn`), the
+ * HTML, the HTML at a heading, or null for no document, or gives no answer at all; `show_window`
+ * keeps the page's text; `app` answers the rest. `documents` is read at each request, so a test
+ * sets its reads after the fake app is set up.
+ */
+export function fakeTheAppReading(
+  documents: () => (Read | NoAnswer)[],
+  app: FakeApp = {},
+): FakeDocumentApp {
+  let textWhenShown: string | undefined;
+  fakeTheApp({
+    show_window: () => {
+      textWhenShown = document.body.textContent;
+      return null;
+    },
+    render_document: (args) => {
+      const next = nextInTurn(documents());
+      if (typeof next === "object")
+        // Tauri rejects a call it can't hand to the command (a denied or malformed one) with a
+        // string, not an Error.
+        // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- as Tauri does
+        return Promise.reject(next.noAnswer);
+      // No document given yet answers as a window that shows none.
+      return next ? answerAsTheApp(args, next) : null;
+    },
+    ...app,
+  });
+  return { textWhenShown: () => textWhenShown };
+}
+
+/** The element the document scrolls in, below the title bar. */
+export function scroller(): HTMLElement | null {
+  return document.querySelector<HTMLElement>(SCROLLER_SELECTOR);
+}
+
 /** Lets the page's pending IPC calls, such as starting to listen, finish. */
 export function settle(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
