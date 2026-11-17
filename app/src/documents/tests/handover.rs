@@ -299,3 +299,32 @@ fn name_shown_for_a_path_without_one_is_never_blank() {
     // against a blank name, should a path without a name of its own ever reach them.
     assert_eq!(file_name_shown(Path::new(r"C:\")), r"C:\");
 }
+
+#[test]
+fn wait_note_names_the_document_a_page_waits_for() {
+    // Ticket 31: a page whose view shows another showing, or none, waits for this one.
+    let (documents, _) = documents();
+    let label = open_new(&documents, &manifest());
+    assert_eq!(documents.awaited_file(&label, None), Some(manifest()));
+    let left = handover(&documents, &label, None).showing;
+    let other = app_file("build.rs");
+    give(&documents, DocumentAt::new(&other), Target::Window(&label));
+    assert_eq!(documents.awaited_file(&label, Some(left)), Some(other));
+}
+
+#[test]
+fn reload_has_no_wait_note() {
+    // The owner's decision on ticket 31: a reload keeps the document in view until the new render
+    // replaces it, so the page waits for no other document.
+    let (documents, _) = documents();
+    let label = open_new(&documents, &manifest());
+    let page_shows = handover(&documents, &label, None).showing;
+    assert_eq!(documents.awaited_file(&label, Some(page_shows)), None);
+}
+
+#[test]
+fn window_without_a_document_has_no_wait_note() {
+    let (documents, _) = documents();
+    let label = open_empty(&documents);
+    assert_eq!(documents.awaited_file(&label, None), None);
+}

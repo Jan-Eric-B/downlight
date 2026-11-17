@@ -5,7 +5,7 @@
 //! table, since this is the contract with the page: its answer's shape is a contract sample
 //! ([`contract_samples`]) that the page's tests read.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use downlight_core::RenderedDocument;
 use tauri::{State, WebviewWindow};
@@ -118,6 +118,21 @@ impl Documents {
             notice: shown.held_notice.take(),
             steps,
         })
+    }
+
+    /// The file of the document `window`'s page waits for, when it asked for its document while
+    /// its view showed `page_shows` (None while it shows no document): the window's document,
+    /// unless the view shows it already, so the request is a reload, which keeps the document in
+    /// view until the new render replaces it and so has no wait note (ticket 31). Decided by the
+    /// showing, as [`Documents::handover`] decides the place. None while the window shows none.
+    pub(super) fn awaited_file(
+        &self,
+        window: &str,
+        page_shows: Option<Showing>,
+    ) -> Option<PathBuf> {
+        let table = self.lock();
+        let shown = table.windows.get(window)?.shown.as_ref()?;
+        (page_shows != Some(shown.showing)).then(|| shown.path.clone())
     }
 
     /// What `window`'s page asking for its document does, for the tests of other modules, which
@@ -240,15 +255,17 @@ fn size_shown(bytes: u64) -> String {
 }
 
 /// What the page's wait note names for the calling window's document, or None while it shows
-/// none. The page asks when `render_document` hasn't answered within half a second. The path
-/// comes from the app's own state, as for every command; the file's size is looked at on a
-/// blocking thread, since a file on a share can take a while to answer.
+/// none or the page's request is a reload ([`Documents::awaited_file`]). The page asks when
+/// `render_document` hasn't answered within half a second, with the showing that request sent.
+/// The path comes from the app's own state, as for every command; the file's size is looked at on
+/// a blocking thread, since a file on a share can take a while to answer.
 #[tauri::command]
 pub async fn wait_note(
     window: WebviewWindow,
+    showing: Option<Showing>,
     documents: State<'_, Documents>,
 ) -> Result<Option<WaitNote>, ()> {
-    let Some(path) = documents.document_path(window.label()) else {
+    let Some(path) = documents.awaited_file(window.label(), showing) else {
         return Ok(None);
     };
     // A blocking task that stopped leaves the note unsaid; the document still comes.
@@ -261,7 +278,7 @@ pub async fn wait_note(
 
 /// A sample of each answer [`wait_note`] gives, by name, which the page's tests read
 /// (`app/src/contract.rs`): with the document's size, without it, and for a window with no
-/// document.
+/// document, which a reload gets too.
 #[cfg(test)]
 pub fn wait_note_samples() -> serde_json::Result<serde_json::Value> {
     let file = || DocumentFile {

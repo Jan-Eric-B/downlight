@@ -271,9 +271,11 @@ export type Commands = {
   };
   /**
    * What the wait note names, asked for when `render_document` hasn't answered within half a
-   * second; null while the window shows no document.
+   * second, with the showing the request sent; null while the window shows no document, or when
+   * the window is still at that showing, so the request is a reload, which keeps the document in
+   * view instead.
    */
-  wait_note: { args: undefined; answer: WaitNote | null };
+  wait_note: { args: { showing: number | null }; answer: WaitNote | null };
   follow_link: {
     /**
      * The showing whose document the link is in, the link target as the document wrote it, and

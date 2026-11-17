@@ -22,6 +22,7 @@ import {
   spyOnHeadingScrolls,
   spyOnScrollsToTop,
   tell,
+  waitNoteAsTheApp,
   type AtHeading,
   type Read,
 } from "./test-support";
@@ -67,7 +68,7 @@ beforeEach(() => {
       textWhenShown = document.body.textContent;
       return null;
     },
-    wait_note: () => BIG_DOCUMENT,
+    wait_note: (args) => waitNoteAsTheApp(args, BIG_DOCUMENT),
     render_document: (args) => {
       const next = nextInTurn(documents);
       if (typeof next === "object")
@@ -270,6 +271,27 @@ test("a document given while another is in view shows the wait note over it unti
     expect(heading()).toBe("Field notes");
   });
   expect(shownWaitNote()).toBeNull();
+});
+
+test("a reload slower than half a second shows no wait note and keeps the document in view", async () => {
+  // The owner's decision on ticket 31: only a window waiting for another document shows the note.
+  let deliver: (html: string) => void = () => {};
+  documents = [
+    () => Promise.resolve(readme),
+    readSentLater((send) => (deliver = send)),
+  ];
+  await startDocumentView(0);
+  await settle();
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+
+  await saveTheFile();
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(shownWaitNote()).toBeNull();
+  expect(heading()).toBe("Lamplighter");
+  deliver(notes);
+  await vi.waitFor(() => {
+    expect(heading()).toBe("Field notes");
+  });
 });
 
 /** The element the document scrolls in, below the title bar. */

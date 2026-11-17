@@ -408,6 +408,18 @@ export async function answerAsTheApp(
 }
 
 /**
+ * Answers `wait_note` as the app does (`wait_note` in `app/src/documents/handover.rs`): `note`
+ * while the page waits for a document its view doesn't show, and none for a reload, whose page
+ * keeps its document in view until the new render replaces it. `args` are the request's.
+ */
+export function waitNoteAsTheApp(
+  args: ArgsOf<"wait_note">,
+  note: WaitNote,
+): WaitNote | null {
+  return args.showing === currentShowing ? null : note;
+}
+
+/**
  * Takes the next of `answers`, which a test lists in the order the page will ask for them. The
  * last one stays and answers every request after it, since a test can't always tell how often the
  * page asks, such as when a reload overtakes another. None left is undefined. Reads the array it

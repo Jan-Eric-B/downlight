@@ -557,8 +557,13 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
    * Shows the wait note for the latest request, once the app has said what it names, unless the
    * request ended meanwhile or the window shows no document.
    */
-  const showWaitNote = async (isLatest: () => boolean) => {
-    const note = await askApp("wait_note").catch(() => null);
+  const showWaitNote = async (
+    requested: number | null,
+    isLatest: () => boolean,
+  ) => {
+    const note = await askApp("wait_note", { showing: requested }).catch(
+      () => null,
+    );
     if (note === null || !isLatest() || !requesting) return;
     fillWaitNote(waitNote, note);
     waitNote.hidden = false;
@@ -722,8 +727,9 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
     requesting = true;
     const thisRequest = ++latestRequest;
     const isLatest = () => thisRequest === latestRequest;
+    const requested = showing;
     const waiting = setTimeout(() => {
-      void showWaitNote(isLatest);
+      void showWaitNote(requested, isLatest);
     }, WAIT_NOTE_MS);
     const outcome = await ask();
     clearTimeout(waiting);
