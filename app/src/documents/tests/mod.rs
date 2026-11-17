@@ -1,10 +1,9 @@
 //! Most tests drive the module through its public interface and check what pages are told and
 //! what is done to windows (the recorder). A page's request for its document goes through
 //! `handover`, which is all of `render_document` but its webview and timing, so that it is tested
-//! without either. A few tests call the private watch callbacks (`on_change`, `keep_watch`,
-//! `notice`) instead: they stand in for the watch's thread, so that a test reports a change, a
-//! late watch or a notice at the moment of its choosing and reproduces ticket 21's race and the
-//! held notice deterministically.
+//! without either. A few tests call the private watch callbacks (`on_report`, `notice`) instead:
+//! they stand in for the watch's thread, so that a test reports a change or a notice at the
+//! moment of its choosing and reproduces ticket 21's race and the held notice deterministically.
 //!
 //! The tests are split by feature, so that each is found by its name: giving a window its
 //! document, the handover to its page, and watching its file. The helpers here are the ones
@@ -18,7 +17,7 @@ use tauri::async_runtime::block_on;
 use super::handover::{Handover, Place};
 use super::recorder::{Recorder, Sent, ToWindow, recorded, recorded_with};
 use super::*;
-use crate::watch::{Change, Stamp};
+use crate::watch::{Change, Report};
 
 mod give;
 mod handover;
@@ -200,13 +199,21 @@ fn heading_of(documents: &Documents, window: &str) -> Option<Option<String>> {
         })
 }
 
-/// What the watch on `path`, given to `window`, does on a change to the file: the callback
-/// [`Documents::watch`] hands the watch, so a test can report a change at a moment of its
-/// choosing, as a watch's thread may.
-fn watch_callback(documents: &Documents, window: &str, path: &Path) -> impl FnMut(Change) + use<> {
-    Documents::on_change(
+/// What the watch on `path`, given to `window`, does with a report: the callback
+/// [`Documents::watch`] hands the watch, so a test can report at a moment of its choosing, as a
+/// watch's thread may.
+fn report_callback(documents: &Documents, window: &str, path: &Path) -> impl FnMut(Report) + use<> {
+    Documents::on_report(
         Arc::downgrade(&documents.inner),
         window.to_owned(),
+        path.to_owned(),
         document_key(path),
     )
+}
+
+/// What the watch on `path`, given to `window`, does on a change to the file, as
+/// [`report_callback`] for the reports of changes.
+fn watch_callback(documents: &Documents, window: &str, path: &Path) -> impl FnMut(Change) + use<> {
+    let mut on_report = report_callback(documents, window, path);
+    move |change| on_report(Report::Change(change))
 }

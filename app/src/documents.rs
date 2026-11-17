@@ -25,7 +25,6 @@
 use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use crate::message::{Message, Pages};
@@ -33,7 +32,7 @@ use crate::notice::Notice;
 use crate::platform;
 use crate::render::{self, RenderTask};
 use crate::settings::{PageSettings, Settings, SettingsError, SettingsStore};
-use crate::watch::{Stamp, Watch};
+use crate::watch::{ReadStamp, Watch};
 
 pub mod handover;
 pub mod history;
@@ -138,7 +137,7 @@ struct ShownDocument {
     render_ahead: Option<RenderTask>,
     /// The file's stamp from just before the render ahead read it, which the watch starts from
     /// (ticket 30); taken when the watch starts.
-    read_stamp: Option<Receiver<Option<Stamp>>>,
+    read_stamp: Option<ReadStamp>,
     /// The watch on the document's file, which reloads it; None until it has started.
     /// Replacing or forgetting the entry drops it, which stops it.
     watch: Option<Watch>,
@@ -183,7 +182,7 @@ impl ShownDocument {
         claim: u64,
         arrival: Arrival,
     ) -> Self {
-        let (render_ahead, read_stamp) = render::start_with_stamp(&path);
+        let (render_ahead, read_stamp) = render::start(&path);
         Self {
             showing,
             claim,
@@ -199,7 +198,7 @@ impl ShownDocument {
     }
 
     fn start_reload(&mut self) {
-        self.render_ahead = Some(render::start(&self.path));
+        self.render_ahead = Some(render::start(&self.path).0);
     }
 }
 

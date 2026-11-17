@@ -1,9 +1,8 @@
 //! Watching the file of the document a window shows (ticket 10): a change reloads it, a file that
 //! is gone tells the page, and a folder whose events can't be watched becomes a notice, held
-//! until the page first asks (ticket 30). Kept apart from the table, since every callback here
-//! runs on a watch's thread and
-//! must check, under the table's lock, that the window still shows the document it was started
-//! for (ticket 21).
+//! until the page first asks (ticket 30). Kept apart from the table, since every report here runs
+//! on a watch's thread and must check, under the table's lock, that the window still shows the
+//! document it was started for (ticket 21).
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Weak};
@@ -11,65 +10,58 @@ use std::sync::{Arc, Weak};
 use super::{Documents, Inner};
 use crate::message::Message;
 use crate::notice::{NamedFile, Notice};
-use crate::watch::{Change, RECHECK, Stamp, Watch};
+use crate::watch::{Change, Report, Watch};
 
 impl Documents {
-    /// Starts watching `document`'s file, which `window` was just given with `key`, on a blocking
-    /// thread, since that reads the file system, from the stamp the render ahead read it at
-    /// (ticket 30). A window that has left the document since starts none. A folder whose events
-    /// can't be watched is checked every [`RECHECK`] instead, and the reader is told that saves
-    /// reload late.
+    /// Starts watching `document`'s file, which `window` was just given with `key`, from the
+    /// stamp the render ahead read it at (ticket 30). Started under the lock that finds the
+    /// window still showing the document, so a window that has left it since starts none, and a
+    /// watch never outlives the document it was started for.
     pub(super) fn watch(&self, window: &str, document: &Path, key: PathBuf) {
-        let Some(read_stamp) = self
-            .lock()
-            .shown_mut(window, &key)
-            .and_then(|shown| shown.read_stamp.take())
-        else {
-            return;
-        };
-        // Weak, so that a watch never keeps the table that holds it alive.
-        let documents = Arc::downgrade(&self.inner);
-        let (window, document) = (window.to_owned(), document.to_owned());
-        tauri::async_runtime::spawn_blocking(move || {
-            // The render ahead sends the stamp first thing; without it, the file now is the
-            // nearest there is.
-            let read = read_stamp.recv().unwrap_or_else(|_| Stamp::of(&document));
-            let on_change = Self::on_change(documents.clone(), window.clone(), key.clone());
-            let (watch, unwatched) = Watch::start(&document, read, on_change);
-            let Some(documents) = Self::upgrade(&documents) else {
-                return;
-            };
-            documents.keep_watch(&window, &key, watch);
-            if let Some(error) = unwatched {
-                let late = format!(
-                    " for changes as they are made, so a save reloads it up to {} seconds \
-                     later: {error}",
-                    RECHECK.as_secs()
-                );
-                documents.notice(
-                    &window,
-                    &key,
-                    Notice::naming("Can't watch ", NamedFile::at(&document), late),
-                );
-            }
-        });
-    }
-
-    /// What the watch on the document `window` was given with `key` does on a change to its file.
-    pub(super) fn on_change(
-        documents: Weak<Inner>,
-        window: String,
-        key: PathBuf,
-    ) -> impl FnMut(Change) + Send + 'static {
-        move |change| {
-            if let Some(documents) = Self::upgrade(&documents) {
-                documents.changed(&window, &key, change);
-            }
+        let on_report = Self::on_report(
+            Arc::downgrade(&self.inner),
+            window.to_owned(),
+            document.to_owned(),
+            key.clone(),
+        );
+        let mut table = self.lock();
+        if let Some(shown) = table.shown_mut(window, &key)
+            && let Some(read_stamp) = shown.read_stamp.take()
+        {
+            shown.watch = Some(Watch::start(document, read_stamp, on_report));
         }
     }
 
-    fn upgrade(documents: &Weak<Inner>) -> Option<Self> {
-        documents.upgrade().map(|inner| Self { inner })
+    /// What the watch on `document`, which `window` was given with `key`, does with each report:
+    /// a change reloads the document or tells the page it is gone, and a folder whose events
+    /// can't be watched tells the reader that saves reload late.
+    pub(super) fn on_report(
+        // Weak, so that a watch never keeps the table that holds it alive.
+        documents: Weak<Inner>,
+        window: String,
+        document: PathBuf,
+        key: PathBuf,
+    ) -> impl FnMut(Report) + Send + 'static {
+        move |report| {
+            let Some(documents) = documents.upgrade().map(|inner| Self { inner }) else {
+                return;
+            };
+            match report {
+                Report::Change(change) => documents.changed(&window, &key, change),
+                Report::EventsUnavailable {
+                    reason,
+                    checked_every,
+                } => {
+                    let late = format!(
+                        " for changes as they are made, so a save reloads it up to {} seconds \
+                         later: {reason}",
+                        checked_every.as_secs()
+                    );
+                    let notice = Notice::naming("Can't watch ", NamedFile::at(&document), late);
+                    documents.notice(&window, &key, notice);
+                }
+            }
+        }
     }
 
     /// Acts on a change to the file of the document with `key`, unless `window` has left it since
@@ -96,15 +88,6 @@ impl Documents {
         };
         // Sent from the watch's thread, which nobody waits on, so nobody is left to tell.
         let _ = self.send(window, message);
-    }
-
-    /// Gives `window` the watch started for the document with `key`. A watch that started after
-    /// the window was given another document, or closed, is dropped instead, so a save to a
-    /// document the window has left never reloads it.
-    pub(super) fn keep_watch(&self, window: &str, key: &Path, watch: Watch) {
-        if let Some(shown) = self.lock().shown_mut(window, key) {
-            shown.watch = Some(watch);
-        }
     }
 
     /// Sends `window`'s page the `notice` about the document with `key`, or holds it until the

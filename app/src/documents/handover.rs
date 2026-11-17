@@ -111,7 +111,7 @@ impl Documents {
             render: shown
                 .render_ahead
                 .take()
-                .unwrap_or_else(|| render::start(&shown.path)),
+                .unwrap_or_else(|| render::start(&shown.path).0),
             showing: shown.showing,
             file: DocumentFile::of(&shown.path),
             place,

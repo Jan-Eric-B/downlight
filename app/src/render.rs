@@ -3,7 +3,6 @@
 
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, Receiver};
 
 use downlight_core::RenderedDocument;
 use tauri::async_runtime::JoinHandle;
@@ -13,7 +12,7 @@ use crate::image;
 use crate::notice::{NamedFile, Notice};
 use crate::platform;
 use crate::timing::Stages;
-use crate::watch::Stamp;
+use crate::watch::ReadStamp;
 
 /// The rendered document, with how long reading and rendering it took for the timing switch.
 pub type ReadAndRender = Result<(RenderedDocument, Stages), DocumentError>;
@@ -24,23 +23,18 @@ pub type RenderTask = JoinHandle<ReadAndRender>;
 /// Starts reading and rendering `path` on a blocking thread, off the main thread and the async
 /// runtime's workers. The timing switch reports it by the place the page gets (`Place` in
 /// `documents.rs`).
-pub fn start(path: &Path) -> RenderTask {
+///
+/// Gives the file's stamp from just before the read too, which a watch on the file starts from,
+/// so that a save after the read reloads the document, even one made before the watch started
+/// (ticket 30). A reload or a render the page asks for drops it: the watch runs already.
+pub fn start(path: &Path) -> (RenderTask, ReadStamp) {
     let path = path.to_owned();
-    tauri::async_runtime::spawn_blocking(move || read_and_render(&path))
-}
-
-/// Starts reading and rendering `path` as [`start`] does, and gives the file's stamp from just
-/// before the read, which the watch on the file starts from: a save after the read then reloads
-/// the document, even one made before the watch started (ticket 30).
-pub fn start_with_stamp(path: &Path) -> (RenderTask, Receiver<Option<Stamp>>) {
-    let path = path.to_owned();
-    let (stamp_sender, stamp) = mpsc::sync_channel(1);
+    let (noter, read_stamp) = ReadStamp::pending();
     let task = tauri::async_runtime::spawn_blocking(move || {
-        // Nobody waits for the stamp once the window has left the document.
-        let _ = stamp_sender.send(Stamp::of(&path));
+        noter.note(&path);
         read_and_render(&path)
     });
-    (task, stamp)
+    (task, read_stamp)
 }
 
 fn read_and_render(path: &Path) -> ReadAndRender {

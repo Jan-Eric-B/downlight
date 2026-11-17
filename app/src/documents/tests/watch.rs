@@ -1,8 +1,6 @@
 //! Watching a window's document: a change to its file reloads it or tells the page it is gone,
-//! a watch or change for a document the window has left is dropped, and a notice waits until the
-//! page first asks.
-
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+//! a change for a document the window has left is ignored, and a notice waits until the page
+//! first asks.
 
 use super::*;
 
@@ -96,35 +94,6 @@ fn reload_overtaken_by_another_document_sends_nothing() {
     assert_eq!(pages.sent(), [to(&label, Message::AskForDocument)]);
 }
 
-/// A watch on `path` whose callback holds the sender of the returned receiver. A dropped watch
-/// ends its thread, which drops the callback, so the receiver tells a running watch (Timeout)
-/// from a dropped one (Disconnected).
-fn watch_with_its_life(path: &Path) -> (Watch, Receiver<Change>) {
-    let (sender, receiver) = mpsc::channel();
-    let (watch, _) = Watch::start(path, Stamp::of(path), move |change| {
-        let _ = sender.send(change);
-    });
-    (watch, receiver)
-}
-
-/// Long enough for a dropped watch's thread to end.
-const WATCH_END_WAIT: Duration = Duration::from_secs(1);
-
-#[test]
-fn watch_for_a_document_the_window_has_left_is_dropped() {
-    let first = document("left-first", "# First");
-    let second = document("left-second", "# Second");
-    let (documents, _) = documents();
-    let label = open_new(&documents, &first);
-    give(&documents, DocumentAt::new(&second), Target::Window(&label));
-    let (watch, life) = watch_with_its_life(&first);
-    documents.keep_watch(&label, &document_key(&first), watch);
-    let running = life.recv_timeout(WATCH_END_WAIT);
-    std::fs::remove_file(&first).unwrap();
-    std::fs::remove_file(&second).unwrap();
-    assert_eq!(running, Err(RecvTimeoutError::Disconnected));
-}
-
 #[test]
 fn change_to_a_document_the_window_has_left_is_ignored() {
     let (documents, pages) = documents();
@@ -204,20 +173,16 @@ fn document_given_and_then_deleted_tells_the_page_it_is_gone() {
 }
 
 #[test]
-fn window_forgotten_before_its_page_asks_hands_over_nothing_and_drops_its_late_watch() {
+fn window_forgotten_before_its_page_asks_hands_over_nothing() {
+    // The window closes straight after it was given its document, while its render ahead may
+    // still run.
     let path = document("closed", "# First");
     let (documents, _) = documents();
     let label = open_new(&documents, &path);
-    // The window closes straight after it was given its document: its render ahead may still
-    // run, and its watch starts only after the window was forgotten.
-    let (watch, life) = watch_with_its_life(&path);
     documents.forget(&label);
     let handover = documents.handover(&label, None);
-    documents.keep_watch(&label, &document_key(&path), watch);
-    let running = life.recv_timeout(WATCH_END_WAIT);
     std::fs::remove_file(&path).unwrap();
     assert!(handover.is_none());
-    assert_eq!(running, Err(RecvTimeoutError::Disconnected));
 }
 
 /// Longer than the watch's check takes to find a file its folder's events didn't report.
@@ -292,6 +257,27 @@ fn notice_held_before_the_page_asks_comes_with_its_first_answer() {
     assert_eq!(first.notice, Some("Can't watch".into()));
     assert_eq!(next.notice, None);
     assert_eq!(pages.sent(), []);
+}
+
+#[test]
+fn folder_whose_events_cannot_be_watched_tells_the_reader_saves_reload_late() {
+    let (documents, _) = documents();
+    let label = open_new(&documents, &manifest());
+    let mut on_report = report_callback(&documents, &label, &manifest());
+    on_report(Report::EventsUnavailable {
+        reason: "Access is denied.".to_owned(),
+        checked_every: Duration::from_secs(2),
+    });
+    let answered = handover(&documents, &label, None).notice;
+    assert_eq!(
+        answered,
+        Some(Notice::naming(
+            "Can't watch ",
+            crate::notice::NamedFile::at(&manifest()),
+            " for changes as they are made, so a save reloads it up to 2 seconds later: \
+             Access is denied.",
+        ))
+    );
 }
 
 #[test]

@@ -16,7 +16,7 @@
 
 use std::fs::Metadata;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender};
 use std::time::{Duration, SystemTime};
 
 use notify::{RecommendedWatcher, RecursiveMode, Watcher as _};
@@ -28,7 +28,7 @@ const QUIET: Duration = Duration::from_millis(150);
 
 /// How often the file is checked whatever the folder's events say. A check is one look at the
 /// file's metadata, so a missed save reloads at most this late.
-pub const RECHECK: Duration = Duration::from_secs(2);
+const RECHECK: Duration = Duration::from_secs(2);
 
 /// What happened to a watched document's file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,10 +41,25 @@ pub enum Change {
     Back,
 }
 
+/// What a watch tells its window.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Report {
+    /// The document's file changed.
+    Change(Change),
+    /// The document's folder is there, but its events can't be watched, as on a share or file
+    /// system without change notifications: its saves are found only by the check every
+    /// `checked_every`, so they reload up to that late.
+    EventsUnavailable {
+        /// Why, in the system's words.
+        reason: String,
+        checked_every: Duration,
+    },
+}
+
 /// Watches one document's file until it is dropped.
 pub struct Watch {
-    /// Reaches the thread that waits for the folder to go quiet and checks the file. The folder's
-    /// watch, which the thread owns, keeps the channel open, so the end is sent.
+    /// Reaches the watch's thread. The thread keeps a sender of its own, for the folder's watch it
+    /// starts anew, so dropping this one doesn't end the thread: the end is sent.
     signals: Sender<Signal>,
 }
 
@@ -59,43 +74,43 @@ enum Signal {
 }
 
 impl Watch {
-    /// Starts watching `document`'s file, which was `read` when the window last read it (None
-    /// while it was missing): a save after that read reports Changed, even one made before the
-    /// watch started. `on_change` runs on a thread of the watch's own for each change, until the
-    /// watch is dropped. A file missing now reports Back when it appears, and so does one whose
-    /// folder is missing now.
+    /// Starts watching `document`'s file from `since`, the stamp it had when the window read it: a
+    /// save after that read reports Changed, even one made before the watch started. A file
+    /// missing now reports Back when it appears, and so does one whose folder is missing now.
     ///
-    /// Gives why the folder's events can't be watched, when the folder is there but can't be,
-    /// such as on a share or file system without change notifications: its saves are then found
-    /// only by the check every [`RECHECK`].
+    /// Returns at once: the folder is watched, and `since` waited for, on a thread of the watch's
+    /// own, where `on_report` runs for each report until the watch is dropped. A folder that is
+    /// there but whose events can't be watched is reported when the watch starts, and when a
+    /// missing folder comes back, once rather than at every check that tries again.
     pub fn start(
         document: &Path,
-        read: Option<Stamp>,
-        on_change: impl FnMut(Change) + Send + 'static,
-    ) -> (Self, Option<notify::Error>) {
-        Self::start_checking_every(document, read, RECHECK, on_change)
+        since: ReadStamp,
+        on_report: impl FnMut(Report) + Send + 'static,
+    ) -> Self {
+        Self::start_checking_every(document, since, RECHECK, on_report)
     }
 
     /// [`Watch::start`], checking the file `every` so often rather than every [`RECHECK`].
     fn start_checking_every(
         document: &Path,
-        read: Option<Stamp>,
+        since: ReadStamp,
         every: Duration,
-        on_change: impl FnMut(Change) + Send + 'static,
-    ) -> (Self, Option<notify::Error>) {
+        on_report: impl FnMut(Report) + Send + 'static,
+    ) -> Self {
         let (signals, heard) = mpsc::channel();
-        let (folder, unwatched) = FolderWatch::start(document, &signals);
         let watching = Watching {
             document: document.to_owned(),
-            stamp: read,
-            folder,
+            // Both are set first thing on the thread, by `Watching::run`.
+            stamp: None,
+            folder: FolderWatch::Missing,
+            events_unavailable: false,
             signals: signals.clone(),
             heard,
             every,
-            on_change,
+            on_report,
         };
-        std::thread::spawn(move || watching.run());
-        (Self { signals }, unwatched)
+        std::thread::spawn(move || watching.run(since));
+        Self { signals }
     }
 
     /// Has the file checked now, whatever the folder's events said, as when its window gets the
@@ -126,11 +141,12 @@ enum FolderWatch {
 }
 
 impl FolderWatch {
-    /// Starts watching `document`'s folder, or gives why it can't be, unless it is missing.
-    fn start(document: &Path, signals: &Sender<Signal>) -> (Self, Option<notify::Error>) {
+    /// Starts watching `document`'s folder, unless it is missing; fails when the folder is there
+    /// but can't be watched.
+    fn start(document: &Path, signals: &Sender<Signal>) -> notify::Result<Self> {
         let folder = document.parent().unwrap_or(document);
         if !folder.is_dir() {
-            return (Self::Missing, None);
+            return Ok(Self::Missing);
         }
         // notify passes the path to CreateFileW as it is, which takes a path over 260 characters
         // only in the `\\?\` form that canonicalizing gives on Windows; the manifest's
@@ -139,8 +155,11 @@ impl FolderWatch {
         let verbatim = std::fs::canonicalize(folder);
         let folder = verbatim.as_deref().unwrap_or(folder);
         match watch_folder(folder, document, signals) {
-            Ok(watcher) => (Self::Watching { _watcher: watcher }, None),
-            Err(error) => (Self::Failed, Some(error)),
+            Ok(watcher) => Ok(Self::Watching { _watcher: watcher }),
+            // A folder deleted while its watch started is missing, not one whose events can't be
+            // watched; the watch looks for it again at each check.
+            Err(_) if !folder.is_dir() => Ok(Self::Missing),
+            Err(error) => Err(error),
         }
     }
 }
@@ -178,7 +197,7 @@ fn folded(name: &Path) -> PathBuf {
 /// What tells one version of a file from another without reading it: its size and when it was
 /// written and created (a file renamed over it was created later). None while there is no file.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Stamp {
+struct Stamp {
     size: u64,
     written: Option<SystemTime>,
     created: Option<SystemTime>,
@@ -186,7 +205,7 @@ pub struct Stamp {
 
 impl Stamp {
     /// The stamp of the file at `document` now, None while there is no file there.
-    pub fn of(document: &Path) -> Option<Self> {
+    fn of(document: &Path) -> Option<Self> {
         let metadata = std::fs::metadata(document).ok().filter(Metadata::is_file)?;
         Some(Self {
             size: metadata.len(),
@@ -196,45 +215,100 @@ impl Stamp {
     }
 }
 
+/// The stamp a document's file had just before the window read it, which a watch starts from
+/// (ticket 30): a save after the read then reloads the document, even one made before the watch
+/// started. The read notes it, on the render task's thread, with the [`ReadStampNoter`] made with
+/// it, and the watch waits for it on its own thread.
+pub struct ReadStamp(Receiver<Option<Stamp>>);
+
+/// Notes the [`ReadStamp`] it was made with.
+pub struct ReadStampNoter(SyncSender<Option<Stamp>>);
+
+impl ReadStamp {
+    /// A stamp still to be noted, with the noter the read notes it with.
+    pub fn pending() -> (ReadStampNoter, Self) {
+        let (noter, stamp) = mpsc::sync_channel(1);
+        (ReadStampNoter(noter), Self(stamp))
+    }
+
+    /// The stamp of the file at `document` now, as if the window had just read it.
+    #[cfg(test)]
+    pub fn now(document: &Path) -> Self {
+        let (noter, stamp) = Self::pending();
+        noter.note(document);
+        stamp
+    }
+
+    /// Waits until the stamp has been noted.
+    fn noted(self, document: &Path) -> Option<Stamp> {
+        // The render task notes the stamp before anything else, so only one that panicked, or never
+        // ran because the runtime shut down, drops its noter without noting; the file now is then
+        // the nearest there is.
+        self.0.recv().unwrap_or_else(|_| Stamp::of(document))
+    }
+}
+
+impl ReadStampNoter {
+    /// Notes the stamp of the file at `document` now, just before it is read.
+    pub fn note(self, document: &Path) {
+        // Nobody waits for the stamp of a reload, whose watch runs already, nor once the window
+        // has left the document.
+        let _ = self.0.send(Stamp::of(document));
+    }
+}
+
 /// The watch's thread: what it knows of the file and its folder.
 struct Watching<F> {
     document: PathBuf,
     /// The file's when it was last reported, or when the window read it.
     stamp: Option<Stamp>,
     folder: FolderWatch,
+    /// Whether the folder's watch failed to start the last time it was tried, which was reported
+    /// then, so that the window tells the reader once rather than after every check.
+    events_unavailable: bool,
     /// For the folder's watch when it is started anew.
     signals: Sender<Signal>,
     heard: Receiver<Signal>,
     /// How often the file is checked.
     every: Duration,
-    on_change: F,
+    on_report: F,
 }
 
-impl<F: FnMut(Change)> Watching<F> {
-    /// Reports each change to the document once the folder has been quiet for [`QUIET`], until
-    /// the watch stops. A change that leaves the stamp as it was, such as a virus scanner touching
-    /// the file's attributes, reports nothing.
-    fn run(mut self) {
-        // The first comparison comes as if the file had been touched, since a save between the
+impl<F: FnMut(Report)> Watching<F> {
+    /// Watches the folder and reports each change to the document once the folder has been quiet
+    /// for [`QUIET`], until the watch stops. A change that leaves the stamp as it was, such as a
+    /// virus scanner touching the file's attributes, reports nothing.
+    fn run(mut self, since: ReadStamp) {
+        self.watch_folder_anew();
+        self.stamp = since.noted(&self.document);
+        // The first comparison comes without waiting for a change, since a save between the
         // window's read and the start of the watch gave no event.
-        let mut touched = true;
         loop {
-            if !touched {
-                match self.heard.recv_timeout(self.every) {
-                    Ok(Signal::Touched) => {}
-                    Ok(Signal::Recheck) | Err(RecvTimeoutError::Timeout) => {
-                        if !self.check() {
-                            continue;
-                        }
-                    }
-                    Ok(Signal::Stop) | Err(RecvTimeoutError::Disconnected) => return,
-                }
-            }
-            touched = false;
             if !self.quiet() {
                 return;
             }
             self.report();
+            if !self.wait_for_change() {
+                return;
+            }
+        }
+    }
+
+    /// Waits until the folder's events or a check say the file may have changed; false once the
+    /// watch stops.
+    fn wait_for_change(&mut self) -> bool {
+        loop {
+            match self.heard.recv_timeout(self.every) {
+                Ok(Signal::Touched) => return true,
+                Ok(Signal::Recheck) | Err(RecvTimeoutError::Timeout) => {
+                    if self.check() {
+                        return true;
+                    }
+                }
+                // The thread holds a sender of its own, so the channel can't disconnect; were it
+                // to, waiting again would spin.
+                Ok(Signal::Stop) | Err(RecvTimeoutError::Disconnected) => return false,
+            }
         }
     }
 
@@ -243,10 +317,30 @@ impl<F: FnMut(Change)> Watching<F> {
     fn check(&mut self) -> bool {
         let missed = Stamp::of(&self.document) != self.stamp;
         if missed || matches!(self.folder, FolderWatch::Missing) {
-            // The old watch goes only once the new one has started, so no event falls between.
-            (self.folder, _) = FolderWatch::start(&self.document, &self.signals);
+            self.watch_folder_anew();
         }
         missed
+    }
+
+    /// Watches the document's folder anew, and reports when its events can't be watched: once in
+    /// each run of tries that fail, since each check that finds a change tries again. The old
+    /// watch goes only once the new one has started, so no event falls between.
+    fn watch_folder_anew(&mut self) {
+        self.folder = match FolderWatch::start(&self.document, &self.signals) {
+            Ok(folder) => {
+                self.events_unavailable = false;
+                folder
+            }
+            Err(error) => {
+                if !std::mem::replace(&mut self.events_unavailable, true) {
+                    (self.on_report)(Report::EventsUnavailable {
+                        reason: error.to_string(),
+                        checked_every: self.every,
+                    });
+                }
+                FolderWatch::Failed
+            }
+        };
     }
 
     /// Waits until the folder has been quiet for [`QUIET`]; false once the watch stops.
@@ -256,6 +350,7 @@ impl<F: FnMut(Change)> Watching<F> {
                 // The report after the quiet looks at the file anyway.
                 Ok(Signal::Touched | Signal::Recheck) => {}
                 Err(RecvTimeoutError::Timeout) => return true,
+                // As in `wait_for_change`, the channel can't disconnect.
                 Ok(Signal::Stop) | Err(RecvTimeoutError::Disconnected) => return false,
             }
         }
@@ -280,7 +375,7 @@ impl<F: FnMut(Change)> Watching<F> {
             self.folder = FolderWatch::Missing;
         }
         if let Some(change) = change {
-            (self.on_change)(change);
+            (self.on_report)(Report::Change(change));
         }
     }
 }
@@ -326,17 +421,12 @@ mod tests {
 
     /// Watches the folder's document as it is now; the changes it reports arrive on the receiver.
     fn watch(folder: &Folder) -> (Watch, Receiver<Change>) {
-        watch_since(folder, Stamp::of(&folder.document()))
+        watch_since(folder, ReadStamp::now(&folder.document()))
     }
 
-    /// Watches the folder's document, which was read when it had `read`.
-    fn watch_since(folder: &Folder, read: Option<Stamp>) -> (Watch, Receiver<Change>) {
-        let (sender, receiver) = mpsc::channel();
-        let (watch, unwatched) = Watch::start(&folder.document(), read, move |change| {
-            let _ = sender.send(change);
-        });
-        assert!(unwatched.is_none(), "{unwatched:?}");
-        (watch, receiver)
+    /// Watches the folder's document from `since`, the stamp it had when it was read.
+    fn watch_since(folder: &Folder, since: ReadStamp) -> (Watch, Receiver<Change>) {
+        watch_changes(folder, since, RECHECK)
     }
 
     /// Longer than any test runs, so that only the folder's events or a recheck report a change.
@@ -347,14 +437,54 @@ mod tests {
 
     /// Watches the folder's document as it is now, checking it `every` so often.
     fn watch_checking_every(folder: &Folder, every: Duration) -> (Watch, Receiver<Change>) {
+        watch_changes(folder, ReadStamp::now(&folder.document()), every)
+    }
+
+    /// Watches the folder's document from `since`, checking it `every` so often; what it reports
+    /// arrives on the receiver.
+    fn watch_reports(
+        folder: &Folder,
+        since: ReadStamp,
+        every: Duration,
+    ) -> (Watch, Receiver<Report>) {
         let (sender, receiver) = mpsc::channel();
-        let document = folder.document();
-        let (watch, unwatched) =
-            Watch::start_checking_every(&document, Stamp::of(&document), every, move |change| {
-                let _ = sender.send(change);
-            });
-        assert!(unwatched.is_none(), "{unwatched:?}");
+        let watch = Watch::start_checking_every(&folder.document(), since, every, move |report| {
+            let _ = sender.send(report);
+        });
         (watch, receiver)
+    }
+
+    /// [`watch_reports`] for a folder whose events can be watched, giving only the changes. Any
+    /// other report panics the watch's thread, which closes the receiver and so fails the test.
+    fn watch_changes(
+        folder: &Folder,
+        since: ReadStamp,
+        every: Duration,
+    ) -> (Watch, Receiver<Change>) {
+        let (sender, receiver) = mpsc::channel();
+        let watch = Watch::start_checking_every(&folder.document(), since, every, move |report| {
+            let Report::Change(change) = report else {
+                panic!("expected only changes, got {report:?}");
+            };
+            let _ = sender.send(change);
+        });
+        (watch, receiver)
+    }
+
+    /// Holds `folder` open without sharing it with anyone, so that it is there but notify can't
+    /// open it to watch its events, as on a share or file system without change notifications.
+    /// Files in it can still be made and written.
+    #[cfg(windows)]
+    fn held_unwatchable(folder: &Path) -> std::fs::File {
+        use std::os::windows::fs::OpenOptionsExt as _;
+        // FILE_FLAG_BACKUP_SEMANTICS, without which Windows opens no folder.
+        const OPEN_FOLDER: u32 = 0x0200_0000;
+        std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .custom_flags(OPEN_FOLDER)
+            .open(folder)
+            .unwrap()
     }
 
     /// Waits out the comparison every watch starts with, so that what comes after is the test's.
@@ -429,6 +559,58 @@ mod tests {
         assert_eq!(reported, Ok(Change::Changed));
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn folder_whose_events_cannot_be_watched_reports_so_once_and_saves_by_its_checks() {
+        let folder = Folder::new("unwatchable");
+        let held = held_unwatchable(&folder.0);
+        let (_watch, reports) = watch_reports(&folder, ReadStamp::now(&folder.document()), OFTEN);
+        let unavailable = reports.recv_timeout(REPORT_WAIT);
+        std::fs::write(folder.document(), "# Second").unwrap();
+        let saved = reports.recv_timeout(REPORT_WAIT);
+        let after = reports.recv_timeout(OFTEN * 3);
+        drop(held);
+        assert!(
+            matches!(&unavailable, Ok(Report::EventsUnavailable { checked_every, .. }) if *checked_every == OFTEN),
+            "{unavailable:?}"
+        );
+        assert_eq!(saved, Ok(Report::Change(Change::Changed)));
+        assert_eq!(after, Err(RecvTimeoutError::Timeout));
+    }
+
+    // The owner's decision on ticket 30: a folder that comes back but whose events can't be
+    // watched is told as one is when the watch starts, once. Checked only by rechecks, so that the
+    // test decides when the folder is looked at.
+    #[cfg(windows)]
+    #[test]
+    fn folder_back_but_its_events_cannot_be_watched_reports_so_once() {
+        let folder = Folder::new("back-unwatchable");
+        std::fs::remove_dir_all(&folder.0).unwrap();
+        let (watch, reports) = watch_reports(&folder, ReadStamp::now(&folder.document()), NEVER);
+        let while_missing = reports.recv_timeout(QUIET * 3);
+        std::fs::create_dir_all(&folder.0).unwrap();
+        let held = held_unwatchable(&folder.0);
+        std::fs::write(folder.document(), "# Built again").unwrap();
+        watch.recheck();
+        let back = [
+            reports.recv_timeout(REPORT_WAIT),
+            reports.recv_timeout(REPORT_WAIT),
+        ];
+        std::fs::write(folder.document(), "# Built once more").unwrap();
+        watch.recheck();
+        let saved = reports.recv_timeout(REPORT_WAIT);
+        let after = reports.recv_timeout(QUIET * 3);
+        drop(held);
+        assert_eq!(while_missing, Err(RecvTimeoutError::Timeout));
+        assert!(
+            matches!(&back[0], Ok(Report::EventsUnavailable { .. })),
+            "{back:?}"
+        );
+        assert_eq!(back[1], Ok(Report::Change(Change::Back)));
+        assert_eq!(saved, Ok(Report::Change(Change::Changed)));
+        assert_eq!(after, Err(RecvTimeoutError::Timeout));
+    }
+
     #[test]
     fn recheck_of_an_unchanged_file_reports_nothing() {
         let folder = Folder::new("unchanged");
@@ -444,7 +626,7 @@ mod tests {
     #[test]
     fn save_between_the_read_and_the_start_of_the_watch_reports_changed() {
         let folder = Folder::new("before-start");
-        let read = Stamp::of(&folder.document());
+        let read = ReadStamp::now(&folder.document());
         std::fs::write(folder.document(), "# Saved before the watch started").unwrap();
         let (_watch, changes) = watch_since(&folder, read);
         assert_eq!(changes.recv_timeout(REPORT_WAIT), Ok(Change::Changed));
