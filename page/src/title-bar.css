@@ -61,8 +61,10 @@
   height: 16px;
 }
 
-/* The file name and the zoom level beside it: Windows 11's caption text, with a hover. */
-.title-bar :is(.file-name, .zoom-level) {
+/* The file name and the zoom level beside it: Windows 11's caption text, with a hover. The app's
+   name in the empty window (ticket 14) takes the file name's place and text, with no hover: it is
+   no item, so the window is dragged by it, and it dims with the bar. */
+.title-bar :is(.app-name, .file-name, .zoom-level) {
   margin: 4px 0;
   padding: 0 6px;
   border-radius: 4px;
@@ -73,7 +75,13 @@
     sans-serif;
 }
 
-/* An empty window shows only the logo; display: flex above would show them all the same. */
+.title-bar .app-name {
+  flex: none;
+  align-self: center;
+}
+
+/* An empty window shows no file name or zoom level; display: flex above would show them all the
+   same. */
 .title-bar :is(.file-name, .zoom-level)[hidden] {
   display: none;
 }

@@ -611,6 +611,13 @@ export function titleBarFileName(): HTMLElement {
   return found;
 }
 
+/** The app's name the title bar shows in the file name's place in the empty window (ticket 14). */
+export function titleBarAppName(): HTMLElement {
+  const found = document.querySelector<HTMLElement>(".title-bar .app-name");
+  if (!found) throw new Error("The title bar has no app name.");
+  return found;
+}
+
 /** The title bar's zoom level beside the file name (window design ticket 04). */
 export function titleBarZoomLevel(): HTMLButtonElement {
   const found = document.querySelector<HTMLButtonElement>(

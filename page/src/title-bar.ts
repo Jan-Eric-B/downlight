@@ -1,7 +1,7 @@
 // The window's title bar, which the page draws in place of the native one (ADR 0005, window
-// design tickets 01, 04 and 05): Downlight's logo, the shown document's file name and its zoom
-// level when it isn't 100%, a strip to drag the window by, the buttons of the reader's commands
-// in groups, and minimize, maximize or restore, and close.
+// design tickets 01, 04, 05 and 14): Downlight's logo, the shown document's file name and its zoom
+// level when it isn't 100%, or the app's name in the empty window, a strip to drag the window by,
+// the buttons of the reader's commands in groups, and minimize, maximize or restore, and close.
 // The app turns the native frame off and says so with the `titleBar` flag; without it the window
 // keeps its native title bar, as on other systems until their ports.
 //
@@ -89,6 +89,20 @@ function createLogo(): HTMLButtonElement {
 }
 
 /**
+ * The app's name in the file name's place while the window shows no document (window design
+ * ticket 14): the empty window has nothing else there, so the name costs no room. Only text, and
+ * part of the drag region, as there is no file to reveal. Hidden until the view says the window is
+ * empty, so a window opened on a document never shows it before its file name.
+ */
+function createAppName(): HTMLSpanElement {
+  const name = document.createElement("span");
+  name.className = "app-name";
+  name.textContent = "Downlight";
+  name.hidden = true;
+  return name;
+}
+
+/**
  * The shown document's file name, with its full path as the tooltip, which reveals the file in
  * its folder. Only the name shows, so the bar stays short; the window's OS title keeps its folder
  * for Alt+Tab and the taskbar (v1 story 10).
@@ -136,8 +150,8 @@ function createZoomLevel(): {
     element,
     refresh: () => {
       const { zoom } = settingsNow();
-      // Hidden at the level Reset gives, and in the empty window, which shows only the logo: there
-      // is no document zoomed.
+      // Hidden at the level Reset gives, and in the empty window, which shows the app's name in
+      // the file name's place (ticket 14): there is no document zoomed.
       element.hidden = zoom === DEFAULT_SETTINGS.zoom || !showsDocument();
       element.textContent = `${String(zoom)}%`;
       // The level the reader sees is part of its name (WCAG's label in name).
@@ -207,10 +221,12 @@ export function startTitleBar(signal?: AbortSignal): void {
   const buttons = document.createElement("div");
   buttons.className = "window-buttons";
   buttons.append(minimize, maximize, close);
+  const appName = createAppName();
   const fileName = createFileName();
   const zoomLevel = createZoomLevel();
   bar.append(
     createLogo(),
+    appName,
     fileName.element,
     zoomLevel.element,
     createCommandButtons(),
@@ -221,6 +237,7 @@ export function startTitleBar(signal?: AbortSignal): void {
   // The name follows whatever the window shows: a link, Open, a drop, and Back and Forward
   // (v1 ticket 12) all go through the document view.
   const stopNaming = whenDocumentShown(({ file }) => {
+    appName.hidden = file !== null;
     fileName.show(file);
     zoomLevel.refresh();
   });

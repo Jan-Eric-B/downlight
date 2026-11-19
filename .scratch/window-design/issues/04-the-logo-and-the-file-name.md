@@ -9,7 +9,7 @@ Spec: [Window design](../spec.md)
 **Status:** closed
 
 - [x] The logo is the icon's SVG inlined into the page (the content security policy has no `'self'` in `img-src`). Its tooltip is "Downlight", and a click opens the window menu, as Alt+Space does. (Built, and tested up to the app's `show_window_menu`; the menu itself is hand check 1.)
-- [x] The file name shows the shown document's file name and follows it on links, Back, Forward, Open and drops. The empty window shows only the logo. (Back and Forward don't exist yet, v1 ticket 12; they will show their documents the same way, so the name follows them with no change here.)
+- [x] The file name shows the shown document's file name and follows it on links, Back, Forward, Open and drops. The empty window shows only the logo (changed by ticket 14: it shows "Downlight" in the file name's place). (Back and Forward don't exist yet, v1 ticket 12; they will show their documents the same way, so the name follows them with no change here.)
 - [x] Hovering the name shows the full path. A click reveals the file in Explorer through the app's `reveal_file`; a missing file shows a notice instead.
 - [x] The zoom level (`125%`) shows next to the name only when it isn't 100%, and a click resets it. (Built and tested; its look is hand check 7.)
 - [x] A long file name is cut with an ellipsis before it pushes the buttons. (Built; hand check 3.)

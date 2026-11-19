@@ -21,6 +21,7 @@ import {
   settle,
   tell,
   titleBarButton,
+  titleBarAppName,
   titleBarButtonRow,
   titleBarFileName,
   titleBarLogo,
@@ -281,12 +282,59 @@ test("the name follows the document a link shows", async () => {
   expect(titleBarFileName().title).toBe("C:\\work\\docs\\guide.md");
 });
 
-test("the empty window shows only the logo", async () => {
+// The app's name in the empty window (window design ticket 14).
+
+test("the empty window shows Downlight beside the logo, in the file name's place", async () => {
   answers = [null];
   await startWithTheDocumentView();
 
-  expect(titleBarFileName().hidden).toBe(true);
   expect(titleBarLogo().hidden).toBe(false);
+  expect(titleBarAppName().hidden).toBe(false);
+  expect(titleBarAppName().textContent).toBe("Downlight");
+  expect(titleBarFileName().hidden).toBe(true);
+  expect(titleBarAppName().previousElementSibling).toBe(titleBarLogo());
+});
+
+test("showing a document replaces the app's name with the file name, and an empty window brings it back", async () => {
+  answers = [null, shownFrom(README, 1), null];
+  await startWithTheDocumentView();
+
+  let shown = nextShown();
+  await giveAnotherDocument();
+  await shown;
+  expect(titleBarAppName().hidden).toBe(true);
+  expect(titleBarFileName().hidden).toBe(false);
+  expect(titleBarFileName().textContent).toBe("README.md");
+
+  shown = nextShown();
+  await giveAnotherDocument();
+  await shown;
+  expect(titleBarAppName().hidden).toBe(false);
+  expect(titleBarFileName().hidden).toBe(true);
+});
+
+test("a window opened on a document never shows the app's name, also before the document arrives", async () => {
+  answers = [shownFrom(README)];
+  startTitleBar(stop.signal);
+  expect(titleBarAppName().hidden).toBe(true);
+
+  await startDocumentView(0);
+  expect(titleBarAppName().hidden).toBe(true);
+});
+
+test("the app's name is plain text the window is dragged by: no button, no tooltip, nothing on a click", async () => {
+  answers = [null];
+  await startWithTheDocumentView();
+  const name = titleBarAppName();
+
+  expect(name.closest("button")).toBeNull();
+  expect(name.title).toBe("");
+  // Only the bar's items are kept out of the drag region (title-bar.css).
+  expect(name.classList.contains("bar-item")).toBe(false);
+  const before = askedOfTheApp().length;
+  name.click();
+  await settle();
+  expect(askedOfTheApp().slice(before)).toEqual([]);
 });
 
 test("a click on the name asks the app to reveal the document's file", async () => {
@@ -495,7 +543,7 @@ test("a click on the zoom level asks the app to reset the zoom", async () => {
   expect(changes).toEqual([{ change: { setting: "zoom", change: "reset" } }]);
 });
 
-test("the empty window shows no zoom level, as it shows no name", async () => {
+test("the empty window shows no zoom level, as it shows no file name", async () => {
   answers = [null];
   await startWithTheDocumentView();
   await tell("settings", { ...DEFAULT_SETTINGS, zoom: 125 });
