@@ -4,6 +4,7 @@ use std::os::windows::ffi::{OsStrExt as _, OsStringExt as _};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
+use tauri::utils::config::WindowEffectsConfig;
 use tauri::window::{Effect, EffectsBuilder};
 use tauri::{Manager, Runtime, WebviewWindow, WebviewWindowBuilder};
 use webview2_com::AcceleratorKeyPressedEventHandler;
@@ -21,10 +22,10 @@ use windows_sys::Win32::System::Com::{
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, GetProcessTimes};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_F12, VK_SHIFT};
 use windows_sys::Win32::UI::Shell::{
-    ASSOCF_INIT_IGNOREUNKNOWN, ASSOCF_NOTRUNCATE, ASSOCSTR_EXECUTABLE, AssocQueryStringW,
-    ILCreateFromPathW, ILFree, SEE_MASK_CLASSNAME, SEE_MASK_FLAG_LOG_USAGE, SEE_MASK_FLAG_NO_UI,
-    SEE_MASK_NOASYNC, SHELLEXECUTEINFOW, SHOpenFolderAndSelectItems, ShellExecuteExW,
-    ShellExecuteW,
+    ASSOCF, ASSOCF_INIT_BYEXENAME, ASSOCF_INIT_IGNOREUNKNOWN, ASSOCF_NOTRUNCATE, ASSOCSTR,
+    ASSOCSTR_EXECUTABLE, ASSOCSTR_FRIENDLYAPPNAME, AssocQueryStringW, ILCreateFromPathW, ILFree,
+    SEE_MASK_CLASSNAME, SEE_MASK_FLAG_LOG_USAGE, SEE_MASK_FLAG_NO_UI, SEE_MASK_NOASYNC,
+    SHELLEXECUTEINFOW, SHOpenFolderAndSelectItems, ShellExecuteExW, ShellExecuteW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     IDYES, MB_DEFBUTTON2, MB_ICONERROR, MB_ICONWARNING, MB_OK, MB_SETFOREGROUND, MB_TOPMOST,
@@ -32,6 +33,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::APP_NAME;
+use crate::settings::Backdrop;
 
 mod title_bar;
 
@@ -58,30 +60,80 @@ pub const fn draws_own_title_bar() -> bool {
     true
 }
 
+/// The first build that sets a backdrop through `DWMWA_SYSTEMBACKDROP_TYPE`, which Mica Alt needs
+/// (window-vibrancy's `apply_tabbed`). Windows 11 builds before it show Mica through an older,
+/// undocumented attribute and have no Mica Alt.
+const FIRST_BUILD_WITH_BACKDROP_TYPE: u32 = 22523;
+
 /// Whether windows get a backdrop, Mica: Windows 11 and later.
 pub fn has_backdrop() -> bool {
     windows_version::OsVersion::current().build >= FIRST_BUILD_WITH_MICA
 }
 
-/// Puts Mica behind the whole window, for windows where `has_backdrop()` is true. The window and
-/// its webview are then transparent, and the page, told so by the app, draws no background of its
-/// own, so the document sits on Mica. `Effect::Mica` follows the window's light or dark mode,
-/// which tao reads from Windows as it creates the window, and again when Windows' setting changes,
-/// and also gives the webview as its `prefers-color-scheme`, so Mica and the page agree.
+/// The effect that draws `backdrop`, or None for no backdrop. Mica Alt falls back to Mica where
+/// the system has no Mica Alt, rather than leave the page, which draws no background on a
+/// backdrop, on nothing.
+fn effect_of(backdrop: Backdrop) -> Option<Effect> {
+    match backdrop {
+        Backdrop::Mica => Some(Effect::Mica),
+        Backdrop::MicaAlt
+            if windows_version::OsVersion::current().build >= FIRST_BUILD_WITH_BACKDROP_TYPE =>
+        {
+            Some(Effect::Tabbed)
+        }
+        Backdrop::MicaAlt => Some(Effect::Mica),
+        Backdrop::Acrylic => Some(Effect::Acrylic),
+        Backdrop::None => None,
+    }
+}
+
+/// Builds the window for a backdrop where the OS can show one (`has_backdrop()`), whatever the
+/// reader's Backdrop, and starts it with `backdrop`'s effect; elsewhere, as on Windows 10, it
+/// leaves the builder as it is, for a solid, opaque window. The window and its webview are
+/// transparent, and the page, told so by the app, draws no background of its own unless the
+/// reader's Backdrop is None, so the document sits on the backdrop. The effects follow the
+/// window's theme, which tao sets from the reader's Theme or from Windows, and also gives the
+/// webview as its `prefers-color-scheme`, so the backdrop and the page agree.
 ///
 /// No redirection surface (`WS_EX_NOREDIRECTIONBITMAP`), so no white surface shows behind the page
 /// before the window first paints it clear, a paint tao holds back while the event loop is busy,
 /// as during `setup` (window design ticket 13).
 ///
-/// This and `transparent` can only be set when the window is built, so a live Backdrop choice
-/// (window design ticket 08) must change only the effect.
+/// This and `transparent` can only be set when the window is built, which is why they don't
+/// depend on the reader's choice: a live change of Backdrop changes only the effect
+/// ([`set_backdrop`], window design ticket 08).
 pub fn with_backdrop<'a, R: Runtime, M: Manager<R>>(
     builder: WebviewWindowBuilder<'a, R, M>,
+    backdrop: Backdrop,
 ) -> WebviewWindowBuilder<'a, R, M> {
-    builder
-        .transparent(true)
-        .no_redirection_bitmap(true)
-        .effects(EffectsBuilder::new().effect(Effect::Mica).build())
+    if !has_backdrop() {
+        return builder;
+    }
+    let builder = builder.transparent(true).no_redirection_bitmap(true);
+    match effect_of(backdrop) {
+        Some(effect) => builder.effects(EffectsBuilder::new().effect(effect).build()),
+        None => builder,
+    }
+}
+
+/// Changes `window`'s backdrop to `backdrop` while it is open, where the OS can show one. Tauri
+/// applies effects on the main thread and only posts them from here, so this never waits for it.
+pub fn set_backdrop(window: &WebviewWindow, backdrop: Backdrop) -> tauri::Result<()> {
+    if !has_backdrop() {
+        return Ok(());
+    }
+    // Windows 11 builds before 22523 draw Acrylic and Mica through different attributes, so
+    // switching from one to the other there would leave the first on: the effect is cleared
+    // first. Later builds set one attribute, which the next effect replaces.
+    let replaces = windows_version::OsVersion::current().build >= FIRST_BUILD_WITH_BACKDROP_TYPE;
+    let effect = effect_of(backdrop);
+    if !replaces || effect.is_none() {
+        window.set_effects(None::<WindowEffectsConfig>)?;
+    }
+    match effect {
+        Some(effect) => window.set_effects(EffectsBuilder::new().effect(effect).build()),
+        None => Ok(()),
+    }
 }
 
 /// The browser arguments of every webview, the same for each window: windows in one process share
@@ -285,22 +337,58 @@ const TEXT_FILE: &str = ".txt";
 /// files, or the one that does names no file, as some packaged programs don't. Only asks the
 /// shell; nothing starts.
 pub fn text_file_program() -> Option<PathBuf> {
-    let (extension, verb) = (wide(TEXT_FILE), wide("open"));
     // Fails rather than naming the "Unknown" program that asks the reader to pick one.
-    let flags = ASSOCF_INIT_IGNOREUNKNOWN | ASSOCF_NOTRUNCATE;
+    let program = PathBuf::from(assoc_string(
+        ASSOCF_INIT_IGNOREUNKNOWN,
+        ASSOCSTR_EXECUTABLE,
+        OsStr::new(TEXT_FILE),
+        Some("open"),
+    )?);
+    program.is_file().then_some(program)
+}
+
+/// The text file program's name as Windows shows it, such as "Notepad", for Edit with's Default
+/// (window design ticket 08). Also for a packaged program, whose file the system doesn't name.
+pub fn text_file_program_name() -> Option<String> {
+    let name = assoc_string(
+        ASSOCF_INIT_IGNOREUNKNOWN,
+        ASSOCSTR_FRIENDLYAPPNAME,
+        OsStr::new(TEXT_FILE),
+        Some("open"),
+    )?;
+    Some(name.to_string_lossy().into_owned())
+}
+
+/// The name of the program at `program`, an `.exe`, as Windows shows it: its description, such
+/// as "Notepad++ : a free (GNU) source code editor", or None when it has none.
+pub fn program_name(program: &Path) -> Option<String> {
+    let name = assoc_string(
+        ASSOCF_INIT_BYEXENAME,
+        ASSOCSTR_FRIENDLYAPPNAME,
+        program.as_os_str(),
+        None,
+    )?;
+    Some(name.to_string_lossy().into_owned())
+}
+
+/// The shell's string `what` for the association `assoc` (an extension, or a program's file with
+/// `ASSOCF_INIT_BYEXENAME`), with its `verb`, or None when the shell has none. Only asks the
+/// shell; nothing starts.
+fn assoc_string(
+    init: ASSOCF,
+    what: ASSOCSTR,
+    assoc: &OsStr,
+    verb: Option<&str>,
+) -> Option<OsString> {
+    let assoc = wide(assoc);
+    let verb = verb.map(wide);
+    let verb = verb.as_ref().map_or(std::ptr::null(), |verb| verb.as_ptr());
+    let flags = init | ASSOCF_NOTRUNCATE;
     let query = |buffer: *mut u16, length: &mut u32| {
-        // SAFETY: both strings are NUL-terminated UTF-16 buffers that outlive the call; `buffer`
-        // is null, which asks only for the length, or holds `length` characters.
-        unsafe {
-            AssocQueryStringW(
-                flags,
-                ASSOCSTR_EXECUTABLE,
-                extension.as_ptr(),
-                verb.as_ptr(),
-                buffer,
-                length,
-            )
-        }
+        // SAFETY: `assoc` and `verb`, when not null, are NUL-terminated UTF-16 buffers that
+        // outlive the call; a null verb is allowed. `buffer` is null, which asks only for the
+        // length, or holds `length` characters.
+        unsafe { AssocQueryStringW(flags, what, assoc.as_ptr(), verb, buffer, length) }
     };
     with_com(|| {
         let mut length = 0;
@@ -316,8 +404,7 @@ pub fn text_file_program() -> Option<PathBuf> {
             .iter()
             .position(|&unit| unit == 0)
             .unwrap_or(buffer.len());
-        let program = PathBuf::from(OsString::from_wide(&buffer[..end]));
-        Ok(program.is_file().then_some(program))
+        Ok((end > 0).then(|| OsString::from_wide(&buffer[..end])))
     })
     .ok()
     .flatten()
@@ -584,6 +671,21 @@ mod tests {
         let notepad = notepad().unwrap();
         assert!(notepad.ends_with(r"System32\notepad.exe"));
         assert!(notepad.is_absolute());
+    }
+
+    #[test]
+    fn notepad_is_named_as_windows_names_it_not_by_its_file() {
+        let name = notepad().and_then(|notepad| program_name(&notepad));
+        assert!(
+            name.as_deref()
+                .is_some_and(|name| !name.is_empty() && !name.ends_with(".exe")),
+            "{name:?}"
+        );
+    }
+
+    #[test]
+    fn missing_program_has_no_name() {
+        assert_eq!(program_name(Path::new(r"C:\no such folder\none.exe")), None);
     }
 
     #[test]

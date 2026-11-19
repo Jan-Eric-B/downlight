@@ -21,12 +21,14 @@ import { startLayout } from "./layout";
 import { startLinks } from "./links";
 import { showNotice } from "./notice";
 import { startSettings } from "./settings";
+import { startSettingsFlyout } from "./settings-flyout";
 import { startTitleBar } from "./title-bar";
 import { WAIT_NOTE_MS } from "./wait-note";
 import { ZOOM_VARIABLE } from "./zoom";
 import {
   askedOfTheApp,
   documentZoom,
+  editorChoicesSample,
   emptyWindow,
   failingWith,
   fakeTheApp,
@@ -712,6 +714,33 @@ function inKeyOrder(change: SettingChange): string {
   return JSON.stringify(change, keysSent(change));
 }
 
+/** The settings flyout's choice labelled `label`. */
+function flyoutChoice(label: string): HTMLInputElement {
+  const found = [
+    ...document.querySelectorAll<HTMLLabelElement>(".settings-flyout label"),
+  ].find((candidate) => candidate.textContent.startsWith(label));
+  const input = found?.querySelector("input");
+  if (!input) throw new Error(`The settings flyout has no choice ${label}.`);
+  return input;
+}
+
+/** Starts the title bar, the commands and the settings flyout, and opens the flyout. */
+async function openTheSettingsFlyout(): Promise<void> {
+  fakeTitleBarLayout();
+  openPageWith("titleBar", "backdropSupported");
+  await startSettings();
+  startTitleBar(stopPage.signal);
+  startCommands(stopPage.signal);
+  startSettingsFlyout(stopPage.signal);
+  await settle();
+  titleBarButton("Settings").click();
+  await vi.waitFor(() => {
+    expect(
+      document.querySelector(".settings-flyout .editors label"),
+    ).not.toBeNull();
+  });
+}
+
 test("the page's changes of the settings are each one the app takes, with its keys, and no other", async () => {
   const sent: SettingChange[] = [];
   fakeTheApp({
@@ -719,16 +748,64 @@ test("the page's changes of the settings are each one the app takes, with its ke
       sent.push(change);
       return null;
     },
+    editor_choices: () => editorChoicesSample("withEditor"),
   });
-  await startSettings();
-  startCommands(stopPage.signal);
-  await settle();
+  await openTheSettingsFlyout();
 
   for (const command of ["zoomIn", "zoomOut", "resetZoom", "fullWidth"])
     await tell("menu-command", command);
+  // Each choice of the settings flyout, the one the settings hold last, so each one is new.
+  for (const label of [
+    "Light",
+    "Dark",
+    "System",
+    "Mica Alt",
+    "Acrylic",
+    "None",
+    "Mica",
+  ])
+    flyoutChoice(label).click();
+  // Amber is the only accent color until window design ticket 09, so it is always checked and
+  // never clicked anew: its change is the browser's for a choice newly checked.
+  flyoutChoice("Amber").dispatchEvent(new Event("change"));
+  flyoutChoice("Default").click();
+  await settle();
   expect(sent.map(inKeyOrder).toSorted()).toEqual(
     settingChangeSamples().map(inKeyOrder).toSorted(),
   );
+});
+
+// `editor_choices.json`
+
+test("the app's choices for Edit with show Default by its program's name and the chosen editor, checked", async () => {
+  const sample = editorChoicesSample("withEditor");
+  fakeTheApp({ editor_choices: () => sample });
+  await openTheSettingsFlyout();
+
+  const editors = [
+    ...document.querySelectorAll<HTMLLabelElement>(
+      ".settings-flyout .editors label",
+    ),
+  ];
+  expect(editors.map((label) => label.textContent)).toEqual([
+    `Default (${sample.defaultName ?? ""})`,
+    sample.editor?.name,
+  ]);
+  expect(editors[1]?.title).toBe(sample.editor?.path);
+  expect(editors[1]?.querySelector("input")?.checked).toBe(true);
+});
+
+test("the app's choices for Edit with without names show Default alone, checked", async () => {
+  fakeTheApp({ editor_choices: () => editorChoicesSample("withoutNames") });
+  await openTheSettingsFlyout();
+
+  const editors = [
+    ...document.querySelectorAll<HTMLLabelElement>(
+      ".settings-flyout .editors label",
+    ),
+  ];
+  expect(editors.map((label) => label.textContent)).toEqual(["Default"]);
+  expect(editors[0]?.querySelector("input")?.checked).toBe(true);
 });
 
 // `title_bar.json`

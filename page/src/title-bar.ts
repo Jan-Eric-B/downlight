@@ -16,6 +16,7 @@ import editGlyph from "@fluentui/svg-icons/icons/edit_16_regular.svg?raw";
 import fullWidthGlyph from "@fluentui/svg-icons/icons/arrow_bidirectional_left_right_16_regular.svg?raw";
 import openGlyph from "@fluentui/svg-icons/icons/folder_open_16_regular.svg?raw";
 import keepOnTopGlyph from "@fluentui/svg-icons/icons/pin_16_regular.svg?raw";
+import settingsGlyph from "@fluentui/svg-icons/icons/settings_16_regular.svg?raw";
 import maximizeGlyph from "@fluentui/svg-icons/icons/square_16_regular.svg?raw";
 import restoreGlyph from "@fluentui/svg-icons/icons/square_multiple_16_regular.svg?raw";
 import minimizeGlyph from "@fluentui/svg-icons/icons/subtract_16_regular.svg?raw";
@@ -158,10 +159,11 @@ function createCommandButtons(): HTMLElement {
       ["open", openGlyph],
       ["edit", editGlyph],
     ],
-    // Settings joins them (window design ticket 08).
     [
       ["fullWidth", fullWidthGlyph],
       ["keepOnTop", keepOnTopGlyph],
+      // The gear, which opens the settings flyout (settings-flyout.ts, window design ticket 08).
+      ["settings", settingsGlyph],
     ],
   ];
   const row = document.createElement("div");

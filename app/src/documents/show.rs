@@ -15,7 +15,7 @@ use crate::message::Message;
 #[cfg(doc)]
 use crate::message::Pages;
 use crate::notice::file_name_shown;
-use crate::settings::PageSettings;
+use crate::settings::{PageSettings, WindowLook};
 
 /// What is done to windows themselves, beside what their pages are told ([`Pages`]): Tauri's in
 /// the app (`window.rs`), a recorder in the tests. A trait with two adapters rather than code
@@ -43,10 +43,20 @@ pub trait Windows: Send + Sync + 'static {
     /// window when there is no active window to open beside (ticket 16's review). None when the
     /// system names no main monitor.
     fn primary_work_area(&self) -> Option<Area>;
+
+    /// Gives `window` the reader's theme and backdrop (window design ticket 08). A window that
+    /// has closed, or is still being built, gets nothing, and that is no failure: one being built
+    /// gets the look when its page first asks for its document
+    /// ([`Documents::page_hears_settings`]).
+    ///
+    /// It must never wait for the main thread: it is called while the settings are held, and
+    /// the main thread takes them as a window closes ([`Documents::closing`]), so a getter here
+    /// would deadlock against a closing window. Tauri's setters only post to the event loop.
+    fn set_look(&self, window: &str, look: &WindowLook) -> Result<(), WindowError>;
 }
 
 /// What a new window starts with that the documents module decides: its title, the settings its
-/// page starts with, and its size and place (ticket 16). What every window starts with alike
+/// page starts with, its theme and backdrop, and its size and place (ticket 16). What every window starts with alike
 /// (the page and its flags, the navigation guard, the backdrop, the key setup and the 5 s
 /// fallback for showing it) is decided in one place, `open_window` in `window.rs`.
 #[derive(Debug, Clone, PartialEq)]
@@ -55,6 +65,9 @@ pub struct NewWindow {
     pub title: String,
     /// What its page shows of the settings from its start, in its URL.
     pub settings: PageSettings,
+    /// The reader's theme and backdrop, which the window is built with (window design ticket
+    /// 08).
+    pub look: WindowLook,
     /// The size of the last window that closed, or the default size until one has.
     pub size: WindowSize,
     /// Where its top left corner goes, in the logical pixels of the active window's monitor:
@@ -189,6 +202,7 @@ impl Documents {
         let new_window = NewWindow {
             title: title_of(document),
             settings: settings.page(),
+            look: settings.window_look(),
             size,
             at,
         };

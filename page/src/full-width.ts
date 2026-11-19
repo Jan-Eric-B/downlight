@@ -15,7 +15,7 @@ export const FULL_WIDTH_CLASS = "full-width";
  * says why.
  */
 export function switchFullWidth(): void {
-  changeSetting({ setting: "switchFullWidth" });
+  void changeSetting({ setting: "switchFullWidth" });
 }
 
 /** Whether the document fills the window's width, for Full width's button and menu entry. */

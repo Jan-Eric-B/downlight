@@ -146,10 +146,12 @@ fn page_url_gives_the_page_the_settings_it_starts_with() {
             PageSettings {
                 zoom: Zoom::from(150),
                 full_width: true,
+                ..PageSettings::default()
             }
         )
         .unwrap(),
-        "index.html?settings=%7B%22zoom%22%3A150%2C%22fullWidth%22%3Atrue%7D"
+        "index.html?settings=%7B%22zoom%22%3A150%2C%22fullWidth%22%3Atrue%2C%22theme%22%3A%22system%22\
+         %2C%22backdrop%22%3A%22mica%22%2C%22accentColor%22%3A%22amber%22%7D"
     );
 }
 

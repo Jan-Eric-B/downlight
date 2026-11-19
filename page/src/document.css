@@ -6,9 +6,10 @@
   background: light-dark(#ffffff, #0d1117);
 }
 
-/* On a backdrop (the app says so, see backdrop.ts), Mica on Windows, the page draws no background
-   of its own, so the document sits on Mica. github-markdown-css keeps its fills on code blocks
-   and tables. With transparency effects off, Windows draws Mica as a solid color itself. */
+/* On a backdrop (the OS can show one and the reader's Backdrop isn't None, see backdrop.ts), Mica
+   on Windows, the page draws no background of its own, so the document sits on the backdrop.
+   github-markdown-css keeps its fills on code blocks and tables. With transparency effects off,
+   Windows draws the backdrop as a solid color itself. */
 :root.backdrop {
   background: transparent;
 }

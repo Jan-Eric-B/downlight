@@ -57,7 +57,10 @@
   "settings": {
     "event": "settings",
     "payload": {
+      "accentColor": "amber",
+      "backdrop": "none",
       "fullWidth": true,
+      "theme": "dark",
       "zoom": 125
     }
   }

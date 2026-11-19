@@ -1,7 +1,11 @@
 import { clearMocks, mockWindows } from "@tauri-apps/api/mocks";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { DEFAULT_SETTINGS, type PageSettings } from "./app";
-import { startSettings, whenSettingsChange } from "./settings";
+import {
+  startSettings,
+  whenSettingChanges,
+  whenSettingsChange,
+} from "./settings";
 import { fakeTheApp, openPageAt, tell } from "./test-support";
 
 /** The snapshots the listener heard, in turn. */
@@ -28,7 +32,7 @@ function listen(): void {
 
 test("a settings listener runs at once with the settings in the page's URL", async () => {
   openPageAt(
-    `?settings=${encodeURIComponent('{"zoom":175,"fullWidth":false}')}`,
+    `?settings=${encodeURIComponent(JSON.stringify({ ...DEFAULT_SETTINGS, zoom: 175 }))}`,
   );
   await startSettings();
   listen();
@@ -60,6 +64,30 @@ test("a removed settings listener hears no more", async () => {
   stopListening();
   await tell("settings", { ...DEFAULT_SETTINGS, zoom: 110 });
   expect(heard).toEqual([{ ...DEFAULT_SETTINGS, zoom: 100 }]);
+});
+
+test("a listener to one setting runs at once and then only when that setting changes", async () => {
+  await startSettings();
+  const backdrops: string[] = [];
+  stopListening = whenSettingChanges("backdrop", (backdrop) => {
+    backdrops.push(backdrop);
+  });
+  await tell("settings", { ...DEFAULT_SETTINGS, zoom: 110 });
+  await tell("settings", { ...DEFAULT_SETTINGS, backdrop: "none" });
+  await tell("settings", { ...DEFAULT_SETTINGS, backdrop: "none", zoom: 90 });
+  await tell("settings", DEFAULT_SETTINGS);
+  expect(backdrops).toEqual(["mica", "none", "mica"]);
+});
+
+test("a removed listener to one setting hears no more", async () => {
+  await startSettings();
+  const backdrops: string[] = [];
+  whenSettingChanges("backdrop", (backdrop) => {
+    backdrops.push(backdrop);
+  })();
+  stopListening = () => undefined;
+  await tell("settings", { ...DEFAULT_SETTINGS, backdrop: "none" });
+  expect(backdrops).toEqual(["mica"]);
 });
 
 test("a settings listener added before the page hears the settings fails", async () => {

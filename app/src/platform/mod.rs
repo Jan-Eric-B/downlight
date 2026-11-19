@@ -8,13 +8,26 @@ mod windows;
 pub use windows::{
     add_maximize_button, ask, custom_scheme_origin, draws_own_title_bar, fold_case, has_backdrop,
     is_missing, leave_keys_to_the_page, menu_item_text, notepad, open_as_text_file, open_folder,
-    open_url, place_maximize_button, process_start, reveal_file, show_error, show_window_menu,
-    text_file_program, with_backdrop, with_browser_arguments,
+    open_url, place_maximize_button, process_start, program_name, reveal_file, set_backdrop,
+    show_error, show_window_menu, text_file_program, text_file_program_name, with_backdrop,
+    with_browser_arguments,
 };
 
 /// Other systems name no text file program until their ports find theirs.
 #[cfg(not(windows))]
 pub fn text_file_program() -> Option<std::path::PathBuf> {
+    None
+}
+
+/// Other systems name no text file program until their ports; Edit with shows "Default" alone.
+#[cfg(not(windows))]
+pub fn text_file_program_name() -> Option<String> {
+    None
+}
+
+/// Other systems name programs by their files until their ports.
+#[cfg(not(windows))]
+pub fn program_name(_program: &std::path::Path) -> Option<String> {
     None
 }
 
@@ -118,8 +131,18 @@ pub fn ask(_window: &tauri::WebviewWindow, _question: &str) -> bool {
 #[cfg(not(windows))]
 pub fn with_backdrop<'a, R: tauri::Runtime, M: tauri::Manager<R>>(
     builder: tauri::WebviewWindowBuilder<'a, R, M>,
+    _backdrop: crate::settings::Backdrop,
 ) -> tauri::WebviewWindowBuilder<'a, R, M> {
     builder
+}
+
+/// Other systems have no backdrop to change until their ports.
+#[cfg(not(windows))]
+pub fn set_backdrop(
+    _window: &tauri::WebviewWindow,
+    _backdrop: crate::settings::Backdrop,
+) -> tauri::Result<()> {
+    Ok(())
 }
 
 /// Other systems get a solid background until their ports; macOS vibrancy comes with its port.

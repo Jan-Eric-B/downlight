@@ -7,6 +7,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use serde::Serialize;
 use tauri::{Manager as _, State, WebviewWindow};
 
 use crate::documents::Documents;
@@ -66,6 +67,102 @@ pub async fn choose_editor(window: WebviewWindow) -> Result<(), Notice> {
     .await
     .map_err(|source| EditError::DialogStopped { source })??;
     Ok(())
+}
+
+/// What Edit with in the settings flyout offers (window design ticket 08, `EditorChoices` in
+/// `page/src/app.ts`): Default, named after the program Edit opens a document in without a chosen
+/// editor, and the chosen editor, while Edit would open it. Asked for each time the flyout opens,
+/// so a change of the program for `.txt` files shows without a restart.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EditorChoices {
+    /// The name of the text file program, or of Notepad when the text file program is Downlight;
+    /// None when the system names neither.
+    default_name: Option<String>,
+    /// The editor the reader chose, unless Edit skips it: it is gone, or isn't a program.
+    editor: Option<ChosenEditor>,
+}
+
+/// The editor the reader chose, as Edit with shows it: the program's own name, and its file for
+/// the tooltip.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ChosenEditor {
+    name: String,
+    path: PathBuf,
+}
+
+/// Samples of what Edit with offers, which the page's tests drive through the settings flyout
+/// (`app/src/contract.rs`).
+#[cfg(test)]
+pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
+    let chosen = PathBuf::from(r"C:\Program Files\Notepad++\notepad++.exe");
+    Ok(serde_json::json!({
+        "withEditor": EditorChoices {
+            default_name: Some("Notepad".to_owned()),
+            editor: Some(ChosenEditor {
+                name: "Notepad++ : a free (GNU) source code editor".to_owned(),
+                path: chosen,
+            }),
+        },
+        "withoutNames": EditorChoices {
+            default_name: None,
+            editor: None,
+        },
+    }))
+}
+
+/// What Edit with offers now: the reader's choice of editor, from the settings, against what the
+/// system has. Asks the shell for the programs' names on a blocking thread, as Edit does.
+#[tauri::command]
+pub async fn editor_choices(
+    settings: State<'_, Arc<SettingsStore>>,
+) -> Result<EditorChoices, Notice> {
+    let chosen = settings.get().editor;
+    tauri::async_runtime::spawn_blocking(move || {
+        let own_exe = std::env::current_exe().ok();
+        let is_own = |program: &Path| {
+            own_exe
+                .as_deref()
+                .is_some_and(|own| is_downlight(program, own))
+        };
+        let text_file_program = platform::text_file_program();
+        let order = editor_order(
+            chosen.as_deref(),
+            text_file_program.as_deref(),
+            Path::is_file,
+            is_own,
+        );
+        choices_of(&order, |editor| match editor {
+            Editor::Chosen(program) => platform::program_name(program),
+            Editor::TextFileProgram => platform::text_file_program_name(),
+            Editor::Notepad => {
+                platform::notepad().and_then(|notepad| platform::program_name(&notepad))
+            }
+        })
+    })
+    .await
+    .map_err(|source| format!("Edit with's choices couldn't be read: {source}").into())
+}
+
+/// What Edit with offers for the editors Edit tries in `order` (`editor_order`), each named by
+/// `name_of`: the chosen editor if Edit tries it, and as Default the first one after it.
+fn choices_of(order: &[Editor], name_of: impl Fn(&Editor) -> Option<String>) -> EditorChoices {
+    let editor = order.iter().find_map(|editor| match editor {
+        Editor::Chosen(path) => Some(ChosenEditor {
+            // A program without a description of its own is named as the file manager names it.
+            name: name_of(editor).unwrap_or_else(|| file_name_shown(path)),
+            path: path.clone(),
+        }),
+        Editor::TextFileProgram | Editor::Notepad => None,
+    });
+    let default_name = order
+        .iter()
+        .find(|editor| !matches!(editor, Editor::Chosen(_)))
+        .and_then(&name_of);
+    EditorChoices {
+        default_name,
+        editor,
+    }
 }
 
 /// Opens `window`'s document in the first of the reader's editors that starts, with `launch`, the
@@ -347,6 +444,59 @@ mod tests {
         assert_eq!(
             order(false, None, "downlight.exe"),
             [Editor::TextFileProgram, Editor::Notepad]
+        );
+    }
+
+    /// What Edit with offers for `order`, with each program named after its file and the text
+    /// file program named `Text editor`.
+    fn choices(order: &[Editor]) -> EditorChoices {
+        choices_of(order, |editor| match editor {
+            Editor::Chosen(program) => program
+                .file_stem()
+                .map(|stem| stem.to_string_lossy().into_owned()),
+            Editor::TextFileProgram => Some("Text editor".to_owned()),
+            Editor::Notepad => Some("Notepad".to_owned()),
+        })
+    }
+
+    #[test]
+    fn edit_with_offers_the_chosen_editor_and_the_text_file_program_as_default() {
+        assert_eq!(
+            choices(&order(true, Some(TEXT_FILE_PROGRAM), "downlight.exe")),
+            EditorChoices {
+                default_name: Some("Text editor".to_owned()),
+                editor: Some(ChosenEditor {
+                    name: "edit".to_owned(),
+                    path: PathBuf::from(CHOSEN),
+                }),
+            }
+        );
+    }
+
+    #[test]
+    fn edit_with_offers_no_chosen_editor_that_edit_would_skip() {
+        assert_eq!(
+            choices(&order(false, Some(TEXT_FILE_PROGRAM), "downlight.exe")).editor,
+            None
+        );
+    }
+
+    #[test]
+    fn edit_with_names_notepad_as_default_when_the_text_file_program_is_downlight() {
+        assert_eq!(
+            choices(&order(false, Some(TEXT_FILE_PROGRAM), TEXT_FILE_PROGRAM)).default_name,
+            Some("Notepad".to_owned())
+        );
+    }
+
+    #[test]
+    fn chosen_editor_without_a_name_of_its_own_is_named_after_its_file() {
+        let order = [chosen(), Editor::TextFileProgram, Editor::Notepad];
+        let unnamed = choices_of(&order, |_| None);
+        assert_eq!(unnamed.default_name, None);
+        assert_eq!(
+            unnamed.editor.map(|editor| editor.name),
+            Some("edit.exe".to_owned())
         );
     }
 

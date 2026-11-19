@@ -1,11 +1,12 @@
 import { askApp, listenToApp, type MenuEntry } from "./app";
-import { chooseEditor, edit } from "./edit";
+import { edit } from "./edit";
 import { findNext, findPrevious, openFind } from "./find";
 import { isFullWidth, switchFullWidth } from "./full-width";
 import { isKeptOnTop, switchKeepOnTop } from "./keep-on-top";
 import { showingWhy } from "./notice";
 import { open } from "./open";
 import { whenSettingsChange } from "./settings";
+import { toggleSettingsFlyout } from "./settings-flyout";
 import {
   canStepThroughHistory,
   requestDocument,
@@ -128,7 +129,6 @@ const commands = {
     available: showsDocument,
     run: edit,
   },
-  chooseEditor: { label: "Choose editor...", run: chooseEditor },
   // Ctrl+plus as each layout types it: its own key (German, the number pad), Shift+= (US), and =
   // without Shift, as browsers take it too.
   zoomIn: {
@@ -175,6 +175,12 @@ const commands = {
       void switchKeepOnTop().then(refreshCommands);
     },
   },
+  // The gear's: opens the settings flyout under it, or closes it (window design ticket 08).
+  settings: {
+    label: "Settings",
+    shortcuts: [{ ctrl: true, key: "," }],
+    run: toggleSettingsFlyout,
+  },
   close: {
     label: "Close",
     shortcuts: [{ ctrl: true, key: "w" }],
@@ -210,7 +216,6 @@ const menu: MenuLine[] = [
   "find",
   "separator",
   "edit",
-  "chooseEditor",
   "open",
   "separator",
   "zoomIn",
@@ -221,6 +226,9 @@ const menu: MenuLine[] = [
   "keepOnTop",
   "separator",
   "copy",
+  // Last (window design spec); Choose editor... is in its Edit with now.
+  "separator",
+  "settings",
 ];
 
 /** The menu as the app's `show_document_menu` takes it. */

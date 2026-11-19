@@ -204,6 +204,24 @@ export function pageFlags(): PageFlags {
 }
 
 /**
+ * Every Theme the reader can pick (`Theme` in `app/src/settings/look.rs`, window design ticket
+ * 08), in the order the settings flyout offers them.
+ */
+export const THEMES = ["system", "light", "dark"] as const;
+export type Theme = (typeof THEMES)[number];
+
+/** Every Backdrop the reader can pick (`Backdrop` in `app/src/settings/look.rs`), in order. */
+export const BACKDROPS = ["mica", "micaAlt", "acrylic", "none"] as const;
+export type Backdrop = (typeof BACKDROPS)[number];
+
+/**
+ * Every Accent color the reader can pick (`AccentColor` in `app/src/settings/look.rs`): amber
+ * only, until window design ticket 09 adds Windows' own.
+ */
+export const ACCENT_COLORS = ["amber"] as const;
+export type AccentColor = (typeof ACCENT_COLORS)[number];
+
+/**
  * What the page shows of the reader's settings, one snapshot of all of them (`PageSettings` in
  * `app/src/settings.rs`, window design ticket 12): the first in the page's URL, and each change in
  * a `settings` message. The page hears both in one place (`whenSettingsChange` in `settings.ts`).
@@ -213,6 +231,14 @@ export type PageSettings = {
   zoom: number;
   /** Whether the document fills the window's width (window design ticket 06). */
   fullWidth: boolean;
+  /**
+   * The reader's theme, which the settings flyout shows. The app sets it on the window, which
+   * gives the page its `prefers-color-scheme`, so nothing else in the page reads it.
+   */
+  theme: Theme;
+  /** The reader's backdrop: with None the page draws its solid background (`backdrop.ts`). */
+  backdrop: Backdrop;
+  accentColor: AccentColor;
 };
 
 /**
@@ -220,7 +246,21 @@ export type PageSettings = {
  * app's `PageSettings::default` (`app/src/settings.rs`) is the source; a contract test checks this
  * against it (the page URL's `defaults` sample).
  */
-export const DEFAULT_SETTINGS: PageSettings = { zoom: 100, fullWidth: false };
+export const DEFAULT_SETTINGS: PageSettings = {
+  zoom: 100,
+  fullWidth: false,
+  theme: "system",
+  backdrop: "mica",
+  accentColor: "amber",
+};
+
+/** Whether `value` is one of `values`. */
+function isOneOf<T extends string>(
+  values: readonly T[],
+  value: unknown,
+): value is T {
+  return (values as readonly unknown[]).includes(value);
+}
 
 function isPageSettings(value: unknown): value is PageSettings {
   return (
@@ -231,7 +271,13 @@ function isPageSettings(value: unknown): value is PageSettings {
     Number.isFinite(value.zoom) &&
     value.zoom > 0 &&
     "fullWidth" in value &&
-    typeof value.fullWidth === "boolean"
+    typeof value.fullWidth === "boolean" &&
+    "theme" in value &&
+    isOneOf(THEMES, value.theme) &&
+    "backdrop" in value &&
+    isOneOf(BACKDROPS, value.backdrop) &&
+    "accentColor" in value &&
+    isOneOf(ACCENT_COLORS, value.accentColor)
   );
 }
 
@@ -256,11 +302,29 @@ export type ZoomChange = "in" | "out" | "reset";
 
 /**
  * A change of a setting every window shares, tagged with the setting it changes (`SettingChange`
- * in `app/src/settings/change.rs`): a zoom step (ticket 16), or Full width switched (window design
- * ticket 06), switched rather than set so that two windows switching it at once each switch it.
+ * in `app/src/settings/change.rs`): a zoom step (ticket 16), Full width switched (window design
+ * ticket 06), switched rather than set so that two windows switching it at once each switch it, a
+ * value the reader picked in the settings flyout (ticket 08), set rather than switched, or Edit
+ * with's Default, which forgets the chosen editor.
  */
 export type SettingChange =
-  { setting: "zoom"; change: ZoomChange } | { setting: "switchFullWidth" };
+  | { setting: "zoom"; change: ZoomChange }
+  | { setting: "switchFullWidth" }
+  | { setting: "theme"; theme: Theme }
+  | { setting: "backdrop"; backdrop: Backdrop }
+  | { setting: "accentColor"; accentColor: AccentColor }
+  | { setting: "clearEditor" };
+
+/**
+ * What Edit with in the settings flyout offers (`EditorChoices` in `app/src/edit.rs`): Default,
+ * named after the program Edit opens a document in without a chosen editor, or null when the
+ * system names none, and the editor the reader chose, while Edit would open it, with its file
+ * for the tooltip.
+ */
+export type EditorChoices = {
+  defaultName: string | null;
+  editor: { name: string; path: string } | null;
+};
 
 /**
  * Every command the app has (`generate_handler!` in `app/src/main.rs`), with the arguments the
@@ -331,6 +395,8 @@ export type Commands = {
    * Choosing nothing changes nothing; a choice that can't be the editor rejects with why.
    */
   choose_editor: { args: undefined; answer: null };
+  /** What Edit with in the settings flyout offers now, asked for each time the flyout opens. */
+  editor_choices: { args: undefined; answer: EditorChoices };
   /**
    * A change of a shared setting, such as Zoom in or Full width, for every window: the app sends
    * each page the settings in a `settings` message, this one too. Rejects with why when the change

@@ -15,5 +15,5 @@ export const ZOOM_VARIABLE = "--document-zoom";
  * level, this one too, which then zooms (`startLayout`); a level that couldn't be saved says why.
  */
 export function changeZoom(change: ZoomChange): void {
-  changeSetting({ setting: "zoom", change });
+  void changeSetting({ setting: "zoom", change });
 }

@@ -2,13 +2,15 @@ import "github-markdown-css/github-markdown.css";
 import "./accent.css";
 import "./document.css";
 import "./title-bar.css";
-import { applyBackdrop } from "./backdrop";
+import "./settings-flyout.css";
+import { startBackdrop } from "./backdrop";
 import { startCommands } from "./commands";
 import { startFind } from "./find";
 import { startKeepOnTop } from "./keep-on-top";
 import { startLayout } from "./layout";
 import { startLinks } from "./links";
 import { startSettings } from "./settings";
+import { startSettingsFlyout } from "./settings-flyout";
 import { epochMs, watchLongTasks } from "./timing";
 import { startTitleBar } from "./title-bar";
 import { startDocumentView } from "./view";
@@ -16,11 +18,13 @@ import { startDocumentView } from "./view";
 const scriptStart = epochMs();
 // First, so every part of the page starts with the settings in the page's URL.
 const hearingSettings = startSettings();
-applyBackdrop();
+startBackdrop();
 watchLongTasks();
 // Before the title bar draws Keep on top's button.
 startKeepOnTop();
 startTitleBar();
+// After the title bar, whose gear it opens under.
+startSettingsFlyout();
 startCommands();
 startLinks();
 startFind();

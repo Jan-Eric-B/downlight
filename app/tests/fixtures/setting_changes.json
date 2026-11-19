@@ -1,10 +1,45 @@
 {
+  "accentColorAmber": {
+    "accentColor": "amber",
+    "setting": "accentColor"
+  },
+  "backdropAcrylic": {
+    "backdrop": "acrylic",
+    "setting": "backdrop"
+  },
+  "backdropMica": {
+    "backdrop": "mica",
+    "setting": "backdrop"
+  },
+  "backdropMicaAlt": {
+    "backdrop": "micaAlt",
+    "setting": "backdrop"
+  },
+  "backdropNone": {
+    "backdrop": "none",
+    "setting": "backdrop"
+  },
+  "clearEditor": {
+    "setting": "clearEditor"
+  },
   "fullWidth": {
     "setting": "switchFullWidth"
   },
   "resetZoom": {
     "change": "reset",
     "setting": "zoom"
+  },
+  "themeDark": {
+    "setting": "theme",
+    "theme": "dark"
+  },
+  "themeLight": {
+    "setting": "theme",
+    "theme": "light"
+  },
+  "themeSystem": {
+    "setting": "theme",
+    "theme": "system"
   },
   "zoomIn": {
     "change": "in",

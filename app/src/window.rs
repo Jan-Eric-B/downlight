@@ -18,7 +18,7 @@ use crate::documents::{
     Area, DocumentAt, Documents, NewWindow, Point, ShowError, Target, WindowError, WindowPlace,
     WindowSize, Windows,
 };
-use crate::settings::PageSettings;
+use crate::settings::{PageSettings, Theme, WindowLook};
 use crate::timing::Timing;
 use crate::{command_line, platform, title_bar};
 
@@ -162,6 +162,29 @@ impl Windows for AppHandle {
         let monitor = self.primary_monitor().ok()??;
         Some(work_area_of(&monitor, monitor.scale_factor()))
     }
+
+    fn set_look(&self, window: &str, look: &WindowLook) -> Result<(), WindowError> {
+        // Not built yet, or closed: the documents module gives a window still being built its
+        // look when its page first asks.
+        let Some(window) = self.get_webview_window(window) else {
+            return Ok(());
+        };
+        // Both setters post to the event loop off the main thread and wait for nothing. tao
+        // sets the window's dark mode, which its backdrop's tint follows, and tauri-runtime-wry
+        // hands the webview the theme on tao's `ThemeChanged` as its preferred color scheme,
+        // which belongs to the WebView2 profile all windows share (window design ticket 13).
+        window.set_theme(tauri_theme(look.theme))?;
+        Ok(platform::set_backdrop(&window, look.backdrop)?)
+    }
+}
+
+/// The reader's `theme` as Tauri takes it: None follows Windows.
+fn tauri_theme(theme: Theme) -> Option<tauri::Theme> {
+    match theme {
+        Theme::System => None,
+        Theme::Light => Some(tauri::Theme::Light),
+        Theme::Dark => Some(tauri::Theme::Dark),
+    }
 }
 
 /// `monitor`'s work area, in logical pixels at `scale`.
@@ -185,7 +208,8 @@ struct PageFlags {
     /// The timing switch is on, so the page sends its timing reports.
     timing: bool,
     /// The system can show a backdrop (Mica on Windows 11), and the window is transparent over
-    /// it, so the page draws no background of its own.
+    /// it, so the page draws no background of its own unless the reader's Backdrop, which comes
+    /// with the settings, is None (window design ticket 08).
     backdrop_supported: bool,
     /// The window has no native frame, so the page draws the title bar and the window's buttons
     /// (ADR 0005).
@@ -252,7 +276,7 @@ const LONGEST_HIDDEN: Duration = Duration::from_secs(5);
 /// Opens a window, hidden until its page has drawn its first frame (`show_window`), so it never
 /// shows WebView2's white or an empty frame while the webview starts (ticket 04). The one place
 /// that decides what every new window starts with: the page and its flags and first settings, its
-/// size and place as `new_window` says, its frame, the navigation guard, the backdrop, the
+/// size and place, theme and backdrop as `new_window` says, its frame, the navigation guard, the
 /// webview's browser arguments, the key setup, the maximize button and the 5 s fallback.
 fn open_window(app: &AppHandle, label: &str, new_window: &NewWindow) -> tauri::Result<()> {
     let timing = app.state::<Timing>();
@@ -270,6 +294,7 @@ fn open_window(app: &AppHandle, label: &str, new_window: &NewWindow) -> tauri::R
     let builder = WebviewWindowBuilder::new(app, label, url)
         // Alt+Tab and the taskbar still show the title, though the page's title bar doesn't.
         .title(&new_window.title)
+        .theme(tauri_theme(new_window.look.theme))
         .inner_size(f64::from(size.width), f64::from(size.height));
     // Without a place the system places the window, as for the first one.
     let builder = match new_window.at {
@@ -284,11 +309,7 @@ fn open_window(app: &AppHandle, label: &str, new_window: &NewWindow) -> tauri::R
         // missed, from loading another site or a file in the window.
         .on_navigation(move |url| is_the_page(url, &page))
         .on_new_window(|_, _| NewWindowResponse::Deny);
-    let builder = if flags.backdrop_supported {
-        platform::with_backdrop(builder)
-    } else {
-        builder
-    };
+    let builder = platform::with_backdrop(builder, new_window.look.backdrop);
     let window = platform::with_browser_arguments(builder).build()?;
     platform::leave_keys_to_the_page(&window);
     if flags.title_bar {

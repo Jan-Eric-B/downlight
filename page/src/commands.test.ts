@@ -193,47 +193,6 @@ describe("Ctrl+E opens the document in the editor", () => {
   });
 });
 
-describe("Choose editor...", () => {
-  test("runs from the menu", async () => {
-    await settle();
-    await tell("menu-command", "chooseEditor");
-    expect(askedOfTheApp()).toEqual(["choose_editor"]);
-  });
-
-  test("a second Choose editor before the dialog closes opens no second dialog", async () => {
-    let closeDialog = () => {};
-    app.choose_editor = () =>
-      new Promise((resolve) => {
-        closeDialog = () => {
-          resolve(null);
-        };
-      });
-    await settle();
-    await tell("menu-command", "chooseEditor");
-    await tell("menu-command", "chooseEditor");
-    expect(askedOfTheApp()).toEqual(["choose_editor"]);
-    closeDialog();
-    await settle();
-    await tell("menu-command", "chooseEditor");
-    expect(askedOfTheApp()).toEqual(["choose_editor", "choose_editor"]);
-    closeDialog();
-    await settle();
-  });
-
-  test("shows why a choice wasn't kept", async () => {
-    app.choose_editor = () => {
-      throw new Error("Downlight can't be the editor");
-    };
-    await settle();
-    await tell("menu-command", "chooseEditor");
-    await vi.waitFor(() => {
-      expect(document.querySelector(".notice")?.textContent).toContain(
-        "Downlight can't be the editor",
-      );
-    });
-  });
-});
-
 // A reload asks the document view for the window's document directly, with the showing the view
 // shows, so the app answers it with a reload (ticket 26).
 describe("Reload", () => {
@@ -439,7 +398,7 @@ describe("the right-click menu", () => {
     return entry?.kind === "command" ? entry.enabled : undefined;
   }
 
-  test("replaces the webview's menu with Back, Forward, Reload, Find, Edit, Choose editor..., Open, Zoom in, Zoom out, Reset zoom, Full width, Keep on top and Copy", async () => {
+  test("replaces the webview's menu with Back, Forward, Reload, Find, Edit, Open, Zoom in, Zoom out, Reset zoom, Full width, Keep on top, Copy and Settings", async () => {
     // A window without a document.
     app.render_document = () => null;
     await startDocumentView(0);
@@ -461,8 +420,7 @@ describe("the right-click menu", () => {
       command("find", "Find", "Ctrl+F"),
       { kind: "separator" },
       command("edit", "Edit", "Ctrl+E"),
-      // Without a shortcut, the menu shows none beside it.
-      command("chooseEditor", "Choose editor..."),
+      // Choose editor... is in the settings flyout's Edit with now (window design ticket 08).
       command("open", "Open...", "Ctrl+O"),
       { kind: "separator" },
       // As Windows names the keys, as in Notepad's menu.
@@ -479,6 +437,9 @@ describe("the right-click menu", () => {
       },
       { kind: "separator" },
       { kind: "copy" },
+      // Last, as in the spec (window design ticket 08).
+      { kind: "separator" },
+      command("settings", "Settings", "Ctrl+,"),
     ]);
   });
 

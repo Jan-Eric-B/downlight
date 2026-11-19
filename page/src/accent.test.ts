@@ -228,6 +228,10 @@ const ROLE_USES: Record<string, string> = {
   ".command-button:focus-visible / outline": "emphasis",
   // A switched-on button: Full width and Keep on top (window design tickets 06 and 07).
   '.command-button[aria-pressed="true"] / color': "emphasis",
+  // The settings flyout's chosen radios and its focus rings (window design ticket 08).
+  '.settings-flyout input[type="radio"] / accent-color': "emphasis",
+  ".settings-flyout input:focus-visible,\n.settings-flyout button:focus-visible / outline":
+    "emphasis",
 };
 
 /**

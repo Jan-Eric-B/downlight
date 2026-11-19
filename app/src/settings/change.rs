@@ -8,14 +8,18 @@ use tauri::State;
 
 use crate::documents::Documents;
 use crate::notice::Notice;
-use crate::settings::Settings;
+use crate::settings::{AccentColor, Backdrop, Settings, Theme};
 use crate::zoom::ZoomChange;
 
 /// A change of the settings every window shares (`SettingChange` in `page/src/app.ts`), tagged
 /// with the setting it changes.
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[cfg_attr(test, derive(serde::Serialize))]
-#[serde(tag = "setting", rename_all = "camelCase")]
+#[serde(
+    tag = "setting",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum SettingChange {
     /// Zoom in, Zoom out or Reset zoom (ticket 16).
     Zoom { change: ZoomChange },
@@ -23,6 +27,18 @@ pub enum SettingChange {
     /// two windows that switch it at once each switch it, and every page then shows what the
     /// settings hold.
     SwitchFullWidth,
+    /// The theme the reader picked in the settings flyout (window design ticket 08). Like every
+    /// choice there, a set rather than a switch: the reader picked a value, not a change.
+    Theme { theme: Theme },
+    /// The backdrop the reader picked in the settings flyout (window design ticket 08).
+    Backdrop { backdrop: Backdrop },
+    /// The accent color the reader picked in the settings flyout (window design tickets 08 and
+    /// 09).
+    AccentColor { accent_color: AccentColor },
+    /// "Default" under Edit with in the settings flyout (window design ticket 08): Edit forgets
+    /// the chosen editor and opens the text file program again, or Notepad. Choosing an editor stays a command
+    /// of its own (`choose_editor`), since it opens a dialog.
+    ClearEditor,
 }
 
 impl SettingChange {
@@ -31,6 +47,10 @@ impl SettingChange {
         match self {
             Self::Zoom { change } => settings.zoom = settings.zoom.step(change),
             Self::SwitchFullWidth => settings.full_width = !settings.full_width,
+            Self::Theme { theme } => settings.theme = theme,
+            Self::Backdrop { backdrop } => settings.backdrop = backdrop,
+            Self::AccentColor { accent_color } => settings.accent_color = accent_color,
+            Self::ClearEditor => settings.editor = None,
         }
     }
 
@@ -39,6 +59,10 @@ impl SettingChange {
         match self {
             Self::Zoom { .. } => "The zoom",
             Self::SwitchFullWidth => "Full width",
+            Self::Theme { .. } => "The theme",
+            Self::Backdrop { .. } => "The backdrop",
+            Self::AccentColor { .. } => "The accent color",
+            Self::ClearEditor => "Edit with Default",
         }
     }
 }
@@ -48,18 +72,42 @@ impl SettingChange {
 #[cfg(test)]
 pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
     // A new change stops the build here: give it a sample below, then name it here.
+    // Every value of a choice too, since the settings flyout offers each one.
     let _sampled = |change: &SettingChange| match change {
         SettingChange::Zoom {
             change: ZoomChange::In | ZoomChange::Out | ZoomChange::Reset,
         }
-        | SettingChange::SwitchFullWidth => {}
+        | SettingChange::SwitchFullWidth
+        | SettingChange::Theme {
+            theme: Theme::System | Theme::Light | Theme::Dark,
+        }
+        | SettingChange::Backdrop {
+            backdrop: Backdrop::Mica | Backdrop::MicaAlt | Backdrop::Acrylic | Backdrop::None,
+        }
+        | SettingChange::AccentColor {
+            accent_color: AccentColor::Amber,
+        }
+        | SettingChange::ClearEditor => {}
     };
     let zoom = |change| serde_json::to_value(SettingChange::Zoom { change });
+    let theme = |theme| serde_json::to_value(SettingChange::Theme { theme });
+    let backdrop = |backdrop| serde_json::to_value(SettingChange::Backdrop { backdrop });
     Ok(serde_json::json!({
         "zoomIn": zoom(ZoomChange::In)?,
         "zoomOut": zoom(ZoomChange::Out)?,
         "resetZoom": zoom(ZoomChange::Reset)?,
         "fullWidth": serde_json::to_value(SettingChange::SwitchFullWidth)?,
+        "themeSystem": theme(Theme::System)?,
+        "themeLight": theme(Theme::Light)?,
+        "themeDark": theme(Theme::Dark)?,
+        "backdropMica": backdrop(Backdrop::Mica)?,
+        "backdropMicaAlt": backdrop(Backdrop::MicaAlt)?,
+        "backdropAcrylic": backdrop(Backdrop::Acrylic)?,
+        "backdropNone": backdrop(Backdrop::None)?,
+        "accentColorAmber": serde_json::to_value(SettingChange::AccentColor {
+            accent_color: AccentColor::Amber,
+        })?,
+        "clearEditor": serde_json::to_value(SettingChange::ClearEditor)?,
     }))
 }
 
@@ -114,6 +162,56 @@ mod tests {
         assert_eq!(on.zoom, Zoom::default());
         let off = changed(on, SettingChange::SwitchFullWidth);
         assert!(!off.full_width);
+    }
+
+    #[test]
+    fn choices_set_what_the_reader_picked_and_leave_the_rest() {
+        let picked = changed(
+            Settings::default(),
+            SettingChange::Theme { theme: Theme::Dark },
+        );
+        let picked = changed(
+            picked,
+            SettingChange::Backdrop {
+                backdrop: Backdrop::Acrylic,
+            },
+        );
+        let picked = changed(
+            picked,
+            SettingChange::AccentColor {
+                accent_color: AccentColor::Amber,
+            },
+        );
+        assert_eq!(
+            picked,
+            Settings {
+                theme: Theme::Dark,
+                backdrop: Backdrop::Acrylic,
+                ..Settings::default()
+            }
+        );
+        // A set, not a switch: picking it again keeps it.
+        let again = changed(picked.clone(), SettingChange::Theme { theme: Theme::Dark });
+        assert_eq!(again, picked);
+    }
+
+    #[test]
+    fn clearing_the_editor_forgets_the_chosen_one() {
+        let chosen = Settings {
+            editor: Some(r"C:\Tools\edit.exe".into()),
+            zoom: Zoom::from(150),
+            ..Settings::default()
+        };
+        let cleared = changed(chosen, SettingChange::ClearEditor);
+        assert_eq!(cleared.editor, None);
+        assert_eq!(cleared.zoom, Zoom::from(150));
+    }
+
+    #[test]
+    fn theme_change_is_the_one_the_page_sends() {
+        let change: SettingChange =
+            serde_json::from_str(r#"{ "setting": "theme", "theme": "light" }"#).unwrap();
+        assert_eq!(changed(Settings::default(), change).theme, Theme::Light);
     }
 
     #[test]

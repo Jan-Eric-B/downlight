@@ -1,0 +1,13 @@
+{
+  "withEditor": {
+    "defaultName": "Notepad",
+    "editor": {
+      "name": "Notepad++ : a free (GNU) source code editor",
+      "path": "C:\\Program Files\\Notepad++\\notepad++.exe"
+    }
+  },
+  "withoutNames": {
+    "defaultName": null,
+    "editor": null
+  }
+}

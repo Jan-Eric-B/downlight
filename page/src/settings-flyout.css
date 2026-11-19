@@ -1,0 +1,129 @@
+/* The settings flyout (settings-flyout.ts, window design ticket 08), under the title bar's gear
+   and above the document, on a solid background in Windows 11's flyout colors, since the document
+   is under it. Its right edge lines up with the gear's (set by the script); it is only as large as
+   its controls, so the document beside and below it shows each change at once. */
+.settings-flyout {
+  position: fixed;
+  top: calc(var(--title-bar-height) + 4px);
+  right: 8px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 280px;
+  max-height: calc(100vh - var(--title-bar-height) - 16px);
+  box-sizing: border-box;
+  overflow: auto;
+  padding: 12px 16px 16px;
+  border: 1px solid light-dark(rgb(0 0 0 / 5.78%), rgb(0 0 0 / 20%));
+  border-radius: 8px;
+  background-color: light-dark(#f9f9f9, #2c2c2c);
+  box-shadow: 0 8px 16px rgb(0 0 0 / 14%);
+  color: light-dark(rgb(0 0 0 / 89.4%), #ffffff);
+  font:
+    14px "Segoe UI Variable Text",
+    "Segoe UI",
+    system-ui,
+    sans-serif;
+  /* The title bar is the window's drag region; nothing here drags it. */
+  app-region: no-drag;
+}
+
+.settings-flyout[hidden] {
+  display: none;
+}
+
+.settings-flyout fieldset {
+  margin: 0;
+  padding: 0;
+  border: none;
+  min-width: 0;
+}
+
+.settings-flyout legend {
+  margin-bottom: 4px;
+  padding: 0;
+  font-weight: 600;
+}
+
+/* Theme, Backdrop and Accent color: their few short choices side by side. */
+.settings-flyout .choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+
+/* Edit with: a program's name can be long, so one choice per line, cut with an ellipsis. */
+.settings-flyout .editors {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.settings-flyout label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.settings-flyout input[type="radio"] {
+  flex: none;
+  margin: 0;
+  accent-color: var(--accent-emphasis);
+}
+
+.settings-flyout input:focus-visible,
+.settings-flyout button:focus-visible {
+  outline: 2px solid var(--accent-emphasis);
+  outline-offset: 2px;
+}
+
+/* Backdrop where the OS shows none, as on Windows 10: its reason is its tooltip. */
+.settings-flyout fieldset:disabled {
+  color: light-dark(rgb(0 0 0 / 36.1%), rgb(255 255 255 / 36.3%));
+}
+
+/* Choose..., in Windows 11's standard button look. */
+.settings-flyout button {
+  margin-top: 6px;
+  padding: 4px 12px;
+  border: 1px solid light-dark(rgb(0 0 0 / 5.78%), rgb(255 255 255 / 9.3%));
+  border-radius: 4px;
+  background-color: light-dark(
+    rgb(255 255 255 / 70%),
+    rgb(255 255 255 / 6.05%)
+  );
+  color: inherit;
+  font: inherit;
+}
+
+.settings-flyout button:hover {
+  background-color: light-dark(
+    rgb(249 249 249 / 50%),
+    rgb(255 255 255 / 8.37%)
+  );
+}
+
+.settings-flyout button:active {
+  background-color: light-dark(
+    rgb(249 249 249 / 30%),
+    rgb(255 255 255 / 3.26%)
+  );
+}
+
+/* High contrast: the reader's own colors and border. */
+@media (forced-colors: active) {
+  .settings-flyout {
+    border-color: CanvasText;
+    background-color: Canvas;
+    color: CanvasText;
+  }
+
+  .settings-flyout fieldset:disabled {
+    color: GrayText;
+  }
+}

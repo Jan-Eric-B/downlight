@@ -21,7 +21,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::{
-    documents, keep_on_top, links, menu, message, notice, settings, timing, title_bar, window,
+    documents, edit, keep_on_top, links, menu, message, notice, settings, timing, title_bar, window,
 };
 
 type TestResult<T = ()> = Result<T, Box<dyn Error>>;
@@ -32,12 +32,14 @@ const HOW_TO_UPDATE: &str =
     "If the change is intended, run `npm run fixtures` and review the diff.";
 
 /// Each sample file, with what writes it: the answers of the commands that answer with more than
-/// nothing (among them `render_document`, and `wait_note` for a document slow to arrive), the
+/// nothing (among them `render_document`, `editor_choices` for the settings flyout's Edit with,
+/// and `wait_note` for a document slow to arrive), the
 /// failure of `open_named_folder` for a folder gone since, the messages, the arguments of
 /// `show_document_menu`, the timing reports, `place_maximize_button` and `change_setting`, and
 /// the flags a window tells its page in the page's URL.
-const SAMPLE_FILES: [(&str, Samples); 11] = [
+const SAMPLE_FILES: [(&str, Samples); 12] = [
     ("render_document.json", documents::contract_samples),
+    ("editor_choices.json", edit::contract_samples),
     ("wait_note.json", documents::wait_note_samples),
     ("follow_link.json", links::contract_samples),
     ("keep_on_top.json", keep_on_top::contract_samples),

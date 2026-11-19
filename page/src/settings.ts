@@ -39,10 +39,17 @@ export function startSettings(): Promise<void> {
 /**
  * Asks the app to change a setting for every window. The app sends every page the settings, this
  * one too, which its listeners then show; a change that couldn't be saved says why. A setting the
- * reader changes is a variant of `SettingChange` rather than a command of its own.
+ * reader changes is a variant of `SettingChange` rather than a command of its own. Resolves once
+ * the app has answered, for a change the page shows nothing of in the settings, such as Edit
+ * with's Default (window design ticket 08); never rejects.
  */
-export function changeSetting(change: SettingChange): void {
-  showingWhy(askApp("change_setting", { change }));
+export function changeSetting(change: SettingChange): Promise<void> {
+  const asked = askApp("change_setting", { change });
+  showingWhy(asked);
+  return asked.then(
+    () => undefined,
+    () => undefined,
+  );
 }
 
 /**
@@ -66,6 +73,26 @@ export function whenSettingsChange(listener: SettingsListener): () => void {
   return () => {
     listeners.delete(listener);
   };
+}
+
+/**
+ * Runs `listener` with the setting `key` now, and again only when a new snapshot changes it, for
+ * a setting the page shows that doesn't lay out the document, such as the backdrop (window design
+ * ticket 08). Settings that lay out the document view (zoom, Full width) go through `startLayout`
+ * instead, which changes them together so the document wraps anew once. Returns a function that
+ * removes the listener; throws before `startSettings`, as `whenSettingsChange` does.
+ */
+export function whenSettingChanges<K extends keyof PageSettings>(
+  key: K,
+  listener: (value: PageSettings[K]) => void,
+): () => void {
+  let last: PageSettings[K] | undefined;
+  return whenSettingsChange((settings) => {
+    const value = settings[key];
+    if (value === last) return;
+    last = value;
+    listener(value);
+  });
 }
 
 /**

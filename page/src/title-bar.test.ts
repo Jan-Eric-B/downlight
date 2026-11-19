@@ -315,7 +315,7 @@ test("a file the app can't reveal shows why in a notice", async () => {
 
 // Open and Edit (window design ticket 05).
 
-test("the bar's buttons come in groups set apart by separators: Open and Edit, Full width and Keep on top, then the window's own", () => {
+test("the bar's buttons come in groups set apart by separators: Open and Edit, Full width, Keep on top and Settings, then the window's own", () => {
   startTitleBar(stop.signal);
   expect(titleBarButtonRow()).toEqual([
     "Open",
@@ -323,6 +323,7 @@ test("the bar's buttons come in groups set apart by separators: Open and Edit, F
     "|",
     "Full width",
     "Keep on top",
+    "Settings",
     "|",
     "Minimize",
     "Maximize",

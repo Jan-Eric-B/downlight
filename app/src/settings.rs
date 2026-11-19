@@ -5,18 +5,21 @@
 //! doesn't know, still loads.
 
 pub mod change;
+mod look;
 
 use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 #[cfg(doc)]
 use crate::documents::Documents;
 use crate::documents::WindowSize;
 use crate::zoom::Zoom;
+
+pub use look::{AccentColor, Backdrop, Theme, WindowLook};
 
 const FILE_NAME: &str = "settings.json";
 
@@ -24,22 +27,48 @@ const FILE_NAME: &str = "settings.json";
 const BAD_FILE_NAME: &str = "settings.json.bad";
 
 /// The reader's choices, as the settings file holds them. A value the file leaves out takes its
-/// default.
+/// default, and so does one it holds that doesn't parse, such as a theme a hand edit misspelled,
+/// while the others keep theirs (window design ticket 08). Every field takes [`or_default`].
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
     /// The program Edit opens a document in, as Choose editor... picked it; None for the text
     /// file program.
+    #[serde(deserialize_with = "or_default")]
     pub editor: Option<PathBuf>,
     /// The document view's zoom level (ticket 16), as Zoom in, Zoom out and Reset zoom set it.
+    #[serde(deserialize_with = "or_default")]
     pub zoom: Zoom,
     /// The size of the last window that closed, which a new window opens at (ticket 16); None
     /// until a window has closed. Kept as the window had it: a new window is fitted to its
     /// screen when it opens, since the screen may have changed since.
+    #[serde(deserialize_with = "or_default")]
     pub window_size: Option<WindowSize>,
     /// Whether the document fills the window's width instead of GitHub's reading width (window
     /// design ticket 06); off for a reader who never switched it.
+    #[serde(deserialize_with = "or_default")]
     pub full_width: bool,
+    /// Light or dark, or as Windows has it (window design ticket 08).
+    #[serde(deserialize_with = "or_default")]
+    pub theme: Theme,
+    /// The material behind every window where the OS can show one (window design ticket 08).
+    #[serde(deserialize_with = "or_default")]
+    pub backdrop: Backdrop,
+    /// The color scale of what Downlight adds to a document (window design tickets 08 and 09).
+    #[serde(deserialize_with = "or_default")]
+    pub accent_color: AccentColor,
+}
+
+/// A field's value from the settings file, or the field's default when the value is there but
+/// doesn't parse as one. A file that isn't JSON at all still fails as a whole, and is kept as
+/// `settings.json.bad`: reading the value fails before its type is looked at.
+fn or_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de> + Default,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(T::deserialize(value).unwrap_or_default())
 }
 
 impl Settings {
@@ -50,6 +79,18 @@ impl Settings {
         PageSettings {
             zoom: self.zoom,
             full_width: self.full_width,
+            theme: self.theme,
+            backdrop: self.backdrop,
+            accent_color: self.accent_color,
+        }
+    }
+
+    /// What of the settings acts on the windows themselves (window design ticket 08): every new
+    /// window is built with it, and a change of it reaches every window.
+    pub fn window_look(&self) -> WindowLook {
+        WindowLook {
+            theme: self.theme,
+            backdrop: self.backdrop,
         }
     }
 }
@@ -64,6 +105,13 @@ pub struct PageSettings {
     pub zoom: Zoom,
     /// Whether the document fills the window's width (window design ticket 06).
     pub full_width: bool,
+    /// The settings flyout shows the reader's theme; the app sets it on the window, which gives
+    /// the page its `prefers-color-scheme` (window design ticket 08).
+    pub theme: Theme,
+    /// The page draws its solid background with Backdrop None, and none on any other backdrop the
+    /// OS can show (window design ticket 08).
+    pub backdrop: Backdrop,
+    pub accent_color: AccentColor,
 }
 
 /// The snapshot of a reader who changed nothing, from [`Settings::default`], so the defaults live
@@ -83,6 +131,10 @@ impl PageSettings {
         Self {
             zoom: Zoom::from(125),
             full_width: true,
+            theme: Theme::Dark,
+            backdrop: Backdrop::None,
+            // Amber is the only choice until window design ticket 09.
+            accent_color: AccentColor::Amber,
         }
     }
 }
@@ -550,6 +602,74 @@ mod tests {
         };
         assert_eq!(zoom_in(&too_large), 300);
         assert_eq!(zoom_in(&too_small), 50);
+    }
+
+    #[test]
+    fn theme_backdrop_and_accent_color_default_to_system_mica_and_amber() {
+        let folder = Folder::with_file("look-default", r#"{ "zoom": 125 }"#);
+        let (store, error) = folder.load();
+        assert!(error.is_none(), "{error:?}");
+        let settings = store.get();
+        assert_eq!(settings.theme, Theme::System);
+        assert_eq!(settings.backdrop, Backdrop::Mica);
+        assert_eq!(settings.accent_color, AccentColor::Amber);
+    }
+
+    #[test]
+    fn saved_theme_and_backdrop_load_after_a_restart() {
+        let folder = Folder::new("look-restart");
+        folder
+            .load()
+            .0
+            .change(|settings| {
+                settings.theme = Theme::Dark;
+                settings.backdrop = Backdrop::MicaAlt;
+            })
+            .saved
+            .unwrap();
+        let (restarted, error) = folder.load();
+        assert!(error.is_none(), "{error:?}");
+        assert_eq!(
+            restarted.get().window_look(),
+            WindowLook {
+                theme: Theme::Dark,
+                backdrop: Backdrop::MicaAlt,
+            }
+        );
+    }
+
+    #[test]
+    fn broken_value_loads_its_default_and_keeps_the_others() {
+        let folder = Folder::with_file(
+            "broken-value",
+            r#"{ "theme": "purple", "backdrop": 3, "zoom": 125, "fullWidth": "yes",
+                 "editor": "C:\\Tools\\edit.exe", "windowSize": { "width": "wide" } }"#,
+        );
+        let (store, error) = folder.load();
+        assert!(error.is_none(), "{error:?}");
+        let settings = store.get();
+        assert_eq!(settings.theme, Theme::System);
+        assert_eq!(settings.backdrop, Backdrop::Mica);
+        assert!(!settings.full_width);
+        assert_eq!(settings.window_size, None);
+        assert_eq!(u16::from(settings.zoom), 125);
+        assert_eq!(settings.editor, Some(PathBuf::from(r"C:\Tools\edit.exe")));
+        // Nothing was wrong with the file as a whole, so it stays where it is.
+        assert!(!folder.0.join(BAD_FILE_NAME).exists());
+    }
+
+    #[test]
+    fn page_shows_the_theme_backdrop_and_accent_color() {
+        let settings = Settings {
+            theme: Theme::Light,
+            backdrop: Backdrop::None,
+            ..Settings::default()
+        };
+        let page = settings.page();
+        assert_eq!(
+            (page.theme, page.backdrop, page.accent_color),
+            (Theme::Light, Backdrop::None, AccentColor::Amber)
+        );
     }
 
     #[test]

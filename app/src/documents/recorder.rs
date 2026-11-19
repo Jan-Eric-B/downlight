@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use super::{Area, Documents, NewWindow, WindowError, WindowPlace, Windows};
 use crate::message::{Message, Pages};
-use crate::settings::{Settings, SettingsStore};
+use crate::settings::{Settings, SettingsStore, WindowLook};
 
 /// A message as a [`Recorder`] keeps it: the window it went to, and the message.
 pub type Sent = (String, Message);
@@ -21,6 +21,8 @@ pub enum ToWindow {
     /// The window was titled this.
     Titled(String),
     BroughtToFront,
+    /// The window was given this theme and backdrop.
+    Looked(WindowLook),
 }
 
 /// Something done to a window as a [`Recorder`] keeps it: the window's label, and what was done.
@@ -175,6 +177,10 @@ impl Windows for Recorder {
 
     fn primary_work_area(&self) -> Option<Area> {
         *lock(&self.primary_work_area)
+    }
+
+    fn set_look(&self, window: &str, look: &WindowLook) -> Result<(), WindowError> {
+        self.do_to(window, ToWindow::Looked(*look))
     }
 }
 

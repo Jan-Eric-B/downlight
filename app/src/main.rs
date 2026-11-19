@@ -79,6 +79,7 @@ fn main() -> ExitCode {
             notice::open_named_folder,
             edit::edit_document,
             edit::choose_editor,
+            edit::editor_choices,
             settings::change::change_setting,
             keep_on_top::switch_keep_on_top,
         ])

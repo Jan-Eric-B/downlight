@@ -82,6 +82,7 @@ fn opened(title: &str) -> ToWindow {
     ToWindow::Opened(NewWindow {
         title: title.to_owned(),
         settings: Settings::default().page(),
+        look: Settings::default().window_look(),
         size: super::place::DEFAULT_SIZE,
         at: None,
     })

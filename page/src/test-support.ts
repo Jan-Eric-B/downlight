@@ -3,6 +3,7 @@
 import { emit } from "@tauri-apps/api/event";
 import { mockIPC } from "@tauri-apps/api/mocks";
 import { vi } from "vitest";
+import editorChoicesSamples from "../../app/tests/fixtures/editor_choices.json?raw";
 import followLinkSamples from "../../app/tests/fixtures/follow_link.json?raw";
 import keepOnTopSamples from "../../app/tests/fixtures/keep_on_top.json?raw";
 import menuEntrySamplesJson from "../../app/tests/fixtures/menu_entries.json?raw";
@@ -21,6 +22,7 @@ import type {
   Command,
   DocumentFile,
   DocumentToShow,
+  EditorChoices,
   FirstPaintMarks,
   Followed,
   LongTask,
@@ -90,6 +92,7 @@ type AnsweredWithMore = {
 const MUST_BE_ANSWERED: Record<AnsweredWithMore, true> = {
   follow_link: true,
   switch_keep_on_top: true,
+  editor_choices: true,
 };
 
 /** The commands the page asked the fake app for, in turn. */
@@ -180,6 +183,13 @@ export function waitNoteSample(name: string): WaitNote | null {
 /** A sample of the app's answers to `follow_link`, by name. */
 export function followLinkSample(name: string): Followed {
   return sampleIn(followLinkSamples, name) as Followed;
+}
+
+/** A sample of the app's answers to `editor_choices`, with a chosen editor or without names. */
+export function editorChoicesSample(
+  name: "withEditor" | "withoutNames",
+): EditorChoices {
+  return sampleIn(editorChoicesSamples, name) as EditorChoices;
 }
 
 /** A sample of the app's answers to `switch_keep_on_top`, switched on or off. */
