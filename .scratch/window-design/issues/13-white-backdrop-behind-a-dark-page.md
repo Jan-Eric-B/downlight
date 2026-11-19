@@ -6,12 +6,12 @@ Spec: [Window design](../spec.md)
 
 **Blocked by:** none
 
-**Status:** ready-for-human
+**Status:** closed
 
 - [x] The cause is found and written down here: which window, which order of events, and why the backdrop and the page's theme disagree.
 - [x] A test reproduces it where a test can see it (for example what `open_window` asks of the windows port when several windows open in one launch); if only a real window shows it, say so and why.
-- [ ] After the fix, a launch with several documents shows each window with a backdrop that matches its page, in light and dark.
-- [ ] Checked by hand: ten launches of `downlight.exe` with three documents, in dark mode and in light mode, each window legible from its first frame.
+- [x] After the fix, a launch with several documents shows each window with a backdrop that matches its page, in light and dark.
+- [x] Checked by hand: ten launches of `downlight.exe` with three documents, in dark mode and in light mode, each window legible from its first frame.
 
 ## Comments
 
@@ -49,3 +49,5 @@ Left for the hand check (the last box, and the third, which only a real launch s
 - On Windows 11 builds 22000 to 22620, window-vibrancy sets the undocumented `DWMWA_MICA_EFFECT` instead of `DWMWA_SYSTEMBACKDROP_TYPE`, a path the dev machine (build 26200) doesn't take. The hand check above now has a launch on Windows 11 21H2, or a note that it is unchecked.
 - The doc comment on `with_backdrop` is corrected: tao follows later theme changes too, and the cause is told as the likely reason, not as observed.
 - The status stays `ready-for-human`, and boxes 3 and 4 stay open for the hand check. The fix is committed before it, so if the hand check finds Mica or the page missing, revert the one line (`.no_redirection_bitmap(true)`) and reopen this ticket.
+
+**2026-11-17, hand check passed.** The repo owner ran the hand check on the release build with the fix: each window legible from its first frame in dark and light mode, the first of three too, with Mica behind the page. Boxes 3 and 4 are ticked and the ticket is closed. Not checked: a launch on Windows 11 21H2 (builds 22000 to 22620), where window-vibrancy takes the `DWMWA_MICA_EFFECT` path; if the white shows there, reopen this ticket.
