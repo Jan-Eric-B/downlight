@@ -29,6 +29,10 @@
     "targets": ["nsis"],
     "publisher": "Jan-Eric-B",
     "icon": ["icons/icon.ico"],
+    "resources": {
+      "../LICENSE": "LICENSE.txt",
+      "notices/THIRD-PARTY-NOTICES.txt": "THIRD-PARTY-NOTICES.txt"
+    },
     "windows": {
       "webviewInstallMode": {
         "type": "skip"

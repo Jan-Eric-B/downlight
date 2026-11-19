@@ -34,6 +34,35 @@ fn extensions_the_installer_registers() -> TestResult<Vec<String>> {
         .map_err(Into::into)
 }
 
+/// Downlight's license and the third-party notices (ticket 36) go in the install folder beside
+/// the exe, from files that exist. Tauri's NSIS installer writes each bundle resource to its
+/// target under the install folder, and its uninstaller deletes them again. The license is
+/// installed as `LICENSE.txt`, so a double-click opens it as text.
+#[test]
+fn installer_puts_the_license_and_the_notices_beside_the_exe() -> TestResult {
+    let config: serde_json::Value = serde_json::from_str(&read_app_file("tauri.conf.json")?)?;
+    let resources = config["bundle"]["resources"]
+        .as_object()
+        .ok_or("tauri.conf.json's bundle.resources isn't a map of sources to targets")?;
+    let mut targets: Vec<(&str, &str)> = resources
+        .iter()
+        .map(|(source, target)| (source.as_str(), target.as_str().unwrap_or_default()))
+        .collect();
+    targets.sort_unstable();
+    assert_eq!(
+        targets,
+        [
+            ("../LICENSE", "LICENSE.txt"),
+            ("notices/THIRD-PARTY-NOTICES.txt", "THIRD-PARTY-NOTICES.txt"),
+        ]
+    );
+    for (source, _) in targets {
+        let file = Path::new(env!("CARGO_MANIFEST_DIR")).join(source);
+        assert!(file.is_file(), "{} doesn't exist", file.display());
+    }
+    Ok(())
+}
+
 #[test]
 fn installer_registers_every_markdown_extension_and_no_other() -> TestResult {
     assert_eq!(

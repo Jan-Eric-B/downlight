@@ -22,6 +22,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-deny
+          # cargo-about writes the Rust crates' third-party notices (ticket 36).
+          tool: cargo-deny,cargo-about
       - run: npm ci
       - run: npm run check

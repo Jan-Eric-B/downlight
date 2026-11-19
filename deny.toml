@@ -2,7 +2,8 @@
 # advisories. Run by `npm run check`.
 
 [graph]
-# v1 ships for Windows x64 only (spec: Platforms). Add targets with the macOS and Linux ports.
+# v1 ships for Windows x64 only (spec: Platforms). Add targets with the macOS and Linux ports, here
+# and in app/notices/about.toml, which writes the third-party notices (ticket 36).
 targets = ["x86_64-pc-windows-msvc"]
 
 [advisories]
@@ -16,7 +17,8 @@ ignore = [
 
 [licenses]
 # Each of these is compatible with GPL-3.0, whichever of GPL-3.0-only or -or-later Downlight
-# chooses (still open, see ticket 01).
+# chooses (still open, see ticket 01). app/notices/about.toml accepts the same ones for the
+# third-party notices (ticket 36); a license added here goes there too.
 allow = [
   "0BSD",
   "Apache-2.0",

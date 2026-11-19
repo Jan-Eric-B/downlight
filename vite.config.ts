@@ -1,32 +1,23 @@
 /// <reference types="vitest/config" />
+import { readFileSync } from "node:fs";
 import { defineConfig } from "vite";
 
-/** The license of Fluent UI System Icons, whose glyphs the title bar and the find bar inline (title-bar.ts,
- * find.ts). */
-const FLUENT_ICONS_NOTICE = `/*! Fluent UI System Icons (@fluentui/svg-icons)
- *
- * MIT License
- *
- * Copyright (c) 2020 Microsoft Corporation
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- */`;
+/** The license of Fluent UI System Icons, whose glyphs the title bar and the find bar inline
+ * (title-bar.ts, find.ts). The package ships no license file of its own, so the text is kept in the
+ * page for the banner below and for the third-party notices (scripts/notices.js, ticket 36). */
+const FLUENT_ICONS_LICENSE = readFileSync(
+  new URL("page/fluent-icons-license.txt", import.meta.url),
+  "utf8",
+);
+
+const FLUENT_ICONS_NOTICE = [
+  "/*! Fluent UI System Icons (@fluentui/svg-icons)",
+  " *",
+  ...FLUENT_ICONS_LICENSE.trimEnd()
+    .split("\n")
+    .map((line) => (line === "" ? " *" : ` * ${line}`)),
+  " */",
+].join("\n");
 
 export default defineConfig({
   root: "page",
@@ -38,13 +29,14 @@ export default defineConfig({
     strictPort: true,
   },
   build: {
-    // Writes the bundled dependencies' license texts, such as github-markdown-css's MIT notice,
-    // next to the page so they ship inside the app.
-    license: { fileName: "licenses.md" },
+    // The bundled packages' licenses ship in the installer's third-party notices, beside the exe
+    // rather than inside it (ticket 36): scripts/notices.js turns build.license on for its own
+    // build, which writes nothing to page/dist.
+    license: false,
     rolldownOptions: {
       output: {
-        // @fluentui/svg-icons ships no license file, so licenses.md names it without its text;
-        // its notice goes at the top of the bundle, where minifying keeps it.
+        // The notice inside the code it covers: minifying keeps a `/*!` comment at the top of the
+        // bundle.
         postBanner: FLUENT_ICONS_NOTICE,
       },
     },
