@@ -60,11 +60,16 @@
   gap: 4px;
 }
 
+/* The padding, taken back by the margin, is the focus ring's reach (2px offset, 2px wide): the
+   ellipsis needs overflow hidden, which would otherwise cut the ring of the radio at the label's
+   edge. */
 .settings-flyout label {
   display: flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
+  margin: -4px;
+  padding: 4px;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
