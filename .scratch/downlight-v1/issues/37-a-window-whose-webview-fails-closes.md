@@ -6,7 +6,7 @@ Spec: [Downlight v1](../spec.md)
 
 **Blocked by:** none
 
-**Status:** needs-triage
+**Status:** ready-for-agent
 
 - [ ] A window whose webview fails to start is closed, or never shown, and the process exits when it was the only window, as it does when the last window closes (ADR 0001).
 - [ ] The reader is still told why, as now ("Can't show **a.md**: its window didn't open: ...").
@@ -21,3 +21,5 @@ Where to look:
 - `open_window` in `app/src/window.rs`: `platform::with_browser_arguments(builder).build()?` returns the error, but the native window Tauri made before the webview may already exist, and nothing closes it. The 5 s fallback that shows a hidden window (`LONGEST_HIDDEN`) is spawned only after `build()` succeeds, so it is not what shows this one; check whether Tauri or tao shows the window itself, or leaves it registered with the app.
 - The launch path that reports the failure: `window::open_launch` and `window::failure_report`, then `platform::show_error` in `main.rs`'s single-instance handler and at startup. After the report, the process should exit when no window is left.
 - `Documents::forget` (`app/src/documents.rs`) already forgets a window that never opened; check that a failed build leaves no record whose window keeps the process alive.
+
+**2026-11-19, triage, decided by the repo owner.** In v1, and a blocker of ticket 18. The empty window keeps the process alive, so every later launch is handed to it (ADR 0001's single instance) and opens nothing until the reader closes that window by hand, which a default app for Markdown can't ship with.
