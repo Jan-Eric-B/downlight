@@ -6,12 +6,12 @@ Spec: [Downlight v1](../spec.md) (Edit; moved into v1 from Out of Scope's "edit 
 
 **Blocked by:** 15 (Edit and Choose editor)
 
-**Status:** ready-for-human
+**Status:** closed
 
 - [x] Edit passes the reading position's line number to the Editor when the Editor is known to take one, and opens the file at its top otherwise.
 - [x] The page sends the line with `edit_document`; the app checks it is a line number, never a path or anything it would pass on unchecked.
 - [x] Tests: the line reaches the launch for an Editor that takes one, and an Editor that doesn't is launched as today.
-- [ ] Hand checks in the release build (2026-11-19, built, below).
+- [x] Hand checks in the release build (2026-11-19, built, below).
 
 ## Comments
 
@@ -65,3 +65,5 @@ Questions for triage:
 - **The guard against a document named like an option is checked** (`app/src/edit/line.rs`): `editor_arguments` has `debug_assert!(document.is_absolute())`, since an absolute path, which never starts with `-`, is the whole guard. Every test already passes absolute paths. The window's record takes the path from the launch (made absolute against the launching folder), the dialog, a drop or a link, all absolute; only a launch whose current folder can't be read could keep a relative one.
 - **The null line is tested** (`page/src/edit.test.ts`): `Edit in raw HTML, which has no line number, sends no line` lays out `find.html` with its raw HTML `<summary>` at the top of the view and expects `{ line: null }`. It fails with the line of the paragraph inside the `<details>` when `lineToEditAt` falls back to a number. `layOut` (`page/src/test-support.ts`) takes the lines of raw HTML elements for this, as only the file knows them. The tests now each show their document (`show`), since this one shows `find.html`.
 - **The glossary leaves the list of editors to the code.** The Editor entry says "One that Downlight knows by its program's file name" instead of naming the editors; the Text file program entry adds "and its file is there". The spec's Edit bullet says the same.
+
+**2026-11-19, hand checks passed.** The repo owner ran hand checks 1 to 5 on the release build of commit 03b5e1d, with the editors installed on the work machine: Ctrl+E opens the document at the reading position's line, at line 1 from the top, at the top in an editor not in the table, through the text file program as decided, and for a path with spaces and non-ASCII letters. The box is ticked and the ticket is closed.

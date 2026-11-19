@@ -6,7 +6,7 @@ Spec: [Window design](../spec.md)
 
 **Blocked by:** 05 (Open and Edit buttons, and the separators), v1 [15](../../downlight-v1/issues/15-edit-and-choose-editor.md) (Edit and Choose editor), 12 (Settings reach every page)
 
-**Status:** ready-for-human
+**Status:** closed
 
 - [x] The flyout is drawn by the page under the gear, above the document, and doesn't cover the whole window.
 - [x] Esc, a click outside and the gear again close it. While it is open, Tab moves through its controls and the focus stays inside; on closing, the focus returns to the gear.
@@ -20,7 +20,7 @@ Spec: [Window design](../spec.md)
 - [x] Each change is saved in the settings file and sent to every open window.
 - [x] Page tests: opening and closing (Esc, outside, gear), the focus, the change the page sends for each control, and a `settings` message with Backdrop None bringing back the solid background.
 - [x] App tests: theme and backdrop kept across a restart, defaults when missing, a broken value loads its field's default and keeps the others, a new window opens with the reader's theme and backdrop, and a change of look reaches every window.
-- [ ] Checked by hand: every theme with every backdrop, light and dark Windows, transparency effects off, high contrast, and Backdrop None, then resize and maximize: no black or see-through edges.
+- [x] Checked by hand: every theme with every backdrop, light and dark Windows, transparency effects off, high contrast, and Backdrop None, then resize and maximize: no black or see-through edges.
 
 ## Comments
 
@@ -83,3 +83,7 @@ Not yet confirmed: `npm run check`. `cargo test` for the app (288 tests) and the
 Left: the hand check (the last box). With it, check the flyout's look in light, dark and high contrast, Tab and arrow keys through it, and Backdrop on Windows 10 (disabled, its tooltip "A backdrop needs Windows 11.").
 
 **2026-11-19, the check.** `npm run check` now passes, with ticket 14's work in the same tree (the app's tests 290 passed, the page's 405). Prettier reformatted `page/src/contract.test.ts` and `page/src/settings-flyout.test.ts`; neither it nor `cargo fmt --all` touched a file outside tickets 08 and 14. Beyond formatting, one fix: `page/src/accent.test.ts` ("each use of the accent takes its row's role") failed because its list of the accent's uses, `ROLE_USES`, lacked the flyout's two, the radios' `accent-color` and its focus rings (`outline`), both on `emphasis`. The CSS was right (the spec's row "Ticked checkbox, focus ring, switched-on button" gives them Dark 1 / Light 1), so the two rows went into the list, as earlier tickets added theirs. The hand check is still open.
+
+**2026-11-19, hand check passed, with one fix.** The repo owner ran the hand check on the release build of commit 03b5e1d: every theme with every backdrop, light and dark Windows, transparency effects off, high contrast and Backdrop None, with no black or see-through edges. One fault: a radio's focus ring was cut off on its left, since each label has `overflow: hidden` for the ellipsis and the radio sits at its edge. Fixed in `page/src/settings-flyout.css`: the label gets a 4px padding (the ring's reach, 2px offset and 2px wide), taken back by a -4px margin, so nothing moves. Styling, so no test. Left: the owner sees the whole ring in the rebuilt app, then the box is ticked and the ticket closed. The owner also asked whether dark Acrylic and Mica look right; that is window design 15.
+
+**2026-11-19, focus ring fix confirmed.** The repo owner saw the whole focus ring on the flyout's radios in the rebuilt release build. The last box is ticked and the ticket is closed.

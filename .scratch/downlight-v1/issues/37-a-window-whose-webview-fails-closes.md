@@ -6,11 +6,11 @@ Spec: [Downlight v1](../spec.md)
 
 **Blocked by:** none
 
-**Status:** ready-for-human
+**Status:** closed
 
 - [x] A window whose webview fails to start is closed, or never shown, and the process exits when it was the only window, as it does when the last window closes (ADR 0001).
 - [x] The reader is still told why, as now ("Can't show **a.md**: its window didn't open: ...").
-- [ ] Tested first where a test can make the webview fail, or else checked by hand with the failure below.
+- [x] Tested first where a test can make the webview fail, or else checked by hand with the failure below.
 
 ## Comments
 
@@ -52,3 +52,5 @@ Where to look:
 
 - **Two statements above corrected.** The window is hidden because Downlight's own builder asks for it so (`.visible(false)` in `open_window`), not because tauri-runtime-wry does; the conclusion holds, as tao's `Drop` destroys the native window and the 5 s fallback is spawned only after `build()` succeeds. And the boxes for several windows come up at the same time, stacked, since each `close_stopped` shows its own from its own thread, not one after the other; that is left as it is.
 - **Failures to watch a window are said to be left at that.** `when_webview_stops` (`app/src/platform/windows.rs`) drops the errors of reaching the webview and of adding the handler, as `leave_keys_to_the_page` does. Its doc comment now says why: both fail only once the webview has closed or the app is ending, with no page left to watch, so the window is left unwatched, as before this ticket.
+
+**2026-11-19, hand checks passed.** The repo owner ran hand checks 1 to 4 on the release build of commit 03b5e1d: a webview that fails at startup, a browser process that ends with two windows open and a render process that ends each leave no window and no process behind, and a large document scrolled while it renders brings up no box. The box is ticked and the ticket is closed.

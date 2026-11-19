@@ -8,7 +8,7 @@ Spec: [Downlight v1](../spec.md)
 
 **Blocked by:** 17 (Installer and file associations)
 
-**Status:** ready-for-human
+**Status:** closed
 
 - [x] The notices of every Rust crate in the release build are generated from `Cargo.lock` by cargo-about, for the same target as `deny.toml` (`x86_64-pc-windows-msvc`) and accepting only the licenses `deny.toml` allows, not written by hand. The workspace's own crates are left out, as in cargo-deny.
 - [x] One third-party notices file holds them all: the Rust crates, the page's packages (what Vite's `build.license` writes today, and Fluent UI System Icons, which ships no license file of its own) and the syntax grammars (two-face's listing). It is committed, so its diff is reviewed.
@@ -18,7 +18,7 @@ Spec: [Downlight v1](../spec.md)
 - [x] The check command fails when the committed notices file no longer matches what cargo-about, Vite and two-face give for the current lockfiles, naming `npm run fixtures` as the fix.
 - [x] `npm run fixtures` writes the notices file again after a dependency changes.
 - [x] CI installs cargo-about (`cargo install --locked cargo-about`, as it does cargo-deny), and CLAUDE.md's Commands name it with the check command's other tools.
-- [ ] Hand check: after installing, the install folder holds `LICENSE.txt` and the notices file, both open as text, and uninstalling removes them.
+- [x] Hand check: after installing, the install folder holds `LICENSE.txt` and the notices file, both open as text, and uninstalling removes them.
 
 ## Comments
 
@@ -48,3 +48,5 @@ Spec: [Downlight v1](../spec.md)
 **Hand check left for the owner** (the installer from `npm run tauri build`): install; the install folder (`%LOCALAPPDATA%\Downlight`) holds `LICENSE` and `THIRD-PARTY-NOTICES.txt` beside `downlight.exe`; `THIRD-PARTY-NOTICES.txt` opens in Notepad with a double-click and reads well (its three parts, the Fluent icons' MIT notice in part 2); `LICENSE` has no extension, so Windows asks which program to open it with, and it opens as text in Notepad. Uninstall: both files are gone, and so is the install folder. If `LICENSE` should open with a double-click, the resource's target can be `LICENSE.txt` (one line in `tauri.conf.json` and the installer test); the ticket names it `LICENSE`, so it stays that.
 
 **2026-11-19, decided by the repo owner.** The license is installed as `LICENSE.txt`, so a double-click opens it as text; the repo's own file keeps its name `LICENSE`. Changed: the resource's target in `app/tauri.conf.json`, `installer_puts_the_license_and_the_notices_beside_the_exe` (changed first, failing), and the notices file's header, which names `LICENSE.txt` (`scripts/notices.js`, written again with `npm run fixtures`). The hand check above now looks for `LICENSE.txt`, which opens in Notepad with a double-click.
+
+**2026-11-19, hand check passed.** The repo owner installed the release build of commit 03b5e1d: `LICENSE.txt` and `THIRD-PARTY-NOTICES.txt` sit beside `downlight.exe` and open as text with a double-click, and uninstalling removes them. The box is ticked and the ticket is closed.

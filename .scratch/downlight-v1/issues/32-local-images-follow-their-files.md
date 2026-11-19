@@ -6,9 +6,9 @@ Spec: [Downlight v1](../spec.md)
 
 **Blocked by:** none
 
-**Status:** ready-for-human
+**Status:** closed
 
-- [ ] Checked first by hand in the release build: change a local image the document shows, save the document, and see whether the reload shows the new picture; then F5. Record the result here. If the new picture shows, close this ticket. (Decided from the code and from how Chromium treats images instead, see 2026-11-17 below; the hand check of the fix is left for the owner.)
+- [x] Checked first by hand in the release build: change a local image the document shows, save the document, and see whether the reload shows the new picture; then F5. Record the result here. If the new picture shows, close this ticket. (Decided from the code and from how Chromium treats images instead, see 2026-11-17 below; the hand check of the fix is left for the owner.)
 - [x] If it doesn't: a reload loads each local image anew. A cache header alone likely won't do, since Chromium reuses an image its document has already loaded whatever the HTTP cache says. One way: the image scheme's URLs carry a per-render query, which `local_image` already ignores, written by the core from a value the app passes with each render, or added by the page to the template on a reload.
 - [x] An unchanged image doesn't flicker on a reload. Check it on a document with many images. (Built so that an unchanged image keeps its URL; the check on a document with many images is a hand check.)
 - [x] Tested first where a test can observe it: the URLs a render writes (core), or the page's reload (page tests).
@@ -41,3 +41,5 @@ Spec: [Downlight v1](../spec.md)
 4. In that document, replace one image above the reading position with a taller one and save the document: the new picture shows, and note whether the view stays at the reading position.
 
 **2026-11-17, review fixes.** The lookups that tell when an image's file was last saved are no longer behind a lock. `render` and the sanitizer now ask for lookups that are `Send`, `Sync` and `'static`, as ammonia asks of its filter, and `ImageSources` holds them directly (`core/src/image.rs`, `core/src/render.rs`, `core/src/sanitize.rs`). The lock was only there because the tests' fake file system could not be shared between threads. The fake now keeps the paths it was asked about behind a lock of its own (`core/src/files.rs`), so production code takes no lock for a test's sake. The app's `Disk` was already shareable, so the app didn't change. Nothing the reader sees changed, and the rendered fixtures are the same.
+
+**2026-11-19, hand checks passed.** The repo owner ran hand checks 1 to 4 on the release build of commit 03b5e1d: a replaced image shows after the document is saved and after F5, and 24 unchanged images don't flicker on a reload. No movement of the reading position was reported for check 4. The first box is ticked and the ticket is closed.

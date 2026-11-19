@@ -6,7 +6,7 @@ Spec: [Downlight v1](../spec.md)
 
 **Blocked by:** none
 
-**Status:** ready-for-human
+**Status:** closed
 
 - [x] Research first, recorded in this ticket: what notify 8.2.2 does on Windows when the watched folder is deleted, moved or recycled; when `ReadDirectoryChangesW` completes with an error (for example a share's session dropped after sleep or a VPN reconnect); when its buffer overflows; and when re-arming fails. Read from notify's source and Microsoft Learn; check the cases that need a real file system in the release build.
 - [x] The window checks the file's stamp again when it gets the focus, and reloads (or shows the bar) when it differs, whatever the watch said. This catches every missed event at the moment the reader looks.
@@ -14,7 +14,7 @@ Spec: [Downlight v1](../spec.md)
 - [x] A watch that stops (notify unwatches the folder) is noticed and restarted, or the reader is told that only F5 reloads the document.
 - [x] A save made between the render ahead's read and the start of the watch reloads the document. Today the stamp is taken after `watcher.watch`, so a save before the watch gives no event and a save between the watch and the stamp matches the stamp.
 - [x] A folder over 260 characters is watched, or the reader is told why not (the manifest has no `longPathAware`).
-- [ ] Checked by hand: renaming or deleting the document's folder, or a parent, in Explorer while the window is open. If the open directory handle blocks it ("folder in use"), find a way that doesn't, or record why it must.
+- [x] Checked by hand: renaming or deleting the document's folder, or a parent, in Explorer while the window is open. If the open directory handle blocks it ("folder in use"), find a way that doesn't, or record why it must.
 - [x] Tested first where a test can observe it: in `app/src/watch.rs` with real temporary folders, a folder deleted and recreated, renamed away and back, and a save while the watch starts.
 
 ## Comments
@@ -66,3 +66,5 @@ Spec: [Downlight v1](../spec.md)
 - **The notice when a folder comes back** (owner's decision above). The watch reports that the folder's events can't be watched whenever the folder's watch fails to start, once in each run of failed tries: when the watch starts, and when a missing folder comes back. The window shows the same "Can't watch **a.md** for changes as they are made, so a save reloads it up to 2 seconds later: ..." notice, held until the page first asks, as before. The special case for a missing folder stays, so a document whose folder comes back reloads as soon as its file is written.
 - **Smaller fixes.** `FolderWatch::start` gives an error instead of a pair, and no error is dropped. The thread's loop waits for quiet, reports, then waits for a change, without a flag. The comment on `Watch`'s channel says why it never closes while the thread runs (the thread holds a sender of its own), and the arms for a closed channel stay, commented, so the loop can't spin.
 - **Tests.** Added, written first and failing before the change: `folder_back_but_its_events_cannot_be_watched_reports_so_once` in `app/src/watch.rs`. Added: `folder_whose_events_cannot_be_watched_reports_so_once_and_saves_by_its_checks` in `app/src/watch.rs`; both hold the folder open without sharing it, so it is there but notify can't open it, as on a share without change notifications. Added: `folder_whose_events_cannot_be_watched_tells_the_reader_saves_reload_late` in `app/src/documents/tests/watch.rs`, which checks the notice's wording. Removed: `watch_for_a_document_the_window_has_left_is_dropped`, since a watch can no longer start late. Changed: `window_forgotten_before_its_page_asks_hands_over_nothing_and_drops_its_late_watch` keeps only its handover and is now `window_forgotten_before_its_page_asks_hands_over_nothing`. The watch tests' helpers take a `ReadStamp` and fail on any report but a change.
+
+**2026-11-19, hand checks passed.** The repo owner ran hand checks 1 to 7 on the release build of commit 03b5e1d: the folder renamed, recycled and deleted and brought back, a parent's rename blocked until the window closed (as decided above), the reload on focus, and a document in a folder whose path is over 260 characters. The box is ticked and the ticket is closed.

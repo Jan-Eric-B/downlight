@@ -6,7 +6,7 @@ Spec: [Downlight v1](../spec.md)
 
 **Blocked by:** none
 
-**Status:** ready-for-human
+**Status:** closed
 
 - [x] Measured first with the timing switch, results recorded here: read, render, IPC and insert for documents of 1, 5, 20 and 100 MB (`npm run documents` can be extended), and the memory used.
 - [x] ~~A document over a ceiling chosen from those numbers is not rendered; the view says how large it is and why it isn't shown. The read stops at the ceiling rather than loading the whole file (`app/src/render.rs` reads it whole today).~~ Changed by the owner's decision (Comments): every document is shown, however large. While a document takes over half a second to arrive, the window shows the wait note, "Showing **a.md** (100 MB) ...", instead of an empty or hidden window, until the document replaces it.
@@ -183,3 +183,5 @@ The default "The wait note shows for any request slower than 500 ms, a reload to
 New hand check:
 
 - Open a 20 MB document and wait until it shows, then save it from the editor: no wait note shows during the reload, and the document stays in view, still and at its reading position, until the new render replaces it.
+
+**2026-11-19, hand checks passed.** The repo owner ran the hand checks on the release build of commit 03b5e1d: the wait note for the 20 MB and 100 MB documents, from the file manager and from a link, no wait note during a 20 MB reload, the 158 KB TypeScript block shown plain with the blocks around it highlighted, and a 300 MB image shown as its alt text with the window staying open. The ticket is closed. The 100 KB first paint on an idle machine is left to ticket 18's measurement. The owner found that the window can't be closed, moved or left while a large document loads; that is ticket 38.

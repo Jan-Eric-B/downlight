@@ -6,14 +6,14 @@ Spec: [Window design](../spec.md)
 
 **Blocked by:** none
 
-**Status:** ready-for-human
+**Status:** closed
 
 - [x] The empty window shows "Downlight" right of the logo, in the file name's place and caption font (12 px Segoe UI Variable), dimmed with the bar when the window isn't active.
 - [x] It is plain text, not a button: no hover look, no tooltip, no click (there is no file to reveal), and it is part of the drag region, as the rest of the empty bar is.
 - [x] Showing a document replaces it with the file name; nothing shows both. The zoom level stays hidden in the empty window, as today.
 - [x] The window's OS title in the empty window is unchanged (v1 story 10).
 - [x] Page tests: the empty window shows the name; after a show the file name replaces it.
-- [ ] Checked by hand: an empty window (Downlight started with no file) in light, dark and a contrast theme, active and inactive.
+- [x] Checked by hand: an empty window (Downlight started with no file) in light, dark and a contrast theme, active and inactive.
 
 ## Comments
 
@@ -26,3 +26,5 @@ Spec: [Window design](../spec.md)
 - **The window's OS title** comes from `title_of` in `app/src/documents/show.rs`, which already gives "Downlight" for an empty window; the app isn't touched.
 - **Tests** in `page/src/title-bar.test.ts` (the first written first, failing): the empty window shows "Downlight" right of the logo and no file name; a show replaces it with the file name and an empty window brings it back; a window opened on a document never shows it, also before its document arrives; it is no button, has no tooltip, isn't a bar item, and a click asks the app nothing. They replace ticket 04's "the empty window shows only the logo". The zoom level's existing test for the empty window stays. `titleBarAppName` joins the title bar helpers in `page/src/test-support.ts`.
 - Ticket 04's box and the spec's title bar section now say the empty window shows "Downlight" (this ticket).
+
+**2026-11-19, hand check passed.** The repo owner checked the empty window on the release build of commit 03b5e1d: "Downlight" beside the logo in light, dark and a contrast theme, active and inactive. The box is ticked and the ticket is closed.

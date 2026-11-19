@@ -6,7 +6,7 @@ Spec: [Downlight v1](../spec.md)
 
 **Blocked by:** none
 
-**Status:** ready-for-human
+**Status:** closed
 
 - [x] **Files that aren't Markdown from the command line.** `downlight notes.txt` or `downlight some.png` renders the file as Markdown today (the spec's Open with for other formats is "later"). Decide: show it as Markdown anyway, show it as plain text, or say Downlight opens Markdown files, as a drop does. **Decided:** a file that is text renders as Markdown, whatever its extension (an extension-less README too); a binary file is refused with a notice that says Downlight opens text files. The same rule holds however the file arrives: the command line, a drop and Open (whose dialog still filters to Markdown by default, with an "All files" choice). How a file is told to be binary is the implementer's, in the core, and the spec and glossary say the new rule.
 - [x] **Drive-relative paths in a second launch.** `downlight C:notes.md` in a second launch resolves against the running process's current folder on that drive, not the second launch's. Decide whether to resolve it in the second launch before handing it over, or say it can't be opened. **Decided:** the second launch makes the path absolute against its own current folder before handing it over.
@@ -54,3 +54,5 @@ Spec: [Downlight v1](../spec.md)
 - Raw HTML that ends inside a tag, comment or declaration shows that markup as text, though GitHub hides what follows an unclosed `<!--`. The difference is accepted so that no document can give its blocks its own line numbers, and a typo can't hide the rest of the document.
 - A launch with a drive-relative path (`C:notes.md`) makes it absolute and relaunches Downlight with it, a first launch too. The extra process start is accepted, since the single-instance plugin offers no other way to meet the decision above.
 - A binary file from the command line opens a window that shows the refusal in place of the document, as a missing file does; Open and a drop refuse before the window changes, with a notice.
+
+**2026-11-19, hand checks passed.** The repo owner ran hand checks 1 to 6 on the release build of commit 03b5e1d: text files of any extension shown from a drop, Open and the command line, a binary file and a shortcut refused with their notices, and drive-relative paths opening the right file in a window that comes to the front. The ticket is closed.
