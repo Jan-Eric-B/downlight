@@ -20,9 +20,9 @@ Downlight renders Markdown in Rust (comrak) and shows the result in the system w
 2. As a reader, I want Downlight to open `.md`, `.markdown`, `.mdown`, `.mkd`, `.mkdn` and `.mdwn` files, so that every common Markdown extension works.
 3. As a reader, I want to run `downlight <file>` from a shell, so that I can show a document from the command line.
 4. As a script author, I want `downlight <file>` to return at once, so that a script or agent that shows me a document doesn't wait for me to close it.
-5. As a reader, I want Ctrl+O to show an open dialog filtered to Markdown files, so that I can open a document from inside Downlight.
-6. As a reader, I want to drop a Markdown file onto a window to show it there, so that I can open files from anywhere I can drag them.
-7. As a reader, I want a short message when I drop a file that isn't Markdown, so that I know why nothing opened.
+5. As a reader, I want Ctrl+O to show an open dialog filtered to Markdown files, with a choice of all files, so that I can open a document from inside Downlight.
+6. As a reader, I want to drop a Markdown file, or any other text file, onto a window to show it there, so that I can open files from anywhere I can drag them.
+7. As a reader, I want a short message when I drop a file that Downlight can't show, a binary file or a shortcut, so that I know why nothing opened.
 8. As a reader, I want each document in its own window, so that I can place documents side by side with the usual window tools.
 9. As a reader, I want opening a document that is already open to bring its window to the front, so that I don't end up with duplicates.
 10. As a reader, I want the window title to show the file name and its folder (`README.md - docs - Downlight`), so that I can tell ten READMEs apart in Alt+Tab and on the taskbar.
@@ -68,7 +68,7 @@ Downlight renders Markdown in Rust (comrak) and shows the result in the system w
 
 ### Edit
 
-41. As a reader, I want Ctrl+E to open the document in my **editor**, so that changing it is one key away.
+41. As a reader, I want Ctrl+E to open the document in my **editor**, at the line I'm reading when the editor takes one, so that changing it is one key away.
 42. As a reader, I want the editor to default to the program my system uses for plain text, so that Edit works with no setup.
 43. As a reader, I want "Choose editor..." to let me pick any program as my editor, remembered from then on, so that Edit uses the editor I prefer.
 44. As a reader, I want Edit never to open Downlight itself, so that being the default app for Markdown doesn't break Edit.
@@ -147,9 +147,10 @@ Downlight renders Markdown in Rust (comrak) and shows the result in the system w
 **Core** (a crate with no Tauri dependency). It does the rendering and link work but reads and watches no document files, and its public interface is the main test seam:
 
 - **Render**: takes a file's bytes and its path, and returns the rendered document: sanitized HTML in which every block carries its **line number** (the line of the file where it starts, from comrak's source positions). Rendering is chosen by file format; Markdown is the only format in v1.
+  - Text and binary files (ticket 34): every text file renders as Markdown, whatever its extension (an extension-less README too). A binary file is refused: one with a zero byte in its first 8000 bytes, as Git tells it, unless it starts with a byte order mark (UTF-16 has zero bytes). The app reads only that much of a file to tell it before a window is given it.
   - Decoding: a byte order mark decides (UTF-8, UTF-16 LE, UTF-16 BE); otherwise valid UTF-8 is UTF-8; otherwise Windows-1252.
   - comrak options: GFM (tables, strikethrough, autolinks, task lists, tagfilter), footnotes, alerts, GitHub-style heading anchors, emoji shortcodes, front matter with `---` (shown as a YAML code block), raw HTML allowed, source positions on.
-  - Sanitizing with a GitHub-like allowlist: keeps `<details>`, `<summary>`, `<picture>`, `<source>`, `<img>` with `width`, `height` and `align`, `<kbd>`, `<sub>` and `<sup>`, as well as the task list checkboxes, the heading ids, the highlighting classes and the line number attributes. It removes scripts, styles, event handlers and `javascript:` URLs.
+  - Sanitizing with a GitHub-like allowlist: keeps `<details>`, `<summary>`, `<picture>`, `<source>`, `<img>` with `width`, `height` and `align`, `<kbd>`, `<sub>` and `<sup>`, as well as the task list checkboxes, the heading ids, the highlighting classes and the line number attributes. It removes scripts, styles, event handlers and `javascript:` URLs. Only rendering writes line numbers: the document's raw HTML loses any `data-sourcepos` of its own, so no block gets a false line number for reload anchoring and Find's first match (ticket 34).
   - Images: relative paths resolve against the document's folder and are served to the page through Downlight's own scheme; a local image's URL names when its file was last saved, so a reload shows an image whose file changed and takes an unchanged one from memory (ticket 32). Remote `http(s)` images stay. Images on network shares (UNC paths, `file://server/`) are removed.
 - **Link resolution**: takes the document's path and a link target, and returns one action:
   - show a document in this window, optionally at a heading;
@@ -159,12 +160,12 @@ Downlight renders Markdown in Rust (comrak) and shows the result in the system w
   - hand a URL to the system (`http`, `https` and `mailto` only);
   - nothing.
 
-  A file is Markdown when it has one of the six extensions. A path that leads to a network share, by its name or through a symbolic link, asks the reader first, naming the share's host, and is looked at only after a yes (ticket 20); with a yes it resolves like a local path. A share on the host whose share the document's own path names asks nothing, since reading the document connected there already.
+  A file is Markdown when it has one of the six extensions; a link shows only a Markdown file as a document, and reveals any other file, a text file too. A path that leads to a network share, by its name or through a symbolic link, asks the reader first, naming the share's host, and is looked at only after a yes (ticket 20); with a yes it resolves like a local path. A share on the host whose share the document's own path names asks nothing, since reading the document connected there already.
 
 **App** (the Tauri crate):
 
-- **One process.** A second launch passes its paths to the running process and exits; the process exits when its last window closes. A document that is already open (paths compared after resolving them, ignoring case on Windows) has its window brought to the front instead of opening a second one.
-- **Opening.** Explorer and the command line open a new window. Ctrl+O and dropping a file show the document in the current window and record it in Back history, as following a link does. A window started without a file shows the empty state. The app reads the document's file and passes its bytes to the core's Render.
+- **One process.** A second launch passes its paths to the running process and exits; the process exits when its last window closes. A window whose webview fails to start never shows, and one whose webview stops (WebView2's browser or render process ends) closes once an error box has said why, so no empty window keeps the process alive (ticket 37). A document that is already open (paths compared after resolving them, ignoring case on Windows) has its window brought to the front instead of opening a second one. A second launch makes a drive-relative path such as `C:notes.md` absolute against its own current folder on that drive before handing it over; since the single-instance plugin hands over the arguments as the launch got them, such a launch starts Downlight again with whole paths, lets it bring its window to the front, and exits (ticket 34).
+- **Opening.** Explorer and the command line open a new window. Ctrl+O and dropping a file show the document in the current window and record it in Back history, as following a link does. A window started without a file shows the empty state. However the file arrives (the command line, Open or a drop), a text file is a document whatever its extension, and a binary file is refused with "**a.png** isn't a text file. Downlight opens text files.": Open and a drop leave the window's document as it is and show that as a notice, and a window opened from the command line shows it in place of the document (ticket 34). Open's dialog starts filtered to the six Markdown extensions, with "All files" to choose. A drop shows its first text file; a dropped shortcut (`.lnk`) is never followed, and a drop with no text file but a shortcut says to drop the file itself, not its shortcut. The app reads the document's file and passes its bytes to the core's Render.
 - **Watching.** The app watches each shown document's file: given its path, it reports Changed, Gone and Back. It watches the file's folder rather than the file, so that saves by rename are seen, and reports a change 150 ms after the last event. On Changed and Back it reads the file again and passes its bytes to the core's Render; the page then shows the result as a reload. Since the folder's events can stop or miss a change, the watch also compares the file's stamp every 2 seconds and when the window gets the focus, and watches the folder again when a check finds what its events missed (ticket 30). While a window is open, Windows refuses to rename, move or recycle a parent of its document's folder, as it does for every program that watches a folder this way; that is accepted.
 - **Windows.**
   - Native title bar. The title is the file name, its parent folder, then "Downlight".
@@ -173,6 +174,7 @@ Downlight renders Markdown in Rust (comrak) and shows the result in the system w
 - **Mica.** On Windows 11 the window is transparent with the Mica window effect, and the page draws no background of its own, so the document sits on Mica. Code blocks, tables and quotes keep github-markdown-css's fills. Windows 10 and Linux get a solid background. macOS vibrancy comes with the macOS port.
 - **Settings.** A small file in the app's config folder holds the chosen editor, the zoom level and the last window size. There is no settings window.
 - **Edit.** Ctrl+E opens the document in the chosen editor if one is set and still exists. Otherwise it uses the program the system uses for `.txt` files, started through the shell's handler API so that the packaged Notepad on Windows 11 works. Otherwise it uses Notepad. "Choose editor..." opens a file dialog for a program and remembers the choice.
+  - At the reading position (ticket 35): the page sends the reading position's line with `edit_document` (the first line at the start of the document, none when the block at the top has no line, as raw HTML has none), and the app takes only a positive 32-bit number. A built-in table maps a program's file name, in any case, to how it takes a line: VS Code (`Code.exe`, `Code - Insiders.exe`) `--goto file:line`, Notepad++ (`notepad++.exe`) `-n<line> file`, Sublime Text (`sublime_text.exe`, `subl.exe`) `file:line`, and JetBrains' IDEs (`idea64.exe`, `pycharm64.exe`, `webstorm64.exe`, `rider64.exe`, `clion64.exe`, `goland64.exe`, `phpstorm64.exe`, `rubymine64.exe`, `datagrip64.exe`, `dataspell64.exe`, `rustrover64.exe`, `rustrover.exe`) `--line <line> file`. Any other program gets the document's path alone, as before. There is no setting or UI for the table. A text file program in the table whose file is there is started by its path with the line rather than through the shell; any other, the packaged Notepad among them, and one whose file is gone, still starts through the shell, at the top.
 - **Per-OS module.** Editor launch, Mica, file association details and reveal-in-file-manager live in one module per OS. v1 implements Windows only.
 - **Right-click menu.** A native popup menu with Back, Forward, Reload, Find, Edit, Choose editor..., Open, Zoom in, Zoom out, Reset zoom and Copy.
 
@@ -241,7 +243,7 @@ If the cold start takes more than 1.5 s, the stack is reopened before any featur
 
 - A good test drives a public interface and checks what a user or caller can observe: the HTML, the link action, the watch events, the state of the page. It doesn't check how the result came about. comrak, ammonia and the webview are never mocked.
 - **Core** (`cargo test`): the main seam.
-  - Render tests feed Markdown in and check the HTML: decoding (byte order marks, UTF-8, Windows-1252), the GFM features, alerts, footnotes, heading anchors, emoji, the front matter block, the highlighting classes, line numbers on blocks, the sanitizing (what is removed and what is kept), remote images kept, images on network shares removed, and relative images resolved.
+  - Render tests feed Markdown in and check the HTML: binary files refused, decoding (byte order marks, UTF-8, Windows-1252), the GFM features, alerts, footnotes, heading anchors, emoji, the front matter block, the highlighting classes, line numbers on blocks, the sanitizing (what is removed and what is kept), remote images kept, images on network shares removed, and relative images resolved.
   - Link resolution is a table of document paths and targets with the action each one gives.
 - **App watching** (`cargo test`): the app's watching takes a path and reports events, so its tests need no window. They use real temporary files: a rewrite in place, a rename over the file, a delete, a recreate. There are only a few of these tests, since each waits about 150 ms.
 - **Page** (Vitest with happy-dom):
@@ -252,7 +254,7 @@ If the cold start takes more than 1.5 s, the stack is reopened before any featur
 - **Manual checklist**, for what needs a real window:
   - one process, and an open document's window coming to the front;
   - `downlight <file>` returning at once;
-  - Edit with the `.txt` program, the packaged Notepad, and a chosen editor;
+  - Edit with the `.txt` program, the packaged Notepad, and a chosen editor, and at the reading position's line in each editor the table knows (ticket 35);
   - zoom shared across windows; window size and offset;
   - Mica, transparency effects off, high contrast, Windows 10;
   - the right-click menu and every shortcut;
@@ -266,8 +268,7 @@ If the cold start takes more than 1.5 s, the stack is reopened before any featur
 
 **v1.x**, the next releases:
 
-- edit at the reading line;
-- full width, Keep on top, full screen (full width and Keep on top moved into v1 with [Window design](../window-design/spec.md));
+- full width, Keep on top, full screen (full width and Keep on top moved into v1 with [Window design](../window-design/spec.md); edit at the reading line moved into v1 with ticket 35);
 - pasting or dropping Markdown text;
 - Copy as Markdown;
 - Outline;
@@ -305,7 +306,7 @@ If the cold start takes more than 1.5 s, the stack is reopened before any featur
 
 ## Further Notes
 
-- **Defaults set without an explicit decision**: the app identifier and command name; dropping a non-Markdown file shows a message; a missing or unreadable file shows its error in the window; Ctrl+O and dropping a file show the document in the current window with Back history; no crash log and no telemetry in v1.
+- **Defaults set without an explicit decision**: the app identifier and command name; dropping a file that can't be shown (a binary file or a shortcut since ticket 34, a file that isn't Markdown before it) shows a message; a missing or unreadable file shows its error in the window; Ctrl+O and dropping a file show the document in the current window with Back history; no crash log and no telemetry in v1.
 - **Versions** were taken from the crates.io registry on 2026-11-03, since Context7 was not available: comrak 0.59.0, tauri 2.12.5, ammonia 4.2.4, window-vibrancy 0.8.1. Check them again when adding each dependency.
 - **The work machine** has WebView2 156 installed system-wide, no AppLocker rules, and user-mode code integrity off, so an unsigned per-user build runs.
 - **MDhero** (MIT, a Tauri Markdown viewer and editor) is a reference to read, not a base. Small pieces, such as its `notify` watcher, its content security policy and its file association setup, may be copied with its MIT notice.

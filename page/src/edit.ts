@@ -1,9 +1,13 @@
 import { askApp } from "./app";
 import { showingWhy } from "./notice";
+import { lineToEdit } from "./view";
 
-/** Edit: the document opened in the reader's editor, which the app picks (ticket 15). */
+/**
+ * Edit: the document opened in the reader's editor, which the app picks (ticket 15), at the
+ * reading position's line for an editor the app knows to take one (ticket 35).
+ */
 export function edit(): void {
-  showingWhy(askApp("edit_document"));
+  showingWhy(askApp("edit_document", { line: lineToEdit() ?? null }));
 }
 
 let choosing = false;

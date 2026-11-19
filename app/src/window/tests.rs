@@ -90,6 +90,25 @@ fn launch_without_failures_has_nothing_to_report() {
 }
 
 #[test]
+fn window_whose_webview_stopped_names_its_document_and_why() {
+    assert_eq!(
+        stopped_report(
+            Some(Path::new(LAUNCHED)),
+            "WebView2's browser process ended"
+        ),
+        r"The window of C:\work\docs\README.md closed: WebView2's browser process ended"
+    );
+}
+
+#[test]
+fn window_without_a_document_whose_webview_stopped_names_why() {
+    assert_eq!(
+        stopped_report(None, "WebView2's render process ended"),
+        "A window that showed no document closed: WebView2's render process ended"
+    );
+}
+
+#[test]
 fn page_url_tells_the_page_about_timing_backdrop_and_title_bar() {
     let plain = PageFlags {
         timing: false,

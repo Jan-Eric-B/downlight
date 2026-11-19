@@ -7,10 +7,10 @@ mod windows;
 #[cfg(windows)]
 pub use windows::{
     add_maximize_button, ask, custom_scheme_origin, draws_own_title_bar, fold_case, has_backdrop,
-    is_missing, leave_keys_to_the_page, menu_item_text, notepad, open_as_text_file, open_folder,
-    open_url, place_maximize_button, process_start, program_name, reveal_file, set_backdrop,
-    show_error, show_window_menu, text_file_program, text_file_program_name, with_backdrop,
-    with_browser_arguments,
+    is_missing, leave_keys_to_the_page, let_take_foreground, menu_item_text, notepad,
+    open_as_text_file, open_folder, open_url, place_maximize_button, process_start, program_name,
+    reveal_file, set_backdrop, show_error, show_window_menu, text_file_program,
+    text_file_program_name, when_webview_stops, with_backdrop, with_browser_arguments,
 };
 
 /// Other systems name no text file program until their ports find theirs.
@@ -101,9 +101,23 @@ pub fn menu_item_text(label: &str, shortcut: Option<&str>) -> (String, Option<St
     (label.to_owned(), shortcut.map(str::to_owned))
 }
 
+/// Other systems leave a relaunched Downlight's window where their window managers put it until
+/// their ports.
+#[cfg(not(windows))]
+pub fn let_take_foreground(_process_id: u32) {}
+
 /// Other systems' webviews keep their browser keys until their ports turn them off.
 #[cfg(not(windows))]
 pub fn leave_keys_to_the_page(_window: &tauri::WebviewWindow) {}
+
+/// Other systems' webviews aren't watched for failing until their ports learn how their webviews
+/// tell of it.
+#[cfg(not(windows))]
+pub fn when_webview_stops(
+    _window: &tauri::WebviewWindow,
+    _stopped: impl FnOnce(&'static str) + Send + 'static,
+) {
+}
 
 /// Other systems print the error on stderr until their ports give it a native dialog.
 #[cfg(not(windows))]

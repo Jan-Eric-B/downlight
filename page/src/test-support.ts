@@ -660,20 +660,28 @@ export const TITLE_BAR_HEIGHT = 32;
  * `topLine` is at the top of the view (1.5 is halfway down the first line). As in the window, the
  * document's scroller runs from below the title bar to the window's bottom, so the view's top is
  * not the window's. A range sits where the element holding its start does.
+ *
+ * The document's raw HTML has no line numbers, so it is laid out on the lines `rawHtml` gives
+ * the first element that matches each selector, as the file has it.
  */
-export function layOut(topLine: number): void {
+export function layOut(
+  topLine: number,
+  rawHtml: Record<string, [number, number]> = {},
+): void {
   const scroller = new DOMRect(
     0,
     TITLE_BAR_HEIGHT,
     800,
     innerHeight - TITLE_BAR_HEIGHT,
   );
+  const rawLines = (element: Element) =>
+    Object.entries(rawHtml).find(
+      ([selector]) => document.querySelector(selector) === element,
+    )?.[1];
   const rectOf = (element: Element | null) => {
     if (element?.matches(SCROLLER_SELECTOR)) return scroller;
-    const [start, end] = (element && linesOf(element)) ?? [
-      topLine,
-      topLine - 1,
-    ];
+    const [start, end] = (element &&
+      (rawLines(element) ?? linesOf(element))) ?? [topLine, topLine - 1];
     const top = TITLE_BAR_HEIGHT + (start - topLine) * 20;
     return new DOMRect(0, top, 800, (end - start + 1) * 20);
   };

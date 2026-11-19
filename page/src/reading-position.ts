@@ -177,8 +177,26 @@ function readingBlock({ view, scroller }: ScrolledView): Element | undefined {
  * or of the innermost block with one around it. Undefined at the start of the document.
  */
 export function readingPosition(shown: ScrolledView): number | undefined {
-  const block = readingBlock(shown)?.closest("[data-sourcepos]");
-  return block && shown.view.contains(block) ? startLine(block) : undefined;
+  return lineAround(shown, readingBlock(shown));
+}
+
+/** The line number of `block`, or of the innermost block with one around it in the view. */
+function lineAround(
+  { view }: ScrolledView,
+  block: Element | undefined,
+): number | undefined {
+  const withLine = block?.closest("[data-sourcepos]");
+  return withLine && view.contains(withLine) ? startLine(withLine) : undefined;
+}
+
+/**
+ * The line Edit opens the document at in the editor (ticket 35): the reading position, or the
+ * file's first line at the start of the document, where the reader is at its top. Undefined when
+ * the block at the top of the view has no line number, as raw HTML has none.
+ */
+export function lineToEditAt(shown: ScrolledView): number | undefined {
+  const block = readingBlock(shown);
+  return block === undefined ? 1 : lineAround(shown, block);
 }
 
 /**

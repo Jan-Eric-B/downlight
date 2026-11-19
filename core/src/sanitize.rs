@@ -180,15 +180,23 @@ const FILTERED_TAGS: [&str; 11] = [
 const RENDERING_ONLY_TAGS: [&str; 1] = ["input"];
 
 /// A filtered tag is renamed with this prefix before the HTML is parsed. The parser reads the
-/// new name like any unknown element, so nothing after it changes, and sanitizing drops it.
+/// new name like any unknown element, so nothing after it changes, and sanitizing drops it. The
+/// document's own line numbers are renamed with it too, into an attribute sanitizing drops.
 const DROPPED_PREFIX: &str = "dropped-";
 
 /// The renamed tags whose content goes with them, as ammonia does for `script` and `style`.
 const DROPPED_WITH_CONTENT: [&str; 2] = ["dropped-script", "dropped-style"];
 
-/// Renames the filtered and the rendering-only tags in the document's raw HTML, the only place
-/// they can come from: comrak escapes `<` everywhere else.
-pub(crate) fn drop_filtered_tags<'a>(root: Node<'a>) {
+/// The attribute rendering writes each block's line number in. Only rendering may write it: a
+/// document's raw HTML that carried its own would give its blocks false line numbers, which
+/// reload anchoring and Find's first match then use (ticket 34).
+const LINE_NUMBER_ATTRIBUTE: &str = "data-sourcepos";
+
+/// Renames, in the document's raw HTML, the filtered and the rendering-only tags and the line
+/// number attributes, so that sanitizing drops them, and turns the markup a raw HTML node leaves
+/// unfinished into text. Raw HTML is the only place they can come from: comrak escapes `<`
+/// everywhere else, and writes its own line numbers only once this ran.
+pub(crate) fn drop_from_raw_html<'a>(root: Node<'a>) {
     for node in root.descendants() {
         let mut data = node.data_mut();
         let raw = match &mut data.value {
@@ -196,34 +204,63 @@ pub(crate) fn drop_filtered_tags<'a>(root: Node<'a>) {
             NodeValue::HtmlInline(raw) => raw,
             _ => continue,
         };
-        if let Some(renamed) = rename_filtered_tags(raw) {
-            *raw = renamed;
+        // The scan comes first, so that an unfinished filtered tag shows as the document wrote
+        // it. Renaming after the scan moves no markup's end, so what the scan read still holds:
+        // it only puts letters after a `<`.
+        let scanned = edited(raw, line_numbers_and_unfinished_markup(raw));
+        let scanned_raw = scanned.as_deref().unwrap_or(raw);
+        let renames = filtered_tag_names(scanned_raw).map(|name| (name, Edit::Drop));
+        if let Some(edited) = edited(scanned_raw, renames).or(scanned) {
+            *raw = edited;
         }
     }
 }
 
-/// `raw` with the name of each filtered or rendering-only tag prefixed, or None when it has none.
-fn rename_filtered_tags(raw: &str) -> Option<String> {
-    let bytes = raw.as_bytes();
-    let mut renamed: Option<String> = None;
+/// A change to raw HTML, at a byte offset on an ASCII character.
+#[derive(Clone, Copy)]
+enum Edit {
+    /// [`DROPPED_PREFIX`] goes before the name that starts there.
+    Drop,
+    /// The `<` there is written as `&lt;`, so that it starts no markup and shows as text.
+    Escape,
+}
+
+/// `raw` with the `edits` made, in the order of their offsets, or None when there are none.
+fn edited(raw: &str, edits: impl IntoIterator<Item = (usize, Edit)>) -> Option<String> {
+    let mut edited: Option<String> = None;
     let mut copied = 0;
-    for (at, _) in raw.match_indices('<') {
-        let is_end_tag = bytes.get(at + 1) == Some(&b'/');
-        let name_start = at + 1 + usize::from(is_end_tag);
-        let mut dropped = FILTERED_TAGS.iter().chain(&RENDERING_ONLY_TAGS);
-        if !dropped.any(|tag| names_tag(bytes, name_start, tag)) {
-            continue;
-        }
+    for (at, edit) in edits {
         let out =
-            renamed.get_or_insert_with(|| String::with_capacity(raw.len() + DROPPED_PREFIX.len()));
-        // `<` and `/` are ASCII, so `name_start` is a char boundary.
-        out.push_str(&raw[copied..name_start]);
-        out.push_str(DROPPED_PREFIX);
-        copied = name_start;
+            edited.get_or_insert_with(|| String::with_capacity(raw.len() + DROPPED_PREFIX.len()));
+        out.push_str(&raw[copied..at]);
+        copied = match edit {
+            Edit::Drop => {
+                out.push_str(DROPPED_PREFIX);
+                at
+            }
+            Edit::Escape => {
+                out.push_str("&lt;");
+                at + 1
+            }
+        };
     }
-    renamed.map(|mut out| {
+    edited.map(|mut out| {
         out.push_str(&raw[copied..]);
         out
+    })
+}
+
+/// Where the name of each filtered or rendering-only tag starts in `raw`.
+fn filtered_tag_names(raw: &str) -> impl Iterator<Item = usize> {
+    let bytes = raw.as_bytes();
+    raw.match_indices('<').filter_map(|(at, _)| {
+        let is_end_tag = bytes.get(at + 1) == Some(&b'/');
+        // `<` and `/` are ASCII, so the name starts on a char boundary.
+        let name_start = at + 1 + usize::from(is_end_tag);
+        let mut dropped = FILTERED_TAGS.iter().chain(&RENDERING_ONLY_TAGS);
+        dropped
+            .any(|tag| names_tag(bytes, name_start, tag))
+            .then_some(name_start)
     })
 }
 
@@ -236,11 +273,200 @@ fn names_tag(bytes: &[u8], start: usize, tag: &str) -> bool {
         .is_some_and(|name| name.eq_ignore_ascii_case(tag.as_bytes()))
         && bytes
             .get(end)
-            .is_none_or(|next| matches!(next, b'\t' | b'\n' | b'\x0c' | b'\r' | b' ' | b'/' | b'>'))
+            .is_none_or(|next| is_html_space(*next) || matches!(next, b'/' | b'>'))
+}
+
+/// The edits that drop each [`LINE_NUMBER_ATTRIBUTE`] of a start tag in `raw`, in any case, and
+/// escape the markup `raw` leaves unfinished (ticket 34).
+///
+/// `raw` is read as the HTML parser's tokenizer reads it (WHATWG HTML, "Tokenization"): tags with
+/// their quoted values, comments, DOCTYPEs, CDATA and bogus comments. So text, values and comments
+/// that name the attribute stay as they are, and no tag the parser reads is missed. Raw text
+/// elements need no reading of their own: each one is a filtered tag, renamed into one the parser
+/// reads like any other.
+///
+/// Each node starts where the parser reads text, and ends there too: the markup it leaves
+/// unfinished, such as a tag with an open quote or a comment without its end, is escaped with all
+/// that follows it in the node, so that comrak's markup after the node can't become that tag's
+/// attributes or that comment's text. This shows broken HTML as text. Every character that ends
+/// markup is ASCII, so each offset is on a char boundary.
+fn line_numbers_and_unfinished_markup(raw: &str) -> Vec<(usize, Edit)> {
+    let bytes = raw.as_bytes();
+    let mut edits = Vec::new();
+    let mut cdata_close = FirstClose::default();
+    let mut at = 0;
+    while let Some(open) = position_from(bytes, at, b'<') {
+        let after = open + 1;
+        let rest = &bytes[after..];
+        let end = match rest.first().copied() {
+            Some(letter) if letter.is_ascii_alphabetic() => {
+                let mut names = Vec::new();
+                let end = tag_end(bytes, after, &mut names);
+                if end.is_some() {
+                    edits.extend(names.into_iter().map(|name| (name, Edit::Drop)));
+                }
+                end
+            }
+            Some(b'/') => match rest.get(1) {
+                // An end tag's attributes are read as a start tag's, and then dropped.
+                Some(letter) if letter.is_ascii_alphabetic() => {
+                    tag_end(bytes, after + 1, &mut Vec::new())
+                }
+                // The parser drops `</>`, and reads `</` before anything else as a bogus comment.
+                Some(b'>') => Some(after + 2),
+                Some(_) => close_after(bytes, after + 1),
+                None => None,
+            },
+            Some(b'!') if rest.starts_with(b"!--") => comment_end(bytes, after + 3),
+            Some(b'!') if rest.starts_with(b"![CDATA[") => {
+                let content = after + 8;
+                match cdata_close.from(bytes, content) {
+                    Some(close) if bytes[content..close].ends_with(b"]]") => Some(close + 1),
+                    // Inside `svg` and `math` CDATA ends at `]]>`, elsewhere it is a bogus
+                    // comment that ends at its first `>`. Where the two differ, the scan can't
+                    // tell which the parser reads, so the CDATA shows as text and the parser
+                    // reads on after its `<`, as the scan does.
+                    _ => {
+                        edits.push((open, Edit::Escape));
+                        Some(after)
+                    }
+                }
+            }
+            // A DOCTYPE and a bogus comment end at their first `>`, even one inside quotes.
+            Some(b'!' | b'?') => close_after(bytes, after),
+            // A `<` before anything else is text.
+            Some(_) => Some(after),
+            None => None,
+        };
+        let Some(end) = end else {
+            let unfinished = bytes[open..].iter().enumerate();
+            edits.extend(
+                unfinished
+                    .filter(|(_, next)| **next == b'<')
+                    .map(|(offset, _)| (open + offset, Edit::Escape)),
+            );
+            break;
+        };
+        at = end;
+    }
+    edits
+}
+
+/// Where the tag whose name starts at `name` ends, just after its `>`, or None when `bytes` end
+/// inside it. Each of its attributes named [`LINE_NUMBER_ATTRIBUTE`] goes in `line_numbers`.
+fn tag_end(bytes: &[u8], name: usize, line_numbers: &mut Vec<usize>) -> Option<usize> {
+    let byte = |at: usize| bytes.get(at).copied();
+    let mut at = name;
+    while byte(at).is_some_and(|next| !ends_a_name(next)) {
+        at += 1;
+    }
+    loop {
+        while byte(at).is_some_and(|next| is_html_space(next) || next == b'/') {
+            at += 1;
+        }
+        if byte(at)? == b'>' {
+            return Some(at + 1);
+        }
+        let name_start = at;
+        // A name's first character may be `=`, as the parser reads it.
+        at += 1;
+        while byte(at).is_some_and(|next| !ends_a_name(next) && next != b'=') {
+            at += 1;
+        }
+        if bytes[name_start..at].eq_ignore_ascii_case(LINE_NUMBER_ATTRIBUTE.as_bytes()) {
+            line_numbers.push(name_start);
+        }
+        let mut value = at;
+        while byte(value).is_some_and(is_html_space) {
+            value += 1;
+        }
+        if byte(value) != Some(b'=') {
+            continue;
+        }
+        value += 1;
+        while byte(value).is_some_and(is_html_space) {
+            value += 1;
+        }
+        at = match byte(value) {
+            Some(quote @ (b'"' | b'\'')) => position_from(bytes, value + 1, quote)? + 1,
+            _ => {
+                let mut end = value;
+                while byte(end).is_some_and(|next| !is_html_space(next) && next != b'>') {
+                    end += 1;
+                }
+                end
+            }
+        };
+    }
+}
+
+/// Where the comment whose text starts at `text`, just after its `<!--`, ends, just after its
+/// `>`, or None when `bytes` end inside it. As the parser reads it, `<!-->` and `<!--->` end at
+/// once, and after them the first `>` that follows `--` or `--!` in the text ends it.
+fn comment_end(bytes: &[u8], text: usize) -> Option<usize> {
+    let rest = &bytes[text..];
+    if rest.starts_with(b">") {
+        return Some(text + 1);
+    }
+    if rest.starts_with(b"->") {
+        return Some(text + 2);
+    }
+    let mut at = text;
+    loop {
+        let close = position_from(bytes, at, b'>')?;
+        let before = &bytes[text..close];
+        if before.ends_with(b"--") || before.ends_with(b"--!") {
+            return Some(close + 1);
+        }
+        at = close + 1;
+    }
+}
+
+/// Just after the first `>` from `from` on, or None when there is none.
+fn close_after(bytes: &[u8], from: usize) -> Option<usize> {
+    position_from(bytes, from, b'>').map(|close| close + 1)
+}
+
+/// The first `>` from an offset on, kept for the offsets after it up to the `>`, so that a run of
+/// CDATA that all look for the same `>` reads up to it once, and the scan stays linear.
+#[derive(Default)]
+struct FirstClose {
+    from: usize,
+    found: Option<Option<usize>>,
+}
+
+impl FirstClose {
+    fn from(&mut self, bytes: &[u8], from: usize) -> Option<usize> {
+        match self.found {
+            Some(found) if self.from <= from && found.is_none_or(|close| close >= from) => found,
+            _ => {
+                let found = position_from(bytes, from, b'>');
+                self.from = from;
+                self.found = Some(found);
+                found
+            }
+        }
+    }
+}
+
+/// Where the first `byte` from `from` on is, or None when there is none.
+fn position_from(bytes: &[u8], from: usize, byte: u8) -> Option<usize> {
+    let offset = bytes.get(from..)?.iter().position(|&next| next == byte)?;
+    Some(from + offset)
+}
+
+/// Whether `byte` ends a tag's or an attribute's name, as the HTML parser reads it.
+fn ends_a_name(byte: u8) -> bool {
+    is_html_space(byte) || matches!(byte, b'/' | b'>')
+}
+
+/// HTML's whitespace, which separates a tag's name and its attributes.
+fn is_html_space(byte: u8) -> bool {
+    matches!(byte, b'\t' | b'\n' | b'\x0c' | b'\r' | b' ')
 }
 
 /// Sanitizes the HTML that comrak rendered, with its images loading from `images`. Run
-/// [`drop_filtered_tags`] on the document's tree before rendering it. The lookups are `Send`,
+/// [`drop_from_raw_html`] on the document's tree before rendering it. The lookups are `Send`,
 /// `Sync` and `'static` because ammonia asks that of its attribute filter, which holds them.
 pub(crate) fn sanitize<F: FileSystem + Send + Sync + 'static>(
     html: &str,
@@ -313,6 +539,7 @@ mod tests {
             "http://image.localhost",
             FakeFiles::default(),
         )
+        .unwrap()
         .as_str()
         .to_owned()
     }
@@ -482,6 +709,144 @@ mod tests {
             let html = html_of(&format!("Text {raw} more\n\n# Next\n"));
             assert!(html.contains(">Next<a "), "{raw}: {html}");
         }
+    }
+
+    #[test]
+    fn raw_html_loses_its_own_line_numbers_and_rendering_s_stay() {
+        let html = html_of(
+            "Text\n\n<div data-sourcepos=\"99:1-99:5\">Block</div>\n\nInline <span data-sourcepos=\"98:1-98:2\">span</span>.\n",
+        );
+        assert!(html.contains("<div>Block</div>"), "{html}");
+        assert!(html.contains("<span>span</span>"), "{html}");
+        assert_eq!(
+            html.matches("data-sourcepos").count(),
+            2,
+            "only the two paragraphs': {html}"
+        );
+        assert!(
+            html.contains(r#"<p data-sourcepos="1:1-1:4">Text</p>"#),
+            "{html}"
+        );
+    }
+
+    #[test]
+    fn line_numbers_in_raw_html_are_found_in_any_case_and_form() {
+        for raw in [
+            r#"<div DATA-SourcePos="99:1-99:1">"#,
+            "<div data-sourcepos=99:1-99:1>",
+            "<div data-sourcepos='99:1-99:1'>",
+            "<div id=\"a\" title=\"1 > 0\"\tdata-sourcepos = \"99:1-99:1\">",
+            "<div title='say \"hi\"' data-sourcepos=\"99:1-99:1\">",
+            "<div\ndata-sourcepos=\"99:1-99:1\">",
+        ] {
+            let html = html_of(&format!("{raw}\nBlock\n</div>\n"));
+            assert!(!html.contains("99:1"), "{raw}: {html}");
+            assert!(html.contains("Block"), "{raw}: {html}");
+        }
+    }
+
+    /// A document whose raw HTML has `before` and `after` around a block with a line number of its
+    /// own, which the HTML parser reads as a tag: the scan finds the line number only if it reads
+    /// `before` as the parser does.
+    fn html_with_a_line_number_after(before: &str, after: &str) -> String {
+        html_of(&format!(
+            "<div>\n{before}<div data-sourcepos=\"99:1-99:1\">Text</div>{after}\n</div>\n"
+        ))
+    }
+
+    #[test]
+    fn line_numbers_after_comments_and_declarations_are_dropped() {
+        for (before, after) in [
+            ("<!-- <a title=\" -->\n", "\n\""),
+            ("<![CDATA[ <a title=\" ]]>\n", "\n\""),
+            ("<?x title=\" ?>\n", "\n\""),
+            ("<!x <a title=\" >\n", "\n\""),
+            ("<!DOCTYPE x <a title=\" >\n", "\n\""),
+            ("</1 <a title=\" >\n", "\n\""),
+            ("</div title='<a x=\"'>\n", "\n\""),
+        ] {
+            let html = html_with_a_line_number_after(before, after);
+            assert!(!html.contains("99:1"), "{before}: {html}");
+            assert!(html.contains("Text"), "{before}: {html}");
+        }
+    }
+
+    #[test]
+    fn comment_ends_where_the_html_parser_ends_it() {
+        for (before, after) in [
+            // These end at once, before the `-->` that comes later.
+            ("<!--> ", " -->"),
+            ("<!---> ", " -->"),
+            ("<!-- a --!> ", " -->"),
+            ("<!-- a <!--> ", " -->"),
+            // These don't end at their `>`, so the quote in them is no attribute's.
+            ("<!--!> <a title=\" --> ", "\""),
+            ("<!---!> <a title=\" --> ", "\""),
+            ("<!-- a -!> <a title=\" --> ", "\""),
+        ] {
+            let html = html_with_a_line_number_after(before, after);
+            assert!(!html.contains("99:1"), "{before}: {html}");
+            assert!(html.contains("Text"), "{before}: {html}");
+        }
+    }
+
+    #[test]
+    fn line_number_after_cdata_that_svg_reads_differently_is_dropped() {
+        // In `svg` the CDATA ends at `]]>`, elsewhere at its first `>`.
+        let html = html_with_a_line_number_after("<svg><![CDATA[ > <a title=\"]]>\n", "\n\"");
+        assert!(!html.contains("99:1"), "{html}");
+    }
+
+    #[test]
+    fn raw_html_ending_inside_a_tag_shows_the_tag_as_text() {
+        let html = html_of("<div title='\n\n' data-sourcepos='999:1-999:1'\n");
+        assert!(!html.contains(r#"data-sourcepos="999"#), "{html}");
+        assert!(html.contains("&lt;div title='"), "{html}");
+        assert!(html.contains(r#"<p data-sourcepos="3:1-3:30">"#), "{html}");
+    }
+
+    #[test]
+    fn unfinished_tag_takes_no_line_number_from_the_paragraph_after_it() {
+        let html = html_of("<div\n\nText\n");
+        assert!(html.contains("&lt;div"), "{html}");
+        assert!(
+            html.contains(r#"<p data-sourcepos="3:1-3:4">Text</p>"#),
+            "{html}"
+        );
+    }
+
+    #[test]
+    fn raw_html_ending_inside_a_comment_hides_no_line_number_after_it() {
+        // The second comment starts in an inline tag that comrak reads whole and the parser
+        // ends at its first `>`, since `\x0b` separates attributes for comrak only.
+        for document in [
+            "> <!--\n\nText <a title=\"--><b data-sourcepos='99:1-99:1'>\">x</a>\n",
+            "Text <a\x0bb=\">\" c=\"<!--\" d=e> and <a title=\"--><b data-sourcepos='99:1-99:1'>\">x</a>\n",
+        ] {
+            let html = html_of(document);
+            assert!(
+                !html.contains(r#"data-sourcepos="99"#),
+                "{document}: {html}"
+            );
+        }
+    }
+
+    #[test]
+    fn raw_html_ending_inside_a_declaration_hides_no_line_number_after_it() {
+        let html = html_of("<div>\n<?x\n\n<a title=\"?><b data-sourcepos='99:1-99:1'>\">\n");
+        assert!(!html.contains(r#"data-sourcepos="99"#), "{html}");
+    }
+
+    #[test]
+    fn text_that_names_the_line_number_attribute_is_kept() {
+        let html = html_of(
+            "<div title=\"data-sourcepos=1\">\nThe data-sourcepos=\"1:1\" attribute, 2 < 3 data-sourcepos.\n</div>\n",
+        );
+        assert!(html.contains(r#"title="data-sourcepos=1""#), "{html}");
+        assert!(
+            html.contains(r#"The data-sourcepos="1:1" attribute, 2 &lt; 3 data-sourcepos."#),
+            "{html}"
+        );
     }
 
     #[test]

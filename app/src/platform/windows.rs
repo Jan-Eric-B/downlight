@@ -7,11 +7,13 @@ use std::time::{Duration, SystemTime};
 use tauri::utils::config::WindowEffectsConfig;
 use tauri::window::{Effect, EffectsBuilder};
 use tauri::{Manager, Runtime, WebviewWindow, WebviewWindowBuilder};
-use webview2_com::AcceleratorKeyPressedEventHandler;
 use webview2_com::Microsoft::Web::WebView2::Win32::{
+    COREWEBVIEW2_PROCESS_FAILED_KIND, COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED,
+    COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED,
     ICoreWebView2AcceleratorKeyPressedEventArgs, ICoreWebView2AcceleratorKeyPressedEventArgs2,
     ICoreWebView2Controller, ICoreWebView2Settings3,
 };
+use webview2_com::{AcceleratorKeyPressedEventHandler, ProcessFailedEventHandler};
 use windows_core::{HRESULT, Interface as _};
 use windows_sys::Win32::Foundation::{
     ERROR_FILE_NOT_FOUND, ERROR_INVALID_DRIVE, ERROR_PATH_NOT_FOUND, FILETIME,
@@ -28,8 +30,8 @@ use windows_sys::Win32::UI::Shell::{
     SHELLEXECUTEINFOW, SHOpenFolderAndSelectItems, ShellExecuteExW, ShellExecuteW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    IDYES, MB_DEFBUTTON2, MB_ICONERROR, MB_ICONWARNING, MB_OK, MB_SETFOREGROUND, MB_TOPMOST,
-    MB_YESNO, MessageBoxW, SW_SHOWNORMAL,
+    AllowSetForegroundWindow, IDYES, MB_DEFBUTTON2, MB_ICONERROR, MB_ICONWARNING, MB_OK,
+    MB_SETFOREGROUND, MB_TOPMOST, MB_YESNO, MessageBoxW, SW_SHOWNORMAL,
 };
 
 use crate::APP_NAME;
@@ -494,6 +496,64 @@ pub fn leave_keys_to_the_page(window: &WebviewWindow) {
     });
 }
 
+/// Calls `stopped` with why, once, when `window`'s webview can no longer show its page: WebView2's
+/// browser process ended, which closes the webview, or the render process that drew the page did,
+/// which leaves WebView2's error page in its place, with no title bar to close the window by
+/// (ticket 37). Called on the window's thread, as WebView2 tells of the failure there.
+///
+/// Reaching the webview or adding the handler fails only once the webview has closed or the app is
+/// ending, with no page left to watch, so a failure leaves the window unwatched, as it was before
+/// ticket 37: the reader closes it.
+pub fn when_webview_stops(
+    window: &WebviewWindow,
+    stopped: impl FnOnce(&'static str) + Send + 'static,
+) {
+    let _ = window.with_webview(move |webview| {
+        let mut stopped = Some(stopped);
+        let handler = ProcessFailedEventHandler::create(Box::new(move |_, args| {
+            let Some(args) = args else {
+                return Ok(());
+            };
+            let mut kind = COREWEBVIEW2_PROCESS_FAILED_KIND::default();
+            // SAFETY: `kind` is a live value that ProcessFailedKind only writes.
+            unsafe { args.ProcessFailedKind(&mut kind)? };
+            // Both processes ending raise the event for one webview, in either order, and the
+            // window is closed only once.
+            if let Some(why) = why_the_window_stops(kind)
+                && let Some(stopped) = stopped.take()
+            {
+                stopped(why);
+            }
+            Ok(())
+        }));
+        let mut token = 0;
+        // SAFETY: the handler and the token are valid for the call, and the webview keeps its own
+        // reference to the handler. The token isn't needed: the handler lives as long as the
+        // webview.
+        let _ = unsafe {
+            webview
+                .controller()
+                .CoreWebView2()
+                .and_then(|webview| webview.add_ProcessFailed(&handler, &mut token))
+        };
+    });
+}
+
+/// Why a WebView2 process failure of `kind` leaves the window unable to show its page, or None
+/// when WebView2 recovers from it on its own, as from a GPU process ending, or the failure passes,
+/// as an unresponsive render process does once a long task ends.
+fn why_the_window_stops(kind: COREWEBVIEW2_PROCESS_FAILED_KIND) -> Option<&'static str> {
+    match kind {
+        COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED => {
+            Some("WebView2's browser process ended")
+        }
+        COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED => {
+            Some("WebView2's render process ended")
+        }
+        _ => None,
+    }
+}
+
 fn turn_off_browser_keys(controller: &ICoreWebView2Controller) -> windows_core::Result<()> {
     // SAFETY: plain getters and a setter on live interfaces, on the window's thread, where Tauri
     // runs `with_webview`'s closure.
@@ -522,6 +582,17 @@ fn turn_off_browser_key(
 /// or Ctrl+Shift+I.
 fn is_dev_tools_key(key: u32, ctrl_held: bool, shift_held: bool) -> bool {
     key == u32::from(VK_F12) || (key == u32::from(b'I') && ctrl_held && shift_held)
+}
+
+/// Lets the process `process_id`, which this one started, bring its window to the front (ticket
+/// 34's relaunch). Windows lets a process take the foreground when the foreground process started
+/// it, which holds for a launch from the shell but not for one this windowless process started,
+/// whose window would come up behind the shell's; a process that may take the foreground can
+/// hand that right on (`AllowSetForegroundWindow`). Windows refuses when this process may not
+/// either, and the window then comes up as it would have anyway, so the refusal is left at that.
+pub fn let_take_foreground(process_id: u32) {
+    // SAFETY: AllowSetForegroundWindow takes a plain process ID and touches no memory of ours.
+    unsafe { AllowSetForegroundWindow(process_id) };
 }
 
 /// When Windows created this process, so first paint counts the loader's work before `main` too.
@@ -553,6 +624,14 @@ pub fn process_start() -> Option<SystemTime> {
 
 #[cfg(test)]
 mod tests {
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        COREWEBVIEW2_PROCESS_FAILED_KIND_FRAME_RENDER_PROCESS_EXITED,
+        COREWEBVIEW2_PROCESS_FAILED_KIND_GPU_PROCESS_EXITED,
+        COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_UNRESPONSIVE,
+        COREWEBVIEW2_PROCESS_FAILED_KIND_SANDBOX_HELPER_PROCESS_EXITED,
+        COREWEBVIEW2_PROCESS_FAILED_KIND_UNKNOWN_PROCESS_EXITED,
+        COREWEBVIEW2_PROCESS_FAILED_KIND_UTILITY_PROCESS_EXITED,
+    };
     use windows_sys::Win32::Foundation::{
         E_FAIL, ERROR_ACCESS_DENIED, ERROR_BAD_NET_NAME, ERROR_BAD_NETPATH,
     };
@@ -663,6 +742,32 @@ mod tests {
                 !is_dev_tools_key(u32::from(key), ctrl_held, shift_held),
                 "{key}"
             );
+        }
+    }
+
+    #[test]
+    fn window_stops_when_webview2_s_browser_or_render_process_ends() {
+        assert_eq!(
+            why_the_window_stops(COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED),
+            Some("WebView2's browser process ended")
+        );
+        assert_eq!(
+            why_the_window_stops(COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED),
+            Some("WebView2's render process ended")
+        );
+    }
+
+    #[test]
+    fn window_keeps_going_through_failures_webview2_recovers_from() {
+        for kind in [
+            COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_UNRESPONSIVE,
+            COREWEBVIEW2_PROCESS_FAILED_KIND_FRAME_RENDER_PROCESS_EXITED,
+            COREWEBVIEW2_PROCESS_FAILED_KIND_GPU_PROCESS_EXITED,
+            COREWEBVIEW2_PROCESS_FAILED_KIND_UTILITY_PROCESS_EXITED,
+            COREWEBVIEW2_PROCESS_FAILED_KIND_SANDBOX_HELPER_PROCESS_EXITED,
+            COREWEBVIEW2_PROCESS_FAILED_KIND_UNKNOWN_PROCESS_EXITED,
+        ] {
+            assert_eq!(why_the_window_stops(kind), None, "{kind:?}");
         }
     }
 

@@ -14,6 +14,7 @@ import { noticeContent, showingWhy, showNotice } from "./notice";
 import { open } from "./open";
 import {
   afterNextFrame,
+  lineToEditAt,
   openSectionsAround,
   readingPosition,
   returnToReadingPosition,
@@ -132,6 +133,7 @@ interface StartedView {
   request: () => Promise<void>;
   showing: () => number | null;
   file: () => DocumentFile | null;
+  lineToEdit: () => number | undefined;
   step: (step: Step) => void;
   canStep: (step: Step) => boolean;
   visitHeading: (heading: string | null) => Promise<void>;
@@ -165,6 +167,14 @@ export function showingInView(): number | null {
  */
 export function showsDocument(): boolean {
   return (theView?.file() ?? null) !== null;
+}
+
+/**
+ * The line Edit opens the document at (`lineToEditAt`, ticket 35), or undefined when the block at
+ * the top of the view has none, or the view hasn't started.
+ */
+export function lineToEdit(): number | undefined {
+  return theView?.lineToEdit();
 }
 
 /**
@@ -717,6 +727,7 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
     request,
     showing: () => showing,
     file: () => file,
+    lineToEdit: () => lineToEditAt(shown),
     step,
     canStep: (to) => history.canStep(showing, to),
     visitHeading: visitHeadingInView,

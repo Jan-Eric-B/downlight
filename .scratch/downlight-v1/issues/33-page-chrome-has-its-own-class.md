@@ -6,7 +6,7 @@ Spec: [Downlight v1](../spec.md)
 
 **Blocked by:** none
 
-**Status:** needs-triage
+**Status:** wontfix
 
 - [ ] Decide first whether this is worth it: github-markdown-css defines its color variables only inside `.markdown-body`, so the page's parts need them from somewhere else (a wrapper, the variables copied under a class of the page's own, or a build step). Record the choice here.
 - [ ] The page's parts no longer carry `markdown-body`; the stylesheet's resets for them (`max-width: none`, `margin: 0`) go.
@@ -16,3 +16,5 @@ Spec: [Downlight v1](../spec.md)
 ## Comments
 
 **2026-11-13, from the architecture review.** Speculative. The visible effect, `content-visibility` on the find bar's input and the empty window's button, was fixed separately by narrowing ADR 0003's rule to `article.markdown-body > *`.
+
+**2026-11-19, triage, decided by the repo owner.** Won't fix. The visible bug is fixed already, and github-markdown-css defines its color variables only inside `.markdown-body`, so moving the page's parts off it means copying or re-homing those variables and checking every theme by hand, for nothing a reader sees.

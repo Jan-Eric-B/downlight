@@ -1,3 +1,4 @@
+use std::fmt;
 use std::path::Path;
 
 use comrak::nodes::{Node, NodeCodeBlock, NodeValue};
@@ -6,9 +7,10 @@ use comrak::{Arena, Options, format_html_with_plugins, parse_document};
 
 use crate::decode::decode;
 use crate::files::FileSystem;
+use crate::format::is_text;
 use crate::highlight::{GithubHighlighter, HIGHLIGHT_LIMIT, HighlightLimit};
 use crate::image::ImageSources;
-use crate::sanitize::{drop_filtered_tags, sanitize};
+use crate::sanitize::{drop_from_raw_html, sanitize};
 
 /// A document rendered to HTML by [`render`].
 ///
@@ -32,12 +34,32 @@ impl serde::Serialize for RenderedDocument {
     }
 }
 
+/// Why a file isn't rendered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RenderError {
+    /// The file is binary, not text ([`is_text`](crate::is_text)). Every text file renders as
+    /// Markdown, whatever its extension (ticket 34).
+    NotText,
+}
+
+impl fmt::Display for RenderError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotText => f.write_str("it isn't a text file"),
+        }
+    }
+}
+
+impl std::error::Error for RenderError {}
+
 /// Renders a document's file to HTML, the way GitHub shows it: GitHub Flavored Markdown,
 /// footnotes, alerts, GitHub's heading anchors, emoji shortcodes, and front matter as a YAML code
 /// block. Every block carries its line number in `data-sourcepos` (`line:column-line:column`).
 ///
-/// The bytes are decoded first: a byte order mark decides the encoding (UTF-8, UTF-16 LE or BE),
-/// otherwise valid UTF-8 is UTF-8, and anything else is Windows-1252.
+/// Any text file renders as Markdown, whatever its extension; a binary file
+/// ([`is_text`](crate::is_text)) is refused with [`RenderError::NotText`]. The bytes are decoded
+/// first: a byte order mark decides the encoding (UTF-8, UTF-16 LE or BE), otherwise valid UTF-8
+/// is UTF-8, and anything else is Windows-1252.
 ///
 /// The HTML is sanitized: it keeps the raw HTML GitHub allows and nothing that could act on its
 /// own. `path` is the document's file, against whose folder relative images resolve, and
@@ -54,12 +76,21 @@ pub fn render(
     path: &Path,
     image_origin: &str,
     files: impl FileSystem + Send + Sync + 'static,
-) -> RenderedDocument {
-    render_within(bytes, path, image_origin, files, HIGHLIGHT_LIMIT)
+) -> Result<RenderedDocument, RenderError> {
+    if !is_text(bytes) {
+        return Err(RenderError::NotText);
+    }
+    Ok(render_within(
+        bytes,
+        path,
+        image_origin,
+        files,
+        HIGHLIGHT_LIMIT,
+    ))
 }
 
-/// [`render`] within a highlight limit of the caller's, so a test can render at the limits
-/// without highlighting as much code as the app's limit allows.
+/// [`render`] of a text file within a highlight limit of the caller's, so a test can render at
+/// the limits without highlighting as much code as the app's limit allows.
 pub(crate) fn render_within(
     bytes: &[u8],
     path: &Path,
@@ -73,7 +104,7 @@ pub(crate) fn render_within(
     let root = parse_document(&arena, &text, &options);
     show_front_matter_as_yaml(root);
     keep_line_numbers_on_blocks_only(root);
-    drop_filtered_tags(root);
+    drop_from_raw_html(root);
     let mut plugins = Plugins::default();
     let highlighter = GithubHighlighter::within(highlight_limit);
     plugins.render.codefence_syntax_highlighter = Some(&highlighter);
@@ -177,10 +208,40 @@ mod tests {
             IMAGE_ORIGIN,
             FakeFiles::default(),
         );
-        let html = rendered.as_str();
+        let html = rendered.unwrap();
+        let html = html.as_str();
 
         assert!(html.contains(">Title<a "), "{html}");
         assert!(html.contains("<em>text</em>"), "{html}");
+    }
+
+    #[test]
+    fn binary_file_is_not_rendered() {
+        // An `.ico` file's start: its reserved zero word, its type and its image count.
+        let rendered = render(
+            b"\x00\x00\x01\x00\x01\x00\x10\x10",
+            Path::new("icon.ico"),
+            IMAGE_ORIGIN,
+            FakeFiles::default(),
+        );
+        assert_eq!(rendered, Err(RenderError::NotText));
+    }
+
+    #[test]
+    fn text_file_renders_as_markdown_whatever_its_extension() {
+        for name in ["notes.txt", "README", "Cargo.toml"] {
+            let html = render(
+                b"# Title\n",
+                Path::new(name),
+                IMAGE_ORIGIN,
+                FakeFiles::default(),
+            )
+            .map(|rendered| rendered.as_str().to_owned());
+            assert!(
+                html.as_ref().is_ok_and(|html| html.contains(">Title<a ")),
+                "{name}: {html:?}"
+            );
+        }
     }
 
     #[test]
@@ -191,7 +252,8 @@ mod tests {
             IMAGE_ORIGIN,
             FakeFiles::default(),
         );
-        let html = rendered.as_str();
+        let html = rendered.unwrap();
+        let html = html.as_str();
 
         assert!(!html.contains("<script"), "{html}");
         assert!(html.contains("After"), "{html}");
@@ -204,6 +266,7 @@ mod tests {
             IMAGE_ORIGIN,
             FakeFiles::default(),
         )
+        .unwrap()
         .as_str()
         .to_owned()
     }
@@ -269,6 +332,7 @@ mod tests {
             IMAGE_ORIGIN,
             FakeFiles::default(),
         )
+        .unwrap()
         .as_str()
         .to_owned()
     }

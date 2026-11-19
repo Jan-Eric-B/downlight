@@ -40,7 +40,7 @@ fn render(document: &Path) -> TestResult<String> {
         .file_name()
         .ok_or("a fixture document has no file name")?;
     Ok(
-        downlight_core::render(&bytes, Path::new(name), "http://image.localhost", Nothing)
+        downlight_core::render(&bytes, Path::new(name), "http://image.localhost", Nothing)?
             .as_str()
             .to_owned(),
     )

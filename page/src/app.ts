@@ -386,10 +386,13 @@ export type Commands = {
    */
   open_named_folder: { args: { folder: string }; answer: null };
   /**
-   * Edit: the window's document opened in the reader's editor (ticket 15). Rejects with why, such
-   * as a window without a document or no editor that started.
+   * Edit: the window's document opened in the reader's editor (ticket 15), at `line`, the reading
+   * position's line, for an editor the app knows to take one (ticket 35); null when the block at
+   * the top of the view has no line, as raw HTML has none, which opens the document as the editor
+   * opens it without one. Rejects with why, such as a window without a document or no editor that
+   * started.
    */
-  edit_document: { args: undefined; answer: null };
+  edit_document: { args: { line: number | null }; answer: null };
   /**
    * Choose editor...: a file dialog for a program, kept in the settings as the reader's editor.
    * Choosing nothing changes nothing; a choice that can't be the editor rejects with why.

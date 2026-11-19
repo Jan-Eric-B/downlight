@@ -299,6 +299,8 @@ pub fn wait_note_samples() -> serde_json::Result<serde_json::Value> {
 /// nowhere but after a return (ticket 12).
 #[cfg(test)]
 pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
+    use serde::ser::Error as _;
+
     use crate::disk::Disk;
     use crate::notice::NamedFile;
     use std::io;
@@ -340,12 +342,14 @@ pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
          Access is denied.",
     );
     let rendered = || {
-        Content::Document(downlight_core::render(
+        downlight_core::render(
             b"# Install\n\nRun the installer.\n",
             Path::new("a.md"),
             "",
             Disk,
-        ))
+        )
+        .map(Content::Document)
+        .map_err(serde_json::Error::custom)
     };
     // A missing file whose folder is there, so the notice opens the folder (window design ticket
     // 11).
@@ -360,11 +364,11 @@ pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
     };
     let at_top = || Place::Show { heading: None };
     Ok(serde_json::json!({
-        "showAtHeading": answer(Place::Show { heading: Some("install".to_owned()) }, rendered())?,
-        "showAtTop": answer(at_top(), rendered())?,
-        "showWithHeldNotice": answer_with(at_top(), rendered(), Some(held_notice))?,
-        "reload": answer(Place::Reload, rendered())?,
-        "return": answer(Place::Return, rendered())?,
+        "showAtHeading": answer(Place::Show { heading: Some("install".to_owned()) }, rendered()?)?,
+        "showAtTop": answer(at_top(), rendered()?)?,
+        "showWithHeldNotice": answer_with(at_top(), rendered()?, Some(held_notice))?,
+        "reload": answer(Place::Reload, rendered()?)?,
+        "return": answer(Place::Return, rendered()?)?,
         "unreadShow": answer(at_top(), unread())?,
         "unreadReturn": answer(Place::Return, unread())?,
         "unreadReload": answer(Place::Reload, unread())?,

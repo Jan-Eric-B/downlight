@@ -65,6 +65,8 @@ fn code_of(size: usize, one_line: bool) -> String {
 }
 
 /// Renders `code` as one block in `token`'s language, and how long that took.
+// A helper outside a #[test] fn needs its own allow (clippy.toml).
+#[allow(clippy::expect_used)]
 fn render_block(token: &str, code: &str) -> (Duration, String) {
     let markdown = format!("```{token}\n{code}```\n");
     let started = Instant::now();
@@ -73,7 +75,8 @@ fn render_block(token: &str, code: &str) -> (Duration, String) {
         Path::new("cost.md"),
         "http://image.localhost",
         Nothing,
-    );
+    )
+    .expect("the code is text, so it renders");
     (started.elapsed(), html.as_str().to_owned())
 }
 

@@ -277,7 +277,8 @@ const LONGEST_HIDDEN: Duration = Duration::from_secs(5);
 /// shows WebView2's white or an empty frame while the webview starts (ticket 04). The one place
 /// that decides what every new window starts with: the page and its flags and first settings, its
 /// size and place, theme and backdrop as `new_window` says, its frame, the navigation guard, the
-/// webview's browser arguments, the key setup, the maximize button and the 5 s fallback.
+/// webview's browser arguments, closing it when its webview stops, the key setup, the maximize
+/// button and the 5 s fallback.
 fn open_window(app: &AppHandle, label: &str, new_window: &NewWindow) -> tauri::Result<()> {
     let timing = app.state::<Timing>();
     timing.window_opening(label);
@@ -310,7 +311,12 @@ fn open_window(app: &AppHandle, label: &str, new_window: &NewWindow) -> tauri::R
         .on_navigation(move |url| is_the_page(url, &page))
         .on_new_window(|_, _| NewWindowResponse::Deny);
     let builder = platform::with_backdrop(builder, new_window.look.backdrop);
+    // A window whose webview fails to start never shows: Tauri drops the native window it made
+    // for it, and only a built window is recorded with Tauri, so it keeps no process alive
+    // (ticket 37).
     let window = platform::with_browser_arguments(builder).build()?;
+    let stopped = window.clone();
+    platform::when_webview_stops(&window, move |why| close_stopped(stopped, why));
     platform::leave_keys_to_the_page(&window);
     if flags.title_bar {
         title_bar::add_maximize_button(&window);
@@ -323,6 +329,32 @@ fn open_window(app: &AppHandle, label: &str, new_window: &NewWindow) -> tauri::R
         }
     });
     Ok(())
+}
+
+/// Closes `window`, whose webview stopped (`why`), after telling the reader, so no empty window
+/// with a title bar that does nothing is left behind (ticket 37). Closing the last window ends
+/// the process (ADR 0001), so a later launch starts afresh rather than being handed to a process
+/// whose webviews can't start.
+fn close_stopped(window: WebviewWindow, why: &'static str) {
+    // Off the main thread, where WebView2 tells of the failure, so the other windows keep working
+    // while the box is up.
+    std::thread::spawn(move || {
+        let document = window.state::<Documents>().document_path(window.label());
+        platform::show_error(&stopped_report(document.as_deref(), why));
+        // Only once the box is dismissed: closing the last window ends the process, and the box
+        // with it. Destroyed rather than closed: the reader didn't close it, so its size isn't kept
+        // for the next window (`track_windows`).
+        let _ = window.destroy();
+    });
+}
+
+/// What the reader is told about a window that closed because its webview stopped (`why`),
+/// naming the document it showed, if any.
+fn stopped_report(document: Option<&Path>, why: &str) -> String {
+    match document {
+        Some(document) => format!("The window of {} closed: {why}", document.display()),
+        None => format!("A window that showed no document closed: {why}"),
+    }
 }
 
 /// The origin the app's page loads from, as Tauri serves `WebviewUrl::App`: the `devUrl` (Vite's

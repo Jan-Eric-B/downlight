@@ -38,6 +38,15 @@ use settings::SettingsStore;
 const APP_NAME: &str = "Downlight";
 
 fn main() -> ExitCode {
+    // Before the single-instance plugin hands a second launch's arguments over as they are, which
+    // would leave `C:notes.md` to the running process's current folder on C (ticket 34). If
+    // Downlight can't be started again, this launch goes on with its arguments as they are.
+    let folder = std::env::current_dir().unwrap_or_default();
+    if let Some(paths) = command_line::relaunch_paths(std::env::args_os(), &folder)
+        && command_line::relaunch(&paths).is_ok()
+    {
+        return ExitCode::SUCCESS;
+    }
     let timing = timing::Timing::from_env();
 
     let built = tauri::Builder::default()

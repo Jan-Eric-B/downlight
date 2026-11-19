@@ -179,7 +179,10 @@ impl<F: FileSystem> ImageSources<F> {
 }
 
 // Windows paths: v1 ships for Windows only, and drive letters and network shares are Windows'.
-#[cfg(all(test, windows))]
+// Two attributes, not `all(test, windows)`: Clippy's allows for tests (clippy.toml) count a
+// module as tests only by a `cfg(test)` of its own.
+#[cfg(test)]
+#[cfg(windows)]
 mod tests {
     use std::path::Path;
     use std::time::{Duration, SystemTime};
@@ -204,6 +207,7 @@ mod tests {
             ORIGIN,
             files,
         )
+        .unwrap()
         .as_str()
         .to_owned()
     }

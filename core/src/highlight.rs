@@ -340,6 +340,7 @@ mod tests {
             "http://image.localhost",
             FakeFiles::default(),
         )
+        .unwrap()
         .as_str()
         .to_owned()
     }

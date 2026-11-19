@@ -5,15 +5,19 @@ A small, fast viewer for Markdown files, meant to be the default app that opens 
 ## Language
 
 **Document**:
-The Markdown file a window shows.
+The file a window shows, rendered as Markdown: a Markdown file, or any other text file, whatever its extension, that the command line, Open or a drop names. A binary file is never one.
 _Avoid_: Page, note
 
+**Binary file**:
+A file that isn't text: a zero byte comes in its first 8000 bytes, as Git tells it, and it starts with no byte order mark. Downlight refuses to show one, however it arrives, and says that it opens text files.
+_Avoid_: Non-text file, non-Markdown file
+
 **Editor**:
-The program that Edit opens a document in. It is never Downlight itself.
+The program that Edit opens a document in. It is never Downlight itself. One that Downlight knows by its program's file name opens the document at the reading position's line; any other opens it as it opens a file.
 _Avoid_: Handler, default app
 
 **Text file program**:
-The program the system opens plain text (`.txt`) files with. Edit opens the document in it when the reader chose no editor, or the chosen one is gone; Edit skips it when it is Downlight.
+The program the system opens plain text (`.txt`) files with. Edit opens the document in it when the reader chose no editor, or the chosen one is gone; Edit skips it when it is Downlight. Edit starts it through the shell, which passes it no line, unless it is an editor Downlight knows to take a line and its file is there: then Edit starts it by its file, at the reading position's line.
 _Avoid_: Handler, default editor
 
 **Find**:
@@ -41,7 +45,7 @@ A short message a window shows the reader for a few seconds, such as why a dropp
 _Avoid_: Toast, alert, popup
 
 **Reading position**:
-The block at the top of the view, kept as the line number it starts on. Reload, and Back and Forward, return to it, and Find's first current match is the first one from it on.
+The block at the top of the view, kept as the line number it starts on. Reload, and Back and Forward, return to it, Find's first current match is the first one from it on, and Edit opens the document at its line in an editor that takes one (the first line at the start of the document).
 _Avoid_: Scroll position, anchor
 
 **Showing**:
@@ -77,7 +81,7 @@ An image in a document whose file is on this computer. The page loads it through
 _Avoid_: Asset, file image
 
 **Network share**:
-A folder that another computer, its host, shares, named by a path such as `\\host\share`. Looking at anything on one connects to the host, and Windows may sign in there as the reader, so Downlight never loads an image from one, and following a link that leads to one, by its path or through a symbolic link, first asks the reader, naming the host, unless the shown document is on a share of that same host.
+A folder that another computer, its host, shares, named by a path such as `\\host\share`. Looking at anything on one connects to the host, and Windows may sign in there as the reader, so Downlight never loads an image from one, and following a link that leads to one, by its path or through a symbolic link, first asks the reader, naming the host, unless the shown document is on a share of that same host. A mapped drive (`Z:`) is not a network share, though its files are on another computer: the reader connected it on purpose, so loading from it reaches no new host, and a document on it keeps its local images, while the same document opened by its `\\host\share` path loses them.
 _Avoid_: UNC path, network drive, server
 
 **Link target**:

@@ -1,8 +1,12 @@
 //! Edit (Ctrl+E) and Choose editor... (ticket 15): the document opens in the reader's editor,
 //! which is the program they chose if it is still there, else the text file program, else
 //! Notepad. Edit never opens Downlight itself, which may well be the program for `.md` files and
-//! even for `.txt` ones.
+//! even for `.txt` ones. An editor Downlight knows to take a line opens the document at the
+//! reading position's line (ticket 35, `line`).
 
+mod line;
+
+use std::ffi::OsString;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -10,6 +14,7 @@ use std::sync::Arc;
 use serde::Serialize;
 use tauri::{Manager as _, State, WebviewWindow};
 
+use self::line::{Line, editor_arguments, takes_line};
 use crate::documents::Documents;
 use crate::notice::{NamedFile, Notice, file_name_shown};
 use crate::platform;
@@ -20,27 +25,57 @@ use crate::settings::{SettingsError, SettingsStore};
 pub enum Editor {
     /// The program the reader picked with Choose editor...
     Chosen(PathBuf),
-    /// The program the system opens `.txt` files with, started through the shell so that a
-    /// packaged one, such as Windows 11's Notepad, starts too.
-    TextFileProgram,
+    /// The program the system opens `.txt` files with, by its file, or None when the system
+    /// doesn't say which it is, as for some packaged programs.
+    TextFileProgram(Option<PathBuf>),
     Notepad,
 }
 
-/// Opens the calling window's document in the reader's editor. The launch runs on a blocking
-/// thread, since starting a program can take a while.
+/// The programs Edit can open a document in besides Notepad: the reader's chosen editor, and the
+/// system's text file program, or None for either when there is none or the system doesn't say
+/// which it is.
+#[derive(Debug, Clone, Copy)]
+struct Editors<'a> {
+    chosen: Option<&'a Path>,
+    text_file_program: Option<&'a Path>,
+}
+
+/// How Edit starts one editor.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Launch {
+    /// A program by its path, with its arguments.
+    Program {
+        program: PathBuf,
+        arguments: Vec<OsString>,
+    },
+    /// The text file program through the shell, with this document and no line.
+    AsTextFile(PathBuf),
+}
+
+/// Opens the calling window's document in the reader's editor, at `line` for an editor known to
+/// take one (ticket 35). The launch runs on a blocking thread, since starting a program can take a
+/// while.
 #[tauri::command]
 pub async fn edit_document(
     window: WebviewWindow,
     settings: State<'_, Arc<SettingsStore>>,
+    line: Option<Line>,
 ) -> Result<(), Notice> {
     let app = window.app_handle().clone();
     let chosen = settings.get().editor;
     tauri::async_runtime::spawn_blocking(move || {
+        let text_file_program = platform::text_file_program();
+        let editors = Editors {
+            chosen: chosen.as_deref(),
+            text_file_program: text_file_program.as_deref(),
+        };
         edit(
             &app.state::<Documents>(),
             window.label(),
-            chosen.as_deref(),
-            launch,
+            editors,
+            line,
+            Path::is_file,
+            start,
         )
     })
     .await
@@ -134,7 +169,7 @@ pub async fn editor_choices(
         );
         choices_of(&order, |editor| match editor {
             Editor::Chosen(program) => platform::program_name(program),
-            Editor::TextFileProgram => platform::text_file_program_name(),
+            Editor::TextFileProgram(_) => platform::text_file_program_name(),
             Editor::Notepad => {
                 platform::notepad().and_then(|notepad| platform::program_name(&notepad))
             }
@@ -153,7 +188,7 @@ fn choices_of(order: &[Editor], name_of: impl Fn(&Editor) -> Option<String>) -> 
             name: name_of(editor).unwrap_or_else(|| file_name_shown(path)),
             path: path.clone(),
         }),
-        Editor::TextFileProgram | Editor::Notepad => None,
+        Editor::TextFileProgram(_) | Editor::Notepad => None,
     });
     let default_name = order
         .iter()
@@ -165,13 +200,16 @@ fn choices_of(order: &[Editor], name_of: impl Fn(&Editor) -> Option<String>) -> 
     }
 }
 
-/// Opens `window`'s document in the first of the reader's editors that starts, with `launch`, the
-/// OS's launch, passed in so a test sees what it is given without a program starting.
+/// Opens `window`'s document at `line` in the first of the reader's `editors` that starts. The
+/// OS's side is passed in, so a test sees what Edit does without a program starting: `is_file`,
+/// whether a program's file is there, and `start`, the launch.
 fn edit(
     documents: &Documents,
     window: &str,
-    chosen: Option<&Path>,
-    launch: impl Fn(&Editor, &Path) -> io::Result<()>,
+    editors: Editors<'_>,
+    line: Option<Line>,
+    is_file: impl Fn(&Path) -> bool,
+    start: impl Fn(&Launch) -> io::Result<()>,
 ) -> Result<(), EditError> {
     let document = documents
         .document_path(window)
@@ -182,11 +220,10 @@ fn edit(
             .as_deref()
             .is_some_and(|own| is_downlight(program, own))
     };
-    let text_file_program = platform::text_file_program();
-    let order = editor_order(chosen, text_file_program.as_deref(), Path::is_file, is_own);
+    let order = editor_order(editors.chosen, editors.text_file_program, &is_file, is_own);
     let mut failure = io::Error::other("no editor to start");
     for editor in order {
-        match launch(&editor, &document) {
+        match launch_of(&editor, &document, line, &is_file).and_then(|launch| start(&launch)) {
             Ok(()) => return Ok(()),
             Err(error) => failure = error,
         }
@@ -197,22 +234,44 @@ fn edit(
     })
 }
 
-/// Opens `document` in `editor`, and doesn't wait for it. A program starts with the document's
-/// path as its one argument; the text file program starts the way the OS starts it.
-fn launch(editor: &Editor, document: &Path) -> io::Result<()> {
-    let start = |program: &Path| {
-        std::process::Command::new(program)
-            .arg(document)
-            .spawn()
-            .map(drop)
+/// How Edit starts `editor` to open `document` at `line`: a program with the arguments that open
+/// it there if Downlight knows how the program takes a line, or with the document's path alone;
+/// the text file program the way the OS starts it, which passes no line.
+///
+/// A text file program that Downlight knows to take a line is started by its path instead, so
+/// that it gets the line (ticket 35), when its file is there and named in full, as a chosen
+/// editor must be: a bare name would be searched for on the PATH. A file the system names that
+/// is gone is still left to the shell, as before.
+fn launch_of(
+    editor: &Editor,
+    document: &Path,
+    line: Option<Line>,
+    is_file: impl Fn(&Path) -> bool,
+) -> io::Result<Launch> {
+    let program = |program: PathBuf| Launch::Program {
+        arguments: editor_arguments(&program, document, line),
+        program,
     };
-    match editor {
-        Editor::Chosen(program) => start(program),
-        Editor::TextFileProgram => platform::open_as_text_file(document),
-        Editor::Notepad => {
-            let notepad = platform::notepad().ok_or(io::ErrorKind::Unsupported)?;
-            start(&notepad)
+    Ok(match editor {
+        Editor::Chosen(path) => program(path.clone()),
+        Editor::TextFileProgram(Some(path))
+            if path.is_absolute() && takes_line(path) && is_file(path) =>
+        {
+            program(path.clone())
         }
+        Editor::TextFileProgram(_) => Launch::AsTextFile(document.to_owned()),
+        Editor::Notepad => program(platform::notepad().ok_or(io::ErrorKind::Unsupported)?),
+    })
+}
+
+/// Starts an editor as `launch` says, and doesn't wait for it.
+fn start(launch: &Launch) -> io::Result<()> {
+    match launch {
+        Launch::Program { program, arguments } => std::process::Command::new(program)
+            .args(arguments)
+            .spawn()
+            .map(drop),
+        Launch::AsTextFile(document) => platform::open_as_text_file(document),
     }
 }
 
@@ -238,7 +297,9 @@ fn editor_order(
         order.push(Editor::Chosen(chosen.to_owned()));
     }
     if !text_file_program.is_some_and(&is_downlight) {
-        order.push(Editor::TextFileProgram);
+        order.push(Editor::TextFileProgram(
+            text_file_program.map(Path::to_owned),
+        ));
     }
     order.push(Editor::Notepad);
     order
@@ -337,13 +398,21 @@ impl From<EditError> for Notice {
 #[cfg(test)]
 mod tests {
     use std::cell::RefCell;
+    use std::ffi::OsStr;
 
     use super::*;
     use crate::documents::recorder::recorded;
     use crate::documents::{DocumentAt, Target};
 
     const CHOSEN: &str = r"C:\Tools\edit.exe";
-    const TEXT_FILE_PROGRAM: &str = r"C:\Program Files\Notepad++\notepad++.exe";
+    /// A text file program that Downlight doesn't know to take a line (ticket 35).
+    const TEXT_FILE_PROGRAM: &str = r"C:\Program Files\EmEditor\EmEditor.exe";
+    /// A text file program that Downlight knows to take a line, which no test machine has.
+    const VS_CODE: &str = r"C:\Tests\Microsoft VS Code\Code.exe";
+
+    fn text_file_program() -> Editor {
+        Editor::TextFileProgram(Some(PathBuf::from(TEXT_FILE_PROGRAM)))
+    }
 
     fn order(chosen_exists: bool, text_file_program: Option<&str>, downlight: &str) -> Vec<Editor> {
         editor_order(
@@ -362,7 +431,7 @@ mod tests {
     fn chosen_editor_that_exists_comes_first() {
         assert_eq!(
             order(true, Some(TEXT_FILE_PROGRAM), "downlight.exe"),
-            [chosen(), Editor::TextFileProgram, Editor::Notepad]
+            [chosen(), text_file_program(), Editor::Notepad]
         );
     }
 
@@ -370,7 +439,7 @@ mod tests {
     fn chosen_editor_that_no_longer_exists_falls_back_to_the_text_file_program() {
         assert_eq!(
             order(false, Some(TEXT_FILE_PROGRAM), "downlight.exe"),
-            [Editor::TextFileProgram, Editor::Notepad]
+            [text_file_program(), Editor::Notepad]
         );
     }
 
@@ -382,14 +451,14 @@ mod tests {
             |_| true,
             |_| false,
         );
-        assert_eq!(order, [Editor::TextFileProgram, Editor::Notepad]);
+        assert_eq!(order, [text_file_program(), Editor::Notepad]);
     }
 
     #[test]
     fn chosen_editor_that_is_downlight_is_skipped() {
         assert_eq!(
             order(true, Some(TEXT_FILE_PROGRAM), CHOSEN),
-            [Editor::TextFileProgram, Editor::Notepad]
+            [text_file_program(), Editor::Notepad]
         );
     }
 
@@ -417,7 +486,7 @@ mod tests {
         // Choose editor... refuses it; a settings file edited by hand may still name it.
         assert_eq!(
             order_for_saved(r"C:\Tools\edit.cmd"),
-            [Editor::TextFileProgram, Editor::Notepad]
+            [text_file_program(), Editor::Notepad]
         );
     }
 
@@ -432,7 +501,7 @@ mod tests {
         ] {
             assert_eq!(
                 order_for_saved(chosen),
-                [Editor::TextFileProgram, Editor::Notepad],
+                [text_file_program(), Editor::Notepad],
                 "{chosen}"
             );
         }
@@ -443,7 +512,7 @@ mod tests {
         // Some packaged programs, such as Windows 11's Notepad, have no file the system names.
         assert_eq!(
             order(false, None, "downlight.exe"),
-            [Editor::TextFileProgram, Editor::Notepad]
+            [Editor::TextFileProgram(None), Editor::Notepad]
         );
     }
 
@@ -454,7 +523,7 @@ mod tests {
             Editor::Chosen(program) => program
                 .file_stem()
                 .map(|stem| stem.to_string_lossy().into_owned()),
-            Editor::TextFileProgram => Some("Text editor".to_owned()),
+            Editor::TextFileProgram(_) => Some("Text editor".to_owned()),
             Editor::Notepad => Some("Notepad".to_owned()),
         })
     }
@@ -491,7 +560,7 @@ mod tests {
 
     #[test]
     fn chosen_editor_without_a_name_of_its_own_is_named_after_its_file() {
-        let order = [chosen(), Editor::TextFileProgram, Editor::Notepad];
+        let order = [chosen(), text_file_program(), Editor::Notepad];
         let unnamed = choices_of(&order, |_| None);
         assert_eq!(unnamed.default_name, None);
         assert_eq!(
@@ -575,17 +644,30 @@ mod tests {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join(path)
     }
 
-    /// A real program, by its full path, that is never Downlight: the Cargo running the tests.
+    fn notes() -> PathBuf {
+        repo_file("core/tests/fixtures/notes.md")
+    }
+
+    /// A real program, by its full path, that is never Downlight and that Downlight doesn't know
+    /// to take a line: the Cargo running the tests.
     fn chosen_program() -> PathBuf {
         PathBuf::from(env!("CARGO"))
     }
 
-    /// Edits the document a window shows, or none, with a chosen editor that is a real program,
-    /// and gives what Edit gave and the editors it tried, which fail as `starts` says.
+    /// The reading position's line the page sends in these tests.
+    fn line_15() -> Option<Line> {
+        serde_json::from_value(serde_json::json!(15)).unwrap()
+    }
+
+    /// Edits the document a window shows, or none, at `line`, with the reader's `chosen` editor and
+    /// the system's `text_file_program`, and gives what Edit gave and the launches it tried, which
+    /// fail as `starts` says. The test machine's files are there, and `VS_CODE` too.
     fn edit_shown(
         document: Option<&Path>,
-        starts: impl Fn(&Editor) -> bool,
-    ) -> (Result<(), EditError>, Vec<(Editor, PathBuf)>) {
+        (chosen, text_file_program): (Option<&Path>, Option<&Path>),
+        line: Option<Line>,
+        starts: impl Fn(&Launch) -> bool,
+    ) -> (Result<(), EditError>, Vec<Launch>) {
         let (documents, _) = recorded();
         let window = documents.open_empty().unwrap();
         if let Some(document) = document {
@@ -593,13 +675,15 @@ mod tests {
                 .give(DocumentAt::new(document), Target::Window(&window))
                 .unwrap();
         }
-        let chosen = chosen_program();
         let tried = RefCell::new(Vec::new());
-        let edited = edit(&documents, &window, Some(&chosen), |editor, document| {
-            tried
-                .borrow_mut()
-                .push((editor.clone(), document.to_owned()));
-            if starts(editor) {
+        let editors = Editors {
+            chosen,
+            text_file_program,
+        };
+        let is_file = |path: &Path| path == Path::new(VS_CODE) || path.is_file();
+        let edited = edit(&documents, &window, editors, line, is_file, |launch| {
+            tried.borrow_mut().push(launch.clone());
+            if starts(launch) {
                 Ok(())
             } else {
                 Err(io::Error::other("it didn't start"))
@@ -608,9 +692,30 @@ mod tests {
         (edited, tried.into_inner())
     }
 
+    /// The reader's editor is Cargo, and the text file program one Downlight doesn't know.
+    fn chosen_and_unknown() -> (PathBuf, PathBuf) {
+        (chosen_program(), PathBuf::from(TEXT_FILE_PROGRAM))
+    }
+
+    fn program(program: impl Into<PathBuf>, arguments: &[&OsStr]) -> Launch {
+        Launch::Program {
+            program: program.into(),
+            arguments: arguments
+                .iter()
+                .map(|&argument| argument.to_owned())
+                .collect(),
+        }
+    }
+
     #[test]
     fn edit_without_a_document_says_so() {
-        let (edited, tried) = edit_shown(None, |_| true);
+        let (chosen, text_file_program) = chosen_and_unknown();
+        let (edited, tried) = edit_shown(
+            None,
+            (Some(&chosen), Some(&text_file_program)),
+            line_15(),
+            |_| true,
+        );
         assert!(matches!(edited, Err(EditError::NoDocument)), "{edited:?}");
         assert!(tried.is_empty());
         assert_eq!(
@@ -621,29 +726,95 @@ mod tests {
 
     #[test]
     fn edit_opens_the_window_s_document_in_the_chosen_editor() {
-        let notes = repo_file("core/tests/fixtures/notes.md");
-        let (edited, tried) = edit_shown(Some(&notes), |_| true);
+        // Cargo isn't known to take a line, so it gets the document alone, as before ticket 35.
+        let (chosen, text_file_program) = chosen_and_unknown();
+        let (edited, tried) = edit_shown(
+            Some(&notes()),
+            (Some(&chosen), Some(&text_file_program)),
+            line_15(),
+            |_| true,
+        );
         assert!(edited.is_ok(), "{edited:?}");
-        assert_eq!(tried, [(Editor::Chosen(chosen_program()), notes)]);
+        assert_eq!(tried, [program(chosen, &[notes().as_os_str()])]);
+    }
+
+    /// VS Code's launch at line 15 of `notes()`.
+    fn vs_code_at_line_15() -> Launch {
+        let mut at_line = notes().into_os_string();
+        at_line.push(":15");
+        program(VS_CODE, &[OsStr::new("--goto"), &at_line])
+    }
+
+    #[test]
+    fn edit_opens_the_document_at_the_line_in_a_text_file_program_that_takes_one() {
+        // The shell passes the text file program no line, so it is started as a chosen editor is.
+        let vs_code = Path::new(VS_CODE);
+        let (edited, tried) =
+            edit_shown(Some(&notes()), (None, Some(vs_code)), line_15(), |_| true);
+        assert!(edited.is_ok(), "{edited:?}");
+        assert_eq!(tried, [vs_code_at_line_15()]);
+    }
+
+    #[test]
+    fn text_file_program_that_takes_a_line_opens_at_it_after_a_chosen_editor_that_does_not_start() {
+        let chosen = chosen_program();
+        let (edited, tried) = edit_shown(
+            Some(&notes()),
+            (Some(&chosen), Some(Path::new(VS_CODE))),
+            line_15(),
+            |launch| *launch != program(&chosen, &[notes().as_os_str()]),
+        );
+        assert!(edited.is_ok(), "{edited:?}");
+        assert_eq!(tried[1..], [vs_code_at_line_15()]);
+    }
+
+    #[test]
+    fn text_file_program_that_takes_a_line_but_is_gone_opens_through_the_shell() {
+        // The registry may still name a program that was uninstalled; the shell may know better.
+        let gone = Path::new(r"C:\Program Files\Gone\Code.exe");
+        let (edited, tried) = edit_shown(Some(&notes()), (None, Some(gone)), line_15(), |_| true);
+        assert!(edited.is_ok(), "{edited:?}");
+        assert_eq!(tried, [Launch::AsTextFile(notes())]);
+    }
+
+    #[test]
+    fn edit_opens_another_text_file_program_through_the_shell_without_a_line() {
+        let (edited, tried) = edit_shown(
+            Some(&notes()),
+            (None, Some(Path::new(TEXT_FILE_PROGRAM))),
+            line_15(),
+            |_| true,
+        );
+        assert!(edited.is_ok(), "{edited:?}");
+        assert_eq!(tried, [Launch::AsTextFile(notes())]);
     }
 
     #[test]
     fn editor_that_does_not_start_falls_back_to_the_next() {
-        let notes = repo_file("core/tests/fixtures/notes.md");
-        let (edited, tried) =
-            edit_shown(Some(&notes), |editor| !matches!(editor, Editor::Chosen(_)));
+        let (chosen, text_file_program) = chosen_and_unknown();
+        let (edited, tried) = edit_shown(
+            Some(&notes()),
+            (Some(&chosen), Some(&text_file_program)),
+            line_15(),
+            |launch| matches!(launch, Launch::AsTextFile(_)),
+        );
         assert!(edited.is_ok(), "{edited:?}");
-        let tried: Vec<_> = tried.into_iter().map(|(editor, _)| editor).collect();
-        assert_eq!(tried[1..], [Editor::TextFileProgram]);
+        assert_eq!(tried[1..], [Launch::AsTextFile(notes())]);
     }
 
     #[test]
     fn edit_that_starts_no_editor_names_the_document_and_why() {
-        let notes = repo_file("core/tests/fixtures/notes.md");
-        let (edited, tried) = edit_shown(Some(&notes), |_| false);
+        let (chosen, text_file_program) = chosen_and_unknown();
+        let (edited, tried) = edit_shown(
+            Some(&notes()),
+            (Some(&chosen), Some(&text_file_program)),
+            line_15(),
+            |_| false,
+        );
+        let notepad = platform::notepad().unwrap();
         assert_eq!(
-            tried.last().map(|(editor, _)| editor),
-            Some(&Editor::Notepad)
+            tried.last(),
+            Some(&program(notepad, &[notes().as_os_str()]))
         );
         let notice = Notice::from(edited.unwrap_err()).to_string();
         assert!(
