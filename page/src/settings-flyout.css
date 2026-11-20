@@ -1,7 +1,10 @@
 /* The settings flyout (settings-flyout.ts, window design ticket 08), under the title bar's gear
    and above the document, on a solid background in Windows 11's flyout colors, since the document
    is under it. Its right edge lines up with the gear's (set by the script); it is only as large as
-   its controls, so the document beside and below it shows each change at once. */
+   its controls, so the document beside and below it shows each change at once. It hangs below the
+   bar's own height rather than the room kept for the bar, even in full screen, where the page
+   keeps no room: the open flyout keeps the bar in view (full screen ticket 04), so it would lie
+   under the bar otherwise. */
 .settings-flyout {
   position: fixed;
   top: calc(var(--title-bar-height) + 4px);

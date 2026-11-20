@@ -1,7 +1,7 @@
 //! A window per document, in one process (ADR 0001): showing the documents a launch names, what
-//! every new window starts with, and closing a window. Which window shows which document, and
-//! carrying out a show, are the documents module's (`documents.rs`); Tauri's `AppHandle` is its
-//! [`Windows`] here.
+//! every new window starts with, closing a window and switching its own states. Which window
+//! shows which document, and carrying out a show, are the documents module's (`documents.rs`);
+//! Tauri's `AppHandle` is its [`Windows`] here.
 
 use std::ffi::OsString;
 use std::fmt;
@@ -18,6 +18,7 @@ use crate::documents::{
     Area, DocumentAt, Documents, NewWindow, Point, ShowError, Target, WindowError, WindowPlace,
     WindowSize, Windows,
 };
+use crate::notice::Notice;
 use crate::settings::{AccentScale, PageSettings, Theme, WindowLook};
 use crate::timing::Timing;
 use crate::{command_line, platform, title_bar};
@@ -137,7 +138,12 @@ impl Windows for AppHandle {
 
     fn place_of(&self, window: &str) -> Option<WindowPlace> {
         let window = self.get_webview_window(window)?;
-        if window.is_minimized().ok()? || window.is_maximized().ok()? {
+        // A full-screen window covers its monitor: kept, its size would make every later window
+        // as large, and a new window beside it would open off the screen (full screen ticket 01).
+        if window.is_minimized().ok()?
+            || window.is_maximized().ok()?
+            || window.is_fullscreen().ok()?
+        {
             return None;
         }
         // In the logical pixels of the window's own monitor, so that a new window opened beside
@@ -393,6 +399,24 @@ pub fn show_window(window: WebviewWindow, timing: State<'_, Timing>) -> tauri::R
     window.show()?;
     timing.window_shown(window.label());
     Ok(())
+}
+
+/// Switches a state that belongs to `window` alone (Keep on top, Full screen), which `is_on` reads
+/// and `set` sets, and answers whether it is on now. Switched rather than set to what the page
+/// shows, so the page shows the window's state whatever it thought it was. A failure is the
+/// Notice "`state` didn't switch: ...".
+pub fn switch_state(
+    window: &WebviewWindow,
+    is_on: impl FnOnce(&WebviewWindow) -> tauri::Result<bool>,
+    set: impl FnOnce(&WebviewWindow, bool) -> tauri::Result<()>,
+    state: &str,
+) -> Result<bool, Notice> {
+    let switch = || -> tauri::Result<bool> {
+        let on = !is_on(window)?;
+        set(window, on)?;
+        Ok(on)
+    };
+    switch().map_err(|error| format!("{state} didn't switch: {error}").into())
 }
 
 #[cfg(all(test, windows))]

@@ -1,4 +1,4 @@
-import { clearMocks, mockWindows } from "@tauri-apps/api/mocks";
+// The title bar out of full screen; title-bar-full-screen.test.ts has it in full screen.
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import {
   DEFAULT_SETTINGS,
@@ -11,14 +11,16 @@ import { startCommands } from "./commands";
 import { startLinks } from "./links";
 import {
   askedOfTheApp,
+  closeTitleBarWindow,
   fakeTheApp,
-  fakeTitleBarLayout,
   giveAnotherDocument,
   nextInTurn,
   nextShown,
   openPageAt,
   openPageWith,
+  openWithTitleBar,
   settle,
+  shownFrom,
   tell,
   titleBarButton,
   titleBarAppName,
@@ -46,16 +48,9 @@ let layOutTitleBar: () => void;
 let stop: AbortController;
 
 beforeEach(async () => {
-  mockWindows("document-0");
-  placed = [];
   answers = [];
   reveal = () => Promise.resolve(null);
-  layOutTitleBar = fakeTitleBarLayout();
-  fakeTheApp({
-    place_maximize_button: (args) => {
-      placed.push(args);
-      return null;
-    },
+  ({ placed, layOut: layOutTitleBar } = await openWithTitleBar({
     render_document: () => nextInTurn(answers) ?? null,
     reveal_document: () => reveal(),
     // A link shows another document in this window: the app tells the page, which asks for it.
@@ -63,20 +58,13 @@ beforeEach(async () => {
       await giveAnotherDocument();
       return { kind: "nothing" };
     },
-  });
-  // The app's flag for a window that has no native frame.
-  openPageWith("titleBar");
-  await startSettings();
+  }));
   stop = new AbortController();
 });
 
 afterEach(() => {
   stop.abort();
-  vi.unstubAllGlobals();
-  vi.restoreAllMocks();
-  clearMocks();
-  openPageWith();
-  document.body.replaceChildren();
+  closeTitleBarWindow();
 });
 
 function bar(): HTMLElement | null {
@@ -227,19 +215,6 @@ const GUIDE: DocumentFile = {
   name: "guide.md",
   path: "C:\\work\\docs\\guide.md",
 };
-
-/** The app's answer for a window that shows `file`, its `showing`th document. */
-function shownFrom(file: DocumentFile, showing = 0): DocumentToShow {
-  return {
-    showing,
-    file,
-    notice: null,
-    steps: { back: false, forward: false },
-    place: "show",
-    heading: null,
-    document: `<h1>${file.name}</h1>\n<p><a href="guide.md">The guide</a></p>\n`,
-  };
-}
 
 /** Starts the title bar and the document view, and waits until the view shows its first answer. */
 async function startWithTheDocumentView(): Promise<void> {

@@ -7,7 +7,8 @@
 //!
 //! The pointer over it never reaches the page, so the window does what the page's button would:
 //! it tells the page when to show the button hovered or pressed, and maximizes or restores the
-//! window on a click.
+//! window on a click. In full screen it lets the pointer through to the page's button, which is
+//! "Leave full screen" then (full screen ticket 05).
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -23,12 +24,13 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     TME_LEAVE, TME_NONCLIENT, TRACKMOUSEEVENT, TrackMouseEvent,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, FindWindowExW, GWLP_USERDATA, GetParent, GetWindowLongPtrW,
-    GetWindowRect, HTMAXBUTTON, HTTRANSPARENT, HWND_TOP, IsWindow, IsZoomed, PostMessageW,
-    RegisterClassExW, SC_KEYMENU, SC_MAXIMIZE, SC_RESTORE, SM_CYFRAME, SWP_NOACTIVATE, SWP_NOMOVE,
-    SWP_NOSIZE, SWP_NOZORDER, SetWindowLongPtrW, SetWindowPos, WM_NCDESTROY, WM_NCHITTEST,
-    WM_NCLBUTTONDBLCLK, WM_NCLBUTTONDOWN, WM_NCLBUTTONUP, WM_NCMOUSELEAVE, WM_NCMOUSEMOVE,
-    WM_SYSCOMMAND, WNDCLASSEXW, WS_CHILD, WS_CLIPSIBLINGS, WS_VISIBLE,
+    CreateWindowExW, DefWindowProcW, FindWindowExW, GWL_STYLE, GWLP_USERDATA, GetParent,
+    GetWindowLongPtrW, GetWindowRect, HTMAXBUTTON, HTTRANSPARENT, HWND_TOP, IsWindow, IsZoomed,
+    PostMessageW, RegisterClassExW, SC_KEYMENU, SC_MAXIMIZE, SC_RESTORE, SM_CYFRAME,
+    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetWindowLongPtrW, SetWindowPos,
+    WM_NCDESTROY, WM_NCHITTEST, WM_NCLBUTTONDBLCLK, WM_NCLBUTTONDOWN, WM_NCLBUTTONUP,
+    WM_NCMOUSELEAVE, WM_NCMOUSEMOVE, WM_SYSCOMMAND, WNDCLASSEXW, WS_CHILD, WS_CLIPSIBLINGS,
+    WS_MAXIMIZEBOX, WS_VISIBLE,
 };
 
 use crate::title_bar::{ButtonRect, MaximizeButtonState};
@@ -363,6 +365,12 @@ impl MaximizeButton {
 fn hit_test_window(window: HWND, lparam: LPARAM) -> LRESULT {
     // SAFETY: a plain call on the live window.
     let parent = unsafe { GetParent(window) };
+    // A full-screen window has no maximize button: its button is the page's "Leave full screen",
+    // which gets the pointer, and no snap layouts flyout may come over it (full screen ticket 05).
+    // Read from the window each time, so the hit test follows full screen with no state to keep.
+    if !has_maximize_box(parent) {
+        return HTTRANSPARENT as LRESULT;
+    }
     let (Some(point), Some(rect)) = (
         to_client(parent, screen_point(lparam)),
         client_rect_of(window, parent),
@@ -370,6 +378,15 @@ fn hit_test_window(window: HWND, lparam: LPARAM) -> LRESULT {
         return HTTRANSPARENT as LRESULT;
     };
     hit_test((point.x, point.y), rect, resize_border(parent))
+}
+
+/// Whether `window` has a maximize box. tao takes it away, with the rest of the overlapped
+/// window's styles, while the window is full screen (`WindowFlags::to_window_styles` in tao 0.37),
+/// and puts it back on leaving, so it tells a full-screen window apart.
+fn has_maximize_box(window: HWND) -> bool {
+    // SAFETY: a plain call on the live window; a handle that is gone answers 0, no box.
+    let style = unsafe { GetWindowLongPtrW(window, GWL_STYLE) };
+    style.cast_unsigned() & WS_MAXIMIZEBOX as usize != 0
 }
 
 /// The screen point a mouse message carries in `lparam`: two signed 16-bit coordinates.

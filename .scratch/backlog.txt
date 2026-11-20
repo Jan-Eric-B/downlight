@@ -5,11 +5,11 @@ ID = folder/number under .scratch/<folder>/issues/<number>-*.md (v1 = downlight-
 Status: ready = ready-for-agent, triage = needs-triage (grill first), info = needs-info (investigate).
 Move lines to change the order. A new ticket gets a line here; a closed ticket's line is removed.
 
-full-screen/01 | F11 and the menu switch full screen | ready | not blocked
-full-screen/02 | Esc leaves full screen, last | ready | blocked by full-screen/01; Esc after the flyout, Find and Stop, and image-lightbox/01 before it
-full-screen/03 | The title bar hides in full screen | ready | blocked by full-screen/01
-full-screen/04 | The title bar slides in at the top edge | ready | blocked by full-screen/03
-full-screen/05 | The bar's buttons in full screen | ready | blocked by full-screen/01 (tests) and full-screen/04 (hand check); slideshow/01 reuses full screen
+full-screen/01 | F11 and the menu switch full screen | built, hand checks left | only the hand check is missing
+full-screen/02 | Esc leaves full screen, last | built, hand checks left | only the hand check is missing; blocked by full-screen/01; Esc after the flyout, Find and Stop, and image-lightbox/02 before it; image-lightbox/01 moves its Esc into one ordered list
+full-screen/03 | The title bar hides in full screen | built, hand checks left | only the hand check is missing; blocked by full-screen/01
+full-screen/04 | The title bar slides in at the top edge | built, hand checks left | only the hand check is missing; blocked by full-screen/03
+full-screen/05 | The bar's buttons in full screen | built, hand checks left | only the hand check is missing; blocked by full-screen/01 (tests) and full-screen/04 (hand check); slideshow/01 reuses full screen
 paste-markdown/01 | Paste or drop Markdown text | triage | not blocked; needs a new term (a Document is a file); shares the "document without a file" question with converter/01; touches the spec's Out item "stdin / --text"
 image-lightbox/01 | Image lightbox | triage | not blocked; Esc is already used by Find and Stop (also wanted by full-screen/02, which goes after it); images inside links (badges)
 copy-as-markdown/01 | Copy as Markdown, and as rich text | triage | not blocked; must decide file order vs shown order with tables/01, and ticks

@@ -3,7 +3,12 @@
    page's solid background where Mica is off. WebView2 drags the window by it, maximizes and
    restores it on a double-click, and shows the window menu on a right-click (app-region). */
 :root {
+  /* The bar's own height, and the room the page keeps for it at the top: the view and the find
+     bar start below the room, the settings flyout below the bar's height (settings-flyout.css).
+     They are the same but in full screen (full screen ticket 03), where the page keeps no room and
+     the bar lies over the document while it shows (title-bar.ts). */
   --title-bar-height: 0px;
+  --title-bar-room: var(--title-bar-height);
   /* Windows 11's subtle fills under the pointer and while pressed, shared by everything on the bar
      that takes clicks and shows it, and by the find bar's buttons (document.css), which look like
      the bar's. */
@@ -34,6 +39,48 @@
 
 .title-bar.inactive {
   color: light-dark(rgb(0 0 0 / 36.1%), rgb(255 255 255 / 36.3%));
+}
+
+/* In full screen the page keeps no room for the bar (full screen ticket 03): it lies over the
+   document, on the page's solid background so that its text never mixes with the document's, and
+   comes in only while the reader reaches for it (ticket 04, title-bar.ts). Its strip is no drag
+   region, shown or not (ticket 05): a drag, a double-click and the window menu on a right-click
+   would act on the full-screen window, and the page takes the right-click (title-bar.ts). */
+.title-bar.full-screen {
+  background: var(--page-background);
+  app-region: no-drag;
+}
+
+/* Slid away above the screen, so it covers nothing there, but stays in the layout, so the settings
+   flyout still lines up with the gear, and can take the focus, so Tab still reaches its buttons
+   and slides it in. */
+.title-bar.away {
+  transform: translateY(-100%);
+}
+
+/* It slides in and out, and comes and goes at once when the system asks for reduced motion.
+   Leaving full screen takes the transition with the class, so the bar is back at once. */
+@media (prefers-reduced-motion: no-preference) {
+  .title-bar.full-screen {
+    transition: transform 167ms ease-out;
+  }
+}
+
+/* The thin zone at the top edge of the screen that slides the bar in (ticket 04): a part of the
+   bar hanging just below it, so that while the bar is away it is the screen's top pixels, and the
+   pointer resting there is over the bar throughout the slide and after. Only in full screen. */
+.title-bar .top-zone {
+  display: none;
+}
+
+.title-bar.full-screen .top-zone {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  left: 0;
+  display: block;
+  height: 2px;
+  app-region: no-drag;
 }
 
 /* Everything on the bar that takes clicks (title-bar.ts): the logo, the file name and the window
@@ -236,6 +283,10 @@
 
   .title-bar.inactive {
     color: GrayText;
+  }
+
+  .title-bar.full-screen {
+    background: Canvas;
   }
 
   .bar-item {

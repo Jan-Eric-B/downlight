@@ -1,6 +1,6 @@
 # Full screen
 
-Status: ready-for-agent
+Status: built, hand checks left
 
 ## Problem Statement
 

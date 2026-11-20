@@ -18,6 +18,7 @@ import {
   fakeTitleBarLayout,
   layOut,
   linesOf,
+  menuEntryOf,
   openPageAt,
   settle,
   tell,
@@ -195,11 +196,7 @@ test("the right-click menu shows Full width with a check mark while it is on", a
     document.body.dispatchEvent(
       new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
     );
-    const entry = entries.find(
-      (candidate) =>
-        candidate.kind === "command" && candidate.id === "fullWidth",
-    );
-    return entry?.kind === "command" ? entry.checked : undefined;
+    return menuEntryOf(entries, "fullWidth")?.checked;
   };
 
   expect(checkedInMenu()).toBe(false);

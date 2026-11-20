@@ -467,6 +467,12 @@ export type Commands = {
    * window couldn't be switched.
    */
   switch_keep_on_top: { args: undefined; answer: boolean };
+  /**
+   * Full screen (full screen ticket 01), for the asking window only: a borderless window covering
+   * its monitor if it wasn't full screen, and back to how it was if it was. Answers whether the
+   * window is full screen now. Rejects with why when the window couldn't be switched.
+   */
+  switch_full_screen: { args: undefined; answer: boolean };
 };
 
 export type Command = keyof Commands;

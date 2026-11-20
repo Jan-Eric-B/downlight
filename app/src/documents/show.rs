@@ -35,8 +35,8 @@ pub trait Windows: Send + Sync + 'static {
     fn bring_to_front(&self, window: &str) -> Result<(), WindowError>;
 
     /// Where `window` is, for a new window to open beside it and at its size (ticket 16). None
-    /// for a window that has closed or isn't built yet, and for one that is minimized or
-    /// maximized, which isn't at a place and size of its own.
+    /// for a window that has closed or isn't built yet, and for one that is minimized, maximized
+    /// or full screen, which isn't at a place and size of its own.
     fn place_of(&self, window: &str) -> Option<WindowPlace>;
 
     /// The work area of the main monitor, in its logical pixels: where the system places a new

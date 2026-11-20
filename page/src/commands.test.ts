@@ -9,6 +9,7 @@ import {
   answerAsTheApp,
   askedOfTheApp,
   fakeTheApp,
+  menuEntryOf,
   settle,
   tell,
   type FakeApp,
@@ -392,13 +393,10 @@ describe("the right-click menu", () => {
   /** Whether the menu's entry for the command `id` can be chosen. */
   function enabledInMenu(id: string): boolean | undefined {
     rightClick();
-    const entry = entries.find(
-      (candidate) => candidate.kind === "command" && candidate.id === id,
-    );
-    return entry?.kind === "command" ? entry.enabled : undefined;
+    return menuEntryOf(entries, id)?.enabled;
   }
 
-  test("replaces the webview's menu with Back, Forward, Reload, Find, Edit, Open, Zoom in, Zoom out, Reset zoom, Full width, Keep on top, Copy and Settings", async () => {
+  test("replaces the webview's menu with Back, Forward, Reload, Find, Edit, Open, Zoom in, Zoom out, Reset zoom, Full width, Keep on top, Full screen, Copy and Settings", async () => {
     // A window without a document.
     app.render_document = () => null;
     await startDocumentView(0);
@@ -433,6 +431,11 @@ describe("the right-click menu", () => {
       // A new window starts without it (window design ticket 07).
       {
         ...command("keepOnTop", "Keep on top", "Ctrl+Alt+T"),
+        checked: false,
+      },
+      // A new window starts out of it too (full screen ticket 01).
+      {
+        ...command("fullScreen", "Full screen", "F11"),
         checked: false,
       },
       { kind: "separator" },

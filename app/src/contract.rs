@@ -21,7 +21,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::{
-    documents, edit, keep_on_top, links, menu, message, notice, settings, timing, title_bar, window,
+    documents, edit, full_screen, keep_on_top, links, menu, message, notice, settings, timing,
+    title_bar, window,
 };
 
 type TestResult<T = ()> = Result<T, Box<dyn Error>>;
@@ -37,13 +38,14 @@ const HOW_TO_UPDATE: &str =
 /// failure of `open_named_folder` for a folder gone since, the messages, the arguments of
 /// `show_document_menu`, the timing reports, `place_maximize_button` and `change_setting`, and
 /// the flags a window tells its page in the page's URL.
-const SAMPLE_FILES: [(&str, Samples); 13] = [
+const SAMPLE_FILES: [(&str, Samples); 14] = [
     ("render_document.json", documents::contract_samples),
     ("editor_choices.json", edit::contract_samples),
     ("wait_note.json", documents::wait_note_samples),
     ("stop_document.json", documents::arrival::contract_samples),
     ("follow_link.json", links::contract_samples),
     ("keep_on_top.json", keep_on_top::contract_samples),
+    ("full_screen.json", full_screen::contract_samples),
     ("open_named_folder.json", notice::contract_samples),
     ("messages.json", message::contract_samples),
     ("menu_entries.json", menu::contract_samples),

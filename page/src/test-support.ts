@@ -1,10 +1,11 @@
 // Helpers shared by the page's tests. The name has no `.test`, so Vitest doesn't run it as a test
 // file, and nothing the app runs imports it.
 import { emit } from "@tauri-apps/api/event";
-import { mockIPC } from "@tauri-apps/api/mocks";
+import { clearMocks, mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import { vi } from "vitest";
 import editorChoicesSamples from "../../app/tests/fixtures/editor_choices.json?raw";
 import followLinkSamples from "../../app/tests/fixtures/follow_link.json?raw";
+import fullScreenSamples from "../../app/tests/fixtures/full_screen.json?raw";
 import keepOnTopSamples from "../../app/tests/fixtures/keep_on_top.json?raw";
 import menuEntrySamplesJson from "../../app/tests/fixtures/menu_entries.json?raw";
 import messageSamples from "../../app/tests/fixtures/messages.json?raw";
@@ -38,6 +39,7 @@ import type {
   SettingChange,
   WaitNote,
 } from "./app";
+import { startSettings } from "./settings";
 import { SCROLLER_SELECTOR, whenDocumentShown } from "./view";
 import { ZOOM_VARIABLE } from "./zoom";
 
@@ -108,6 +110,7 @@ type AnsweredWithMore = {
 const MUST_BE_ANSWERED: Record<AnsweredWithMore, true> = {
   follow_link: true,
   switch_keep_on_top: true,
+  switch_full_screen: true,
   editor_choices: true,
   stop_document: true,
 };
@@ -214,6 +217,13 @@ export function keepOnTopSample(
   name: "switchedOn" | "switchedOff",
 ): AnswerOf<"switch_keep_on_top"> {
   return sampleIn(keepOnTopSamples, name) as AnswerOf<"switch_keep_on_top">;
+}
+
+/** A sample of the app's answers to `switch_full_screen`, switched on or off. */
+export function fullScreenSample(
+  name: "switchedOn" | "switchedOff",
+): AnswerOf<"switch_full_screen"> {
+  return sampleIn(fullScreenSamples, name) as AnswerOf<"switch_full_screen">;
 }
 
 /** A sample of the app's answers to `stop_document`, stopped or not. */
@@ -395,10 +405,13 @@ export async function scrollAsTheApp(
 }
 
 /**
- * The file of every document `answerAsTheApp` hands over; the title bar's tests answer with
- * files of their own.
+ * The file of every document `answerAsTheApp` hands over, and of a test's document whose file
+ * doesn't matter to it.
  */
-const SHOWN_FILE: DocumentFile = { name: "a.md", path: "C:\\docs\\a.md" };
+export const SHOWN_FILE: DocumentFile = {
+  name: "a.md",
+  path: "C:\\docs\\a.md",
+};
 
 /**
  * Answers `render_document` as the app does (`Documents::handover`): a page whose view shows the
@@ -621,6 +634,85 @@ export function fakeTitleBarLayout(): () => void {
   };
 }
 
+/** The fake app's window of the title bar's tests (`openWithTitleBar`). */
+export interface TitleBarWindow {
+  /** Each `place_maximize_button` request's arguments, in turn. */
+  placed: ArgsOf<"place_maximize_button">[];
+  /** Lays the title bar out, as the webview does when the window's size or DPI changes. */
+  layOut: () => void;
+}
+
+/**
+ * Opens the page as a window whose title bar the page draws (the app's `titleBar` flag), with its
+ * settings started, and the fake app answering as `app` says: by default `editor_choices` for the
+ * settings flyout, and `place_maximize_button` by keeping each place it is sent. For the title
+ * bar's tests, whose `afterEach` calls `closeTitleBarWindow`.
+ */
+export async function openWithTitleBar(
+  app: FakeApp = {},
+): Promise<TitleBarWindow> {
+  mockWindows("document-0");
+  const placed: ArgsOf<"place_maximize_button">[] = [];
+  const layOut = fakeTitleBarLayout();
+  fakeTheApp({
+    editor_choices: () => editorChoicesSample("withoutNames"),
+    place_maximize_button: (args) => {
+      placed.push(args);
+      return null;
+    },
+    ...app,
+  });
+  openPageWith("titleBar");
+  await startSettings();
+  return { placed, layOut };
+}
+
+/** Closes what `openWithTitleBar` opened, so that no test inherits another's window. */
+export function closeTitleBarWindow(): void {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+  clearMocks();
+  openPageWith();
+  document.body.replaceChildren();
+}
+
+/**
+ * The app's answer for a window that shows `file`, its `showing`th document, rendered as
+ * `rendered`, or as a heading with a link to `guide.md` by default.
+ */
+export function shownFrom(
+  file: DocumentFile,
+  showing = 0,
+  rendered = `<h1>${file.name}</h1>\n<p><a href="guide.md">The guide</a></p>\n`,
+): DocumentToShow {
+  return {
+    showing,
+    file,
+    notice: null,
+    steps: { back: false, forward: false },
+    place: "show",
+    heading: null,
+    document: rendered,
+  };
+}
+
+/** A command's line of the right-click menu. */
+type CommandEntry = Extract<MenuEntry, { kind: "command" }>;
+
+/**
+ * The entry of the command `id` among the right-click menu's `entries`, as the page hands them to
+ * the app's `show_document_menu`, or undefined if the menu has none.
+ */
+export function menuEntryOf(
+  entries: MenuEntry[],
+  id: string,
+): CommandEntry | undefined {
+  return entries.find(
+    (entry): entry is CommandEntry =>
+      entry.kind === "command" && entry.id === id,
+  );
+}
+
 /** The title bar's logo. */
 export function titleBarLogo(): HTMLElement {
   const found = document.querySelector<HTMLElement>(".title-bar .logo");
@@ -674,6 +766,59 @@ export function titleBarButtonRow(): string[] {
       ? "|"
       : (item.getAttribute("aria-label") ?? ""),
   );
+}
+
+/**
+ * Whether the title bar shows, rather than being hidden away at the top, as it is in full screen
+ * (full screen ticket 03). happy-dom lays nothing out, so this is the state the page sets.
+ */
+export function titleBarShows(): boolean {
+  const bar = document.querySelector<HTMLElement>(".title-bar");
+  if (!bar) throw new Error("The page draws no title bar.");
+  return !bar.classList.contains("away");
+}
+
+/**
+ * The room the page keeps for the title bar at the top, which the view and the find bar start
+ * below, when the page sets it itself, as in full screen (full screen ticket 03); undefined while
+ * it leaves it to the stylesheet, which keeps the bar's height.
+ */
+export function titleBarRoom(): string | undefined {
+  return (
+    document.documentElement.style.getPropertyValue("--title-bar-room") ||
+    undefined
+  );
+}
+
+/**
+ * The thin zone at the top edge of the screen whose pointer slides the hidden title bar in, in
+ * full screen (full screen ticket 04).
+ */
+export function titleBarTopZone(): HTMLElement {
+  const found = document.querySelector<HTMLElement>(".title-bar .top-zone");
+  if (!found) throw new Error("The title bar has no top zone.");
+  return found;
+}
+
+/** `element` and its ancestors, innermost first. */
+function withAncestors(element: Element | null): Element[] {
+  const chain: Element[] = [];
+  for (let at = element; at; at = at.parentElement) chain.push(at);
+  return chain;
+}
+
+/**
+ * Moves the pointer from over `from` to over `to` (null: outside the page), as the browser tells
+ * it, which happy-dom doesn't: `pointerleave` on each element left, innermost first, then
+ * `pointerenter` on each element entered, outermost first.
+ */
+export function movePointer(from: Element | null, to: Element | null): void {
+  const left = withAncestors(from);
+  const entered = withAncestors(to);
+  for (const element of left.filter((at) => !entered.includes(at)))
+    element.dispatchEvent(new PointerEvent("pointerleave"));
+  for (const element of entered.filter((at) => !left.includes(at)).reverse())
+    element.dispatchEvent(new PointerEvent("pointerenter"));
 }
 
 /** The height of the title bar the page draws (window design ticket 01), in px. */

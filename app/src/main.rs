@@ -10,6 +10,7 @@ mod contract;
 mod disk;
 mod documents;
 mod edit;
+mod full_screen;
 mod image;
 mod keep_on_top;
 mod links;
@@ -93,6 +94,7 @@ fn main() -> ExitCode {
             edit::editor_choices,
             settings::change::change_setting,
             keep_on_top::switch_keep_on_top,
+            full_screen::switch_full_screen,
         ])
         .on_menu_event(menu::forward_choice)
         .on_window_event(|window, event| {

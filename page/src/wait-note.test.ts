@@ -3,7 +3,10 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import notes from "../../core/tests/fixtures/notes.html?raw";
 import readme from "../../core/tests/fixtures/readme.html?raw";
 import type { WaitNote } from "./app";
+import { startCommands } from "./commands";
 import { openFind, startFind } from "./find";
+import { startFullScreen } from "./full-screen";
+import { startSettings } from "./settings";
 import {
   askedOfTheApp,
   emptyWindow,
@@ -53,12 +56,16 @@ let arrivals: number[] = [];
 /** What the fake app answers `stop_document`: whether it stopped. */
 let stopAnswer = stopDocumentSample("stopped");
 
+/** Whether the fake app's window is full screen, which its `switch_full_screen` flips. */
+let fullScreen = false;
+
 /** Stops the test's view, whose Esc would otherwise reach the next test's. */
 let stopView: AbortController;
 
 beforeEach(() => {
   mockWindows("document-0");
   documents = [];
+  fullScreen = false;
   waitedFor = BIG_DOCUMENT;
   stops = [];
   arrivals = [];
@@ -74,6 +81,7 @@ beforeEach(() => {
       arrivals.push(showing);
       return null;
     },
+    switch_full_screen: () => (fullScreen = !fullScreen),
   });
   // The note's half second passes when a test says, never late on a loaded machine; time still
   // runs on its own, for the page's frames and the IPC.
@@ -200,15 +208,19 @@ function stopButton(): HTMLButtonElement | null {
   return shownWaitNote()?.querySelector("button") ?? null;
 }
 
-/** Presses Esc where the page has the focus, as the reader does. */
-function pressEsc(): void {
+/** Presses `key` where the page has the focus, as the reader does. */
+function press(key: string): void {
   (document.activeElement ?? document.body).dispatchEvent(
-    new KeyboardEvent("keydown", {
-      key: "Escape",
-      bubbles: true,
-      cancelable: true,
-    }),
+    new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }),
   );
+}
+
+function pressEsc(): void {
+  press("Escape");
+}
+
+function pressF11(): void {
+  press("F11");
 }
 
 /**
@@ -604,4 +616,30 @@ test("Esc with Find open closes Find first, whichever started first", async () =
     expect(heading()).toBe("Field notes");
   });
   stopFind.abort();
+});
+
+test("Esc in full screen with the document on its way only stops it, and a second Esc leaves full screen", async () => {
+  await startSettings();
+  startFullScreen(stopView.signal);
+  startCommands(stopView.signal);
+  const deliver = await loadingAnotherDocument();
+  const inView = showingInView();
+  pressF11();
+  await vi.waitFor(() => {
+    expect(fullScreen).toBe(true);
+  });
+
+  pressEsc();
+  await settle();
+  expect(stops).toEqual([inView]);
+  expect(fullScreen).toBe(true);
+
+  pressEsc();
+  await vi.waitFor(() => {
+    expect(fullScreen).toBe(false);
+  });
+  expect(stops).toEqual([inView]);
+  deliver(notes);
+  await vi.advanceTimersByTimeAsync(100);
+  expect(heading()).toBe("Lamplighter");
 });

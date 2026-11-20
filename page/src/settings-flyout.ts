@@ -208,6 +208,32 @@ export function toggleSettingsFlyout(): void {
 }
 
 /**
+ * Whether the flyout is open, for Esc's order, whose later listeners defer to the flyout (full
+ * screen ticket 02). False before `startSettingsFlyout`.
+ */
+export function isSettingsFlyoutOpen(): boolean {
+  return flyout?.isOpen() ?? false;
+}
+
+type FlyoutListener = (open: boolean) => void;
+
+const flyoutListeners = new Set<FlyoutListener>();
+
+/**
+ * Runs `listener` with whether the flyout is open each time it opens or closes, for the title bar,
+ * which stays in view in full screen while the flyout hanging from its gear is open (full screen
+ * ticket 04). Returns a function that removes the listener.
+ */
+export function whenSettingsFlyoutToggles(
+  listener: FlyoutListener,
+): () => void {
+  flyoutListeners.add(listener);
+  return () => {
+    flyoutListeners.delete(listener);
+  };
+}
+
+/**
  * Draws the settings flyout, closed, and keeps it in step with the settings. After
  * `startSettings` and the title bar, whose gear it opens under. The signal removes it again, for
  * the tests.
@@ -284,6 +310,7 @@ export function startSettingsFlyout(signal?: AbortSignal): void {
       place();
       element.hidden = false;
       gear()?.setAttribute("aria-expanded", "true");
+      for (const listener of flyoutListeners) listener(true);
       editWith.refresh();
       tabStops(element)[0]?.focus();
     },
@@ -291,9 +318,13 @@ export function startSettingsFlyout(signal?: AbortSignal): void {
       element.hidden = true;
       const anchor = gear();
       anchor?.setAttribute("aria-expanded", "false");
-      if (!focusGear) return;
-      if (anchor) anchor.focus();
-      else if (focusBefore instanceof HTMLElement) focusBefore.focus();
+      if (focusGear) {
+        if (anchor) anchor.focus();
+        else if (focusBefore instanceof HTMLElement) focusBefore.focus();
+      }
+      // Once the focus is where it goes, so a title bar that keeps the focus on its gear in view
+      // never slides away in between.
+      for (const listener of flyoutListeners) listener(false);
     },
   };
   flyout = opened;

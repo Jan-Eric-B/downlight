@@ -1,9 +1,11 @@
 /* Light or dark follows Windows. color-scheme also makes the scroll bar follow it. Where the
    window has no Mica (Windows 10, other systems) the page draws a solid background: GitHub's,
-   github-markdown-css's --bgColor-default, which it defines only inside .markdown-body. */
+   github-markdown-css's --bgColor-default, which it defines only inside .markdown-body. Named, so
+   the title bar outside .markdown-body draws the same one in full screen (title-bar.css). */
 :root {
+  --page-background: light-dark(#ffffff, #0d1117);
   color-scheme: light dark;
-  background: light-dark(#ffffff, #0d1117);
+  background: var(--page-background);
 }
 
 /* On a backdrop (the OS can show one and the reader's Backdrop isn't None, see backdrop.ts), Mica
@@ -26,11 +28,12 @@ body {
   margin: 0;
 }
 
-/* The element the document scrolls in (view.ts), below the title bar (title-bar.css), so the scroll
-   bar starts below the bar too. It has the keys' focus, and shows no ring for it. */
+/* The element the document scrolls in (view.ts), below the room kept for the title bar
+   (title-bar.css), so the scroll bar starts below the bar too; in full screen there is no room, and
+   it starts at the top of the screen. It has the keys' focus, and shows no ring for it. */
 .view-scroller {
   position: fixed;
-  inset: var(--title-bar-height) 0 0;
+  inset: var(--title-bar-room) 0 0;
   overflow: auto;
   outline: none;
 }
@@ -381,12 +384,14 @@ article.markdown-body {
   display: none;
 }
 
-/* The find bar (find.ts), at the top right over the document, below the title bar, on a solid
-   background, since the document scrolls under it. Above the "File deleted or moved" bar, which
-   it may cover. */
+/* The find bar (find.ts), at the top right over the document, below the room kept for the title
+   bar (at the top of the screen in full screen), on a solid background, since the document
+   scrolls under it. Above the "File deleted or moved" bar, which it may cover, and under the
+   title bar, which covers it while it slides in in full screen, so it never moves (full screen
+   ticket 04). */
 .find-bar {
   position: fixed;
-  top: calc(var(--title-bar-height) + 12px);
+  top: calc(var(--title-bar-room) + 12px);
   right: 24px;
   z-index: 3;
   display: flex;

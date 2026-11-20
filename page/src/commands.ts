@@ -1,14 +1,16 @@
 import { askApp, listenToApp, type MenuEntry } from "./app";
 import { edit } from "./edit";
-import { findNext, findPrevious, openFind } from "./find";
+import { findNext, findPrevious, isFindOpen, openFind } from "./find";
+import { isFullScreen, switchFullScreen } from "./full-screen";
 import { isFullWidth, switchFullWidth } from "./full-width";
 import { isKeptOnTop, switchKeepOnTop } from "./keep-on-top";
 import { showingWhy } from "./notice";
 import { open } from "./open";
 import { whenSettingsChange } from "./settings";
-import { toggleSettingsFlyout } from "./settings-flyout";
+import { isSettingsFlyoutOpen, toggleSettingsFlyout } from "./settings-flyout";
 import {
   canStepThroughHistory,
+  canStop,
   requestDocument,
   showsDocument,
   stepThroughHistory,
@@ -175,6 +177,16 @@ const commands = {
       void switchKeepOnTop().then(refreshCommands);
     },
   },
+  // The window's own state too, as Keep on top's, with no title bar button of its own (full
+  // screen spec): in full screen the title bar's maximize button runs it (full screen ticket 05).
+  fullScreen: {
+    label: "Full screen",
+    shortcuts: [{ key: "F11" }],
+    pressed: isFullScreen,
+    run: () => {
+      void switchFullScreen().then(refreshCommands);
+    },
+  },
   // The gear's: opens the settings flyout under it, or closes it (window design ticket 08).
   settings: {
     label: "Settings",
@@ -205,6 +217,15 @@ const commands = {
 
 export type CommandId = keyof typeof commands;
 
+/**
+ * Runs the command `id`, for a button that runs one command or another by the window's state, as
+ * the title bar's maximize button runs Full screen in full screen (full screen ticket 05). Every
+ * other button is a `commandButton`.
+ */
+export function runCommand(id: CommandId): void {
+  commands[id].run();
+}
+
 /** A line of the right-click menu: a command, a separator, or the system's Copy. */
 type MenuLine = CommandId | "separator" | "copy";
 
@@ -224,6 +245,7 @@ const menu: MenuLine[] = [
   "separator",
   "fullWidth",
   "keepOnTop",
+  "fullScreen",
   "separator",
   "copy",
   // Last (window design spec); Choose editor... is in its Edit with now.
@@ -259,18 +281,29 @@ function menuEntries(): MenuEntry[] {
 export function commandButton(id: CommandId, glyph: string): HTMLButtonElement {
   const command: Command = commands[id];
   const label = command.label.replace(/\.\.\.$/, "");
-  const shortcut = shortcutOf(command);
   const button = document.createElement("button");
   button.type = "button";
   button.dataset.command = id;
   button.setAttribute("aria-label", label);
-  button.title = shortcut ? `${label} (${shortcut})` : label;
+  button.title = tooltipOf(id, label);
   button.innerHTML = glyph;
   button.addEventListener("click", () => {
     command.run();
   });
   showState(button, command);
   return button;
+}
+
+/**
+ * The tooltip of a button that runs the command `id` under the name `label`: the name and the
+ * command's shortcut, as in "Close (Ctrl+W)", or the name alone for a command without one. Also
+ * for a button that runs a command under another name, as the title bar's maximize button runs
+ * Full screen as "Leave full screen (F11)" (full screen ticket 05).
+ */
+export function tooltipOf(id: CommandId, label: string): string {
+  const command: Command = commands[id];
+  const shortcut = shortcutOf(command);
+  return shortcut ? `${label} (${shortcut})` : label;
 }
 
 /** Shows on `button` whether `command` is available, and whether it is on. */
@@ -393,6 +426,30 @@ export function startCommands(signal?: AbortSignal): void {
       event.preventDefault();
       if (event.repeat && !command.repeatsWhileHeld) return;
       command.run();
+    },
+    { signal },
+  );
+
+  // Esc leaves full screen, last (full screen ticket 02). It isn't the command's shortcut, which
+  // would take Esc from everything else: Esc closes what is nearest first, in the order the
+  // settings flyout, Find, Stop, then full screen, and the coming image lightbox goes before full
+  // screen too. Each feature's listener defers to the ones before it, whichever runs first, so
+  // this one asks each of them rather than relying on `defaultPrevented` alone: the open flyout
+  // hears Esc only with the focus inside it, and a click on it where nothing takes the focus
+  // leaves it open with the focus outside. It runs the command, so what shows full screen's state
+  // refreshes with the app's answer.
+  addEventListener(
+    "keydown",
+    (event) => {
+      if (event.key !== "Escape" || event.isComposing) return;
+      if (event.ctrlKey || event.altKey || event.metaKey || event.shiftKey)
+        return;
+      if (event.defaultPrevented || !isFullScreen()) return;
+      if (isSettingsFlyoutOpen() || isFindOpen() || canStop()) return;
+      event.preventDefault();
+      // The app switches rather than sets, so a repeat before its answer would switch back.
+      if (event.repeat) return;
+      commands.fullScreen.run();
     },
     { signal },
   );

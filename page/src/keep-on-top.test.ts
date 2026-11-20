@@ -9,6 +9,7 @@ import {
   failingWith,
   fakeTheApp,
   fakeTitleBarLayout,
+  menuEntryOf,
   openPageAt,
   settle,
   tell,
@@ -89,10 +90,7 @@ function checkedInMenu(): boolean | undefined {
   document.body.dispatchEvent(
     new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
   );
-  const entry = entries.find(
-    (candidate) => candidate.kind === "command" && candidate.id === "keepOnTop",
-  );
-  return entry?.kind === "command" ? entry.checked : undefined;
+  return menuEntryOf(entries, "keepOnTop")?.checked;
 }
 
 test("the button, Ctrl+Alt+T and the menu entry each ask the app to switch Keep on top", async () => {

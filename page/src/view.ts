@@ -139,6 +139,7 @@ interface StartedView {
   canStep: (step: Step) => boolean;
   visitHeading: (heading: string | null) => Promise<void>;
   keepReadingPosition: (change: () => void) => Promise<void>;
+  canStop: () => boolean;
 }
 
 /** The started view, until a view starts. */
@@ -215,6 +216,15 @@ export function keepReadingPosition(change: () => void): Promise<void> {
   if (theView) return theView.keepReadingPosition(change);
   change();
   return Promise.resolve();
+}
+
+/**
+ * Whether the reader can Stop now (ticket 38): while the wait note shows a document on its way,
+ * and not once it says "Laying out". For Esc's order, whose later listeners defer to Stop (full
+ * screen ticket 02). False until the view has started.
+ */
+export function canStop(): boolean {
+  return theView?.canStop() ?? false;
 }
 
 /**
@@ -840,6 +850,7 @@ export async function startDocumentView(
     canStep: (to) => history.canStep(showing, to),
     visitHeading: visitHeadingInView,
     keepReadingPosition: keepReadingPositionInView,
+    canStop: () => waitNote.canStop(),
   };
 
   // The listeners only start: waiting for them would hold up first paint.

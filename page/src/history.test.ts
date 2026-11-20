@@ -15,6 +15,7 @@ import {
   heading,
   layOut,
   linesOf,
+  menuEntryOf,
   nextInTurn,
   nextShown,
   settle,
@@ -147,10 +148,7 @@ async function offered(): Promise<{ back: boolean; forward: boolean }> {
     new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
   );
   await landed();
-  const enabled = (id: string) =>
-    menu.some(
-      (entry) => entry.kind === "command" && entry.id === id && entry.enabled,
-    );
+  const enabled = (id: string) => menuEntryOf(menu, id)?.enabled ?? false;
   return { back: enabled("back"), forward: enabled("forward") };
 }
 

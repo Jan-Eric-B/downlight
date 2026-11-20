@@ -7,6 +7,7 @@ import { startAccent } from "./accent";
 import { startBackdrop } from "./backdrop";
 import { startCommands } from "./commands";
 import { startFind } from "./find";
+import { startFullScreen } from "./full-screen";
 import { startKeepOnTop } from "./keep-on-top";
 import { startLayout } from "./layout";
 import { startLinks } from "./links";
@@ -25,6 +26,7 @@ startAccent();
 watchLongTasks();
 // Before the title bar draws Keep on top's button.
 startKeepOnTop();
+startFullScreen();
 startTitleBar();
 // After the title bar, whose gear it opens under.
 startSettingsFlyout();

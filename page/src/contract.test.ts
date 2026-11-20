@@ -18,6 +18,7 @@ import {
   type SettingChange,
 } from "./app";
 import { startCommands } from "./commands";
+import { startFullScreen } from "./full-screen";
 import { FULL_WIDTH_CLASS } from "./full-width";
 import { startKeepOnTop } from "./keep-on-top";
 import { startLayout } from "./layout";
@@ -38,9 +39,11 @@ import {
   fakeTitleBarLayout,
   followLinkFailureSample,
   followLinkSample,
+  fullScreenSample,
   goneBar,
   heading,
   keepOnTopSample,
+  menuEntryOf,
   menuEntrySamples,
   messageSample,
   nextInTurn,
@@ -281,10 +284,7 @@ test.each([
       new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
     );
     await settle();
-    const enabled = (id: string) =>
-      entries.some(
-        (entry) => entry.kind === "command" && entry.id === id && entry.enabled,
-      );
+    const enabled = (id: string) => menuEntryOf(entries, id)?.enabled;
     expect([enabled("back"), enabled("forward")]).toEqual([offered, offered]);
   },
 );
@@ -538,6 +538,18 @@ test.each([
   expect(maximize.dataset.state).toBe(look);
 });
 
+/**
+ * Takes the next of the sampled `answers`, in the order the page asks for them, so that each
+ * switch the page asks for is answered by a sample. One asked for after the last fails rather than
+ * be answered by an answer the test made up.
+ */
+function nextSample<T>(answers: T[]): T {
+  const next = answers.shift();
+  if (next === undefined)
+    throw new Error("The page asked for more switches than the test sampled.");
+  return next;
+}
+
 // `keep_on_top.json`
 
 test("the app's answers to switch Keep on top press its button and release it", async () => {
@@ -548,7 +560,7 @@ test("the app's answers to switch Keep on top press its button and release it", 
   fakeTitleBarLayout();
   openPageWith("titleBar");
   fakeTheApp({
-    switch_keep_on_top: () => nextInTurn(answers) ?? false,
+    switch_keep_on_top: () => nextSample(answers),
   });
   await startSettings();
   startKeepOnTop(stopPage.signal);
@@ -562,6 +574,44 @@ test("the app's answers to switch Keep on top press its button and release it", 
   keepOnTop.click();
   await vi.waitFor(() => {
     expect(keepOnTop.getAttribute("aria-pressed")).toBe("false");
+  });
+});
+
+// `full_screen.json`
+
+test("the app's answers to switch full screen tick its menu entry, with the Notice on how to leave, and untick it", async () => {
+  const answers = [
+    fullScreenSample("switchedOn"),
+    fullScreenSample("switchedOff"),
+  ];
+  let entries: MenuEntry[] = [];
+  fakeTheApp({
+    switch_full_screen: () => nextSample(answers),
+    show_document_menu: (args) => {
+      entries = args.entries;
+      return null;
+    },
+  });
+  await startSettings();
+  startFullScreen(stopPage.signal);
+  startCommands(stopPage.signal);
+  const checked = () => {
+    document.body.dispatchEvent(
+      new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+    );
+    return menuEntryOf(entries, "fullScreen")?.checked;
+  };
+
+  await tell("menu-command", "fullScreen");
+  await vi.waitFor(() => {
+    expect(checked()).toBe(true);
+  });
+  expect(document.querySelector(".notice")?.textContent).toBe(
+    "Press F11 or Esc to leave full screen",
+  );
+  await tell("menu-command", "fullScreen");
+  await vi.waitFor(() => {
+    expect(checked()).toBe(false);
   });
 });
 
