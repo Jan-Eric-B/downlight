@@ -9,6 +9,7 @@ Issues and specs for this repo live as markdown files in `.scratch/`.
 - Implementation issues are one file per ticket at `.scratch/<feature-slug>/issues/<NN>-<slug>.md`, numbered from `01`, never a single combined tickets file
 - Triage state is recorded as a `Status:` line near the top of each issue file (see `triage-labels.md` for the role strings)
 - Comments and conversation history append to the bottom of the file under a `## Comments` heading
+- The order of all open tickets, across features, is `.scratch/backlog.txt`, one line per ticket, set by the repo owner. The next ticket to work on is the first line whose blockers are done. A new ticket gets a line there (at the end, unless the owner says where), and a closed ticket's line is removed. Tickets carry no priority of their own.
 
 ## When a skill says "publish to the issue tracker"
 

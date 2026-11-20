@@ -15,6 +15,7 @@ Spec: none yet. Grill it first (`/grill-with-docs`), then `/to-spec` writes `.sc
     3. **The current heading beside the file name in the title bar** (VS Code's breadcrumbs), its click opening the flyout at that heading. Cheap and always visible, but the title bar is already full in a narrow window.
     - Rejected: **a hover menu on the file name** (hover is undiscoverable and has no keyboard path, and the file name's tooltip and click already mean the path, the counts and revealing the file) and **the headings as a native right-click submenu** (no filter, no marked heading, nesting h2 and h3 in submenus, and hundreds of entries in a large document).
   - Which heading levels; whether choosing a heading joins **History** as a heading link does.
+  - **Heading jump keys:** keys that go to the next or previous heading (mdhero uses `[` and `]`; Alt+Down and Alt+Up are another choice), from the reading position. Which keys, which levels, and whether a jump joins History. They need only the list of headings, so they can ship as a first slice ahead of the flyout.
   - Large documents: how many headings it must handle (the 100 MB test document) and whether it waits for ticket 39 of the v1 spec.
   - Its name in the glossary: "Outline" (the spec's word) vs "Table of contents"; option C of the overview ruler's mockups is this list squeezed into the ruler, and was dropped for that.
 

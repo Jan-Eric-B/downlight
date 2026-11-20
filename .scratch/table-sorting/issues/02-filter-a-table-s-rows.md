@@ -1,0 +1,18 @@
+# 02: Filter a table's rows
+
+**What to build:** The reader can show only a table's rows that match some text, to find their way in a large table.
+
+Spec: none yet. Grill it first (`/grill-with-docs`). From ticket 01's grilling, which put it on Later.
+
+**Blocked by:** 01 (Sort a document's tables)
+
+**Status:** needs-triage
+
+- [ ] Grill it before planning. Open questions:
+  - Ticket 01's grilling rejected a filter on the table because it would be a second Find. Is it a Find option instead ("show matching rows only"), and does it then belong with Find's options (`.scratch/find-options/issues/01-find-options.md`)?
+  - Like a **Sort**, it belongs to the showing and is never written to the file; does a **Reload** keep it?
+  - What Find, copying, Edit and the counts do with hidden rows.
+
+## Comments
+
+**2026-11-20.** From ticket 01's grilling (2026-11-19): "Filtering rows (perhaps as a Find option, 'show matching rows only') ... go on Later."

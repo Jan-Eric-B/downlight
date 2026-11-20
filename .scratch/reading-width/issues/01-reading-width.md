@@ -6,7 +6,7 @@ Spec: none yet. Grill it first (`/grill-with-docs`). It may belong under the v1 
 
 **Blocked by:** none
 
-**Status:** needs-triage
+**Status:** wontfix
 
 - [ ] Grill it before planning. Open questions:
   - **Its unit.** The owner's idea is a percentage. A percentage of the window makes the line length change with every resize, which is what a reading width exists to prevent, so the recommendation is a width in px at 100% zoom (or in characters), from about 600 px up to Full width.
@@ -16,3 +16,5 @@ Spec: none yet. Grill it first (`/grill-with-docs`). It may belong under the v1 
 ## Comments
 
 **2026-11-20, from the repo owner.** Asked for as a feature idea while discussing the overview ruler and the outline.
+
+**2026-11-20, from the repo owner.** Dropped (wontfix). GitHub's reading width and **Full width** stay the two widths; reader settings no longer asks about a width of its own.

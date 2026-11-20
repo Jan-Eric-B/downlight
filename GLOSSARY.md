@@ -132,6 +132,10 @@ _Avoid_: Current window, focused window
 A window staying above all others. It belongs to one window and is gone when the window closes.
 _Avoid_: Pin, always on top
 
+**Full screen**:
+A window filling its whole screen, over the taskbar, its title bar showing only while the reader reaches for it at the top edge, while other windows can still be put over it. It belongs to one window, as Keep on top does, and is gone when the window closes; leaving it returns the window to how it was, maximized or at its size and place.
+_Avoid_: Zen mode, kiosk, presentation mode, borderless
+
 **Settings**:
 The reader's choices that every window shares (editor, zoom, theme, backdrop, accent color, Full width, the Overview ruler), kept in one file and changed from the settings flyout under the title bar's gear.
 _Avoid_: Preferences, options, config

@@ -1,0 +1,56 @@
+Downlight backlog, ordered by the owner on 2026-11-20
+The order of all open tickets: the first line whose blockers are done is the next one to work on.
+One line per open ticket: ID | title | status | notes (blocked by, collides with).
+ID = folder/number under .scratch/<folder>/issues/<number>-*.md (v1 = downlight-v1, wd = window-design, ruler = overview-ruler, tables = table-sorting).
+Status: ready = ready-for-agent, triage = needs-triage (grill first), info = needs-info (investigate).
+Move lines to change the order. A new ticket gets a line here; a closed ticket's line is removed.
+
+full-screen/01 | F11 and the menu switch full screen | ready | not blocked
+full-screen/02 | Esc leaves full screen, last | ready | blocked by full-screen/01; Esc after the flyout, Find and Stop, and image-lightbox/01 before it
+full-screen/03 | The title bar hides in full screen | ready | blocked by full-screen/01
+full-screen/04 | The title bar slides in at the top edge | ready | blocked by full-screen/03
+full-screen/05 | The bar's buttons in full screen | ready | blocked by full-screen/01 (tests) and full-screen/04 (hand check); slideshow/01 reuses full screen
+paste-markdown/01 | Paste or drop Markdown text | triage | not blocked; needs a new term (a Document is a file); shares the "document without a file" question with converter/01; touches the spec's Out item "stdin / --text"
+image-lightbox/01 | Image lightbox | triage | not blocked; Esc is already used by Find and Stop (also wanted by full-screen/02, which goes after it); images inside links (badges)
+copy-as-markdown/01 | Copy as Markdown, and as rich text | triage | not blocked; must decide file order vs shown order with tables/01, and ticks
+v1/38 | A large document's load can be left (Wait note, Stop) | built, hand checks left | only your hand check is missing; all boxes still unchecked; blocks v1/39
+wd/10 | Counts (lines and words in the file name tooltip, selection bubble bottom right) | ready | not blocked; its bubble owns the bottom right corner
+about/01 | About Downlight (version, GPL notices, third-party notices) | triage | not blocked; closes a GPL-3.0 gap (legal notices in the UI); may add a section to the settings flyout, as ruler/02 adds a "View" group
+ruler/01 | Overview ruler: heading marks beside the scroll bar | ready | not blocked; builds the list of headings that outline/01 reuses
+ruler/02 | Overview ruler: the switch in the settings (flyout "View" group) | ready | blocked by ruler/01; creates the flyout's "View" group that reader-settings and remote-images may use
+ruler/03 | Overview ruler: Find's marks, and clicking them | ready | blocked by ruler/01; extends Find's interface (find-options and tables/01 must keep it working)
+ruler/04 | Overview ruler: clicking and hovering heading marks | ready | blocked by ruler/01
+ruler/05 | Overview ruler: large documents, measured | ready | blocked by ruler/03; may switch the ruler to a canvas; does not wait for v1/39
+tables/01 | Sort a document's tables | triage, grilled | needs /to-spec and /to-tickets only; Find, the ruler, line numbers and copy follow the shown order
+outline/01 | Outline: headings to jump to (flyout, docked in the left margin), heading jump keys | triage | best after ruler/01 (shares the list of headings); docked placement takes the left margin, which collides with line-numbers/01; jump keys can ship first
+print/01 | Printing and PDF | triage | not blocked; shares "laid out for others" styles with export-html/01; check ADR 0003's skipped blocks print at full size
+export-html/01 | Export to HTML | triage | not blocked; first feature that writes a file ("reading only"); share styles with print/01
+mermaid-and-math/01 | Mermaid diagrams and math | triage | not blocked; rendering change (fixtures, see right-to-left/01); needs a cap like the Highlight limit; print and export should show diagrams
+find-options/01 | Find options (case, whole word, regex) | triage | not blocked; overlaps tables/02 (filter as a Find option); keep ruler/03's marks working
+reader-settings/01 | Reader settings (font, size, line height, wrap long code lines) | triage | not blocked; every change must keep the reading position
+tables/03 | A long table's header sticks to the top | triage | not blocked; must not count as the reading position; find bar and file-gone bar sit above it
+ruler/07 | Overview ruler: marks for task items | triage | blocked by ruler/01; changes as ticks change
+ruler/06 | Overview ruler: blocks shaded by kind (option B) | triage | blocked by ruler/05's measurement
+other-formats/03 | Code and plain text as highlighted text, not as Markdown | triage | not blocked; sets up the format choice cheaply for other-formats/01 and 02; widens the term Document; rendering change (see right-to-left/01); research in other-formats/research.md
+other-formats/01 | CSV and TSV as a table, SVG as an image | triage | not blocked; a CSV table wants tables/01's Sort; research in other-formats/research.md
+other-formats/02 | JSON and XML as collapsible trees | triage | blocked by other-formats/01 or /03 (the format choice, whichever builds it)
+other-formats/04 | Jupyter notebooks | triage | blocked by other-formats/02 (its JSON parsing with lines); outputs are untrusted HTML and images
+explorer-preview/01 | The Explorer preview pane | triage | not blocked; separate COM component, likely its own ADR
+converter/01 | Word, PDF and PowerPoint converter | triage | not blocked; separate optional component; shares the "document without a file" question with paste-markdown/01
+writing-ticks/01 | Writing ticks to the file, opt-in | triage | not blocked; contradicts the glossary ("reading only", a Tick is never written); its save triggers Downlight's own reload
+line-numbers/01 | Line numbers in the margin | triage | not blocked; left margin collides with outline/01's docked placement; tables/01 puts row numbers out of sequence
+recent-documents/01 | The last 5 documents in the empty window, reading position across launches | triage | not blocked; network share rules; a stored list beside the settings
+slideshow/01 | Marp slideshow | triage | not blocked; F5 is Reload already; relates to full-screen/01; maybe a JavaScript dependency (Marp Core) against ADR 0002's render in Rust
+local-files/01 | Open non-Markdown local files with their default app, opt-in | triage | not blocked; a new link action; safety of untrusted link targets
+macos-port/01 | The macOS port | triage | not blocked; title bar (ADR 0005), per-OS module, signing; every Windows-only feature needs a macOS answer
+linux-port/01 | The Linux port | triage | not blocked; WebKitGTK must support what the page uses (CSS Highlights, content-visibility); per-OS module
+remote-images/01 | A setting to block remote images | triage | not blocked; before publishing; may sit in the flyout's "View" group (ruler/02)
+discoverability/01 | Review how discoverable the commands are | triage | not blocked, but best done late, after most commands exist; before publishing
+v1/39 | The page answers while a large document goes in | triage | blocked by v1/38; after v1
+wd/16 | Mica never shows as active | info | not blocked; blocks wd/15
+wd/15 | The backdrops against Windows' own | info | blocked by wd/16
+right-to-left/01 | Right-to-left text (dir="auto" on blocks, as GitHub) | triage, small | not blocked; changes every rendered fixture, so avoid running it beside another rendering change (mermaid-and-math, other-formats)
+tables/02 | Filter a table's rows | triage | blocked by tables/01; may become a Find option instead (find-options/01)
+
+Not tickets, to do:
+- Commit the new and changed tickets (since commit 6bc9c7c: 23 stubs, 5 tickets from the mdhero comparison, 4 tickets extended, this file; later other-formats/research.md, other-formats/03 and 04, other-formats/01 and 02 extended).
