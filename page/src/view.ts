@@ -9,6 +9,7 @@ import {
   type Steps,
 } from "./app";
 import { addCopyButtons } from "./copy";
+import { isFindOpen } from "./find";
 import { WindowHistory, type Line } from "./history";
 import { noticeContent, showingWhy, showNotice } from "./notice";
 import { open } from "./open";
@@ -283,6 +284,11 @@ interface Placement {
   /** The showing whose render this is, or null for the empty state or an error. */
   showing: number | null;
   /**
+   * The showing the app gave this answer, an error's too, which the page tells it it placed
+   * (`document_arrived`); null for the empty state or when the app couldn't be asked.
+   */
+  answered: number | null;
+  /**
    * The file of the document the window shows, also when it can't be read, or null for the
    * empty state or when the app couldn't be asked.
    */
@@ -306,17 +312,24 @@ interface Placement {
 /** Nowhere to go, as for a window that shows no document. */
 const NO_STEPS: Steps = { back: false, forward: false };
 
-/** What a request does when the view keeps what it shows: tell the reader why. */
+/**
+ * What a request does when the view keeps what it shows: tell the reader why. `answered` is the
+ * showing the app gave the answer, a reload's that can't be read, which the page tells it it took
+ * (`document_arrived`), or null when the app couldn't be asked.
+ */
 interface Telling {
   notice: Notice;
+  answered: number | null;
 }
 
 /**
  * Shows why the window can't show its document from `file`, in place of any render, for a show
- * or a return (`reason`), with what the app said of its history in `steps`.
+ * or a return (`reason`), with what the app said of its history in `steps`. `answered` is the
+ * showing the app gave the answer, or null when it couldn't be asked.
  */
 function placeError(
   why: Notice,
+  answered: number | null,
   file: DocumentFile | null,
   reason: ShownReason,
   steps: Steps | null,
@@ -324,6 +337,7 @@ function placeError(
   return {
     reason,
     showing: null,
+    answered,
     file,
     content: { why },
     ticks: NO_TICKS,
@@ -345,6 +359,7 @@ function placementFor(
     return {
       reason: "shown",
       showing: null,
+      answered: null,
       file: null,
       content: null,
       ticks: NO_TICKS,
@@ -354,10 +369,11 @@ function placementFor(
   const { showing, file, steps } = answer;
   switch (answer.place) {
     case "reload":
-      if ("error" in answer) return { notice: answer.error };
+      if ("error" in answer) return { notice: answer.error, answered: showing };
       return {
         reason: "reload",
         showing,
+        answered: showing,
         file,
         content: { html: answer.document },
         ticks: "keep",
@@ -366,10 +382,11 @@ function placementFor(
       };
     case "return":
       if ("error" in answer)
-        return placeError(answer.error, file, "return", steps);
+        return placeError(answer.error, showing, file, "return", steps);
       return {
         reason: "return",
         showing,
+        answered: showing,
         file,
         content: { html: answer.document },
         // As a reload does, the ticks are dropped if the file's number of task items changed
@@ -380,10 +397,11 @@ function placementFor(
       };
     case "show":
       if ("error" in answer)
-        return placeError(answer.error, file, "shown", steps);
+        return placeError(answer.error, showing, file, "shown", steps);
       return {
         reason: "shown",
         showing,
+        answered: showing,
         file,
         content: { html: answer.document },
         ticks: NO_TICKS,
@@ -472,12 +490,20 @@ function keepTheKeysOn(scroller: HTMLElement): void {
  * window names a heading in it, it scrolls there once that showing is in view. An answer that
  * takes over half a second, as a large document's does, shows the wait note until it comes
  * (ticket 31), unless the app says it is a reload, which keeps the document in view untouched.
- * `scriptStart` is when the page's script started, for the first paint report.
+ * The note's Stop, and Esc, stop the document on its way (ticket 38), and so does the app's word
+ * that the reader asked for the document in view meanwhile. `scriptStart` is when the page's
+ * script started, for the first paint report; `signal` stops the view's Esc, as the tests do
+ * after each test.
  */
-export async function startDocumentView(scriptStart: number): Promise<void> {
+export async function startDocumentView(
+  scriptStart: number,
+  signal?: AbortSignal,
+): Promise<void> {
   markFirstPaint("scriptStart", scriptStart);
   const goneBar = createGoneBar();
-  const waitNote = createWaitNote();
+  const waitNote = createWaitNote(() => {
+    void stopIfTheReaderCan();
+  });
   const view = document.createElement("article");
   view.className = "markdown-body";
   const empty = createEmptyState();
@@ -497,6 +523,14 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
   let showing: number | null = null;
   /** The file of the document the view shows, for the `whenDocumentShown` listeners. */
   let file: DocumentFile | null = null;
+  /**
+   * The showing of the last answer the view placed, as the app named it: the showing in view, or
+   * the one whose answer said why its document can't be shown, which the view's `showing` doesn't
+   * name. Null for the empty state or nothing yet. Stop names it, so that the app, which the page
+   * tells of every answer it placed, and the page agree on what the view shows (ticket 38's
+   * review).
+   */
+  let answered: number | null = null;
   /**
    * The showing whose file the app said went away since the window last asked for its render, or
    * null. The bar shows only while the view shows that showing (ticket 26), so a `gone` for a
@@ -544,8 +578,8 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
       // The app couldn't be asked at all, so there is no answer to say what to do: a view that
       // shows a document keeps it, as a failed reload does.
       return showing === null
-        ? placeError(String(error), null, "shown", null)
-        : { notice: String(error) };
+        ? placeError(String(error), null, null, "shown", null)
+        : { notice: String(error), answered: null };
     }
     // Shown as soon as it comes, even if a later request overtakes this one: the app hands a held
     // notice over once, with the first answer (ticket 26).
@@ -569,6 +603,7 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
     if (placement.reason === "shown") history.showAnew(placement.showing, left);
     if (placement.steps) history.appCanStep(placement.steps);
     showing = placement.showing;
+    answered = placement.answered;
     file = placement.file;
     view.hidden = content === null;
     empty.hidden = content !== null;
@@ -591,6 +626,19 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
   let latestStepWithin = 0;
 
   /**
+   * Tells the app the page placed its answer for `answered`, its render or why it can't be shown,
+   * or took a reload that can't be read (ticket 38): a document joins the window's history only
+   * then, and the app lets go of the document the view showed before. Nothing for the empty
+   * state, or when the app couldn't be asked.
+   */
+  const tellPlaced = (answered: number | null) => {
+    if (answered === null) return;
+    void askApp("document_arrived", { showing: answered }).catch(
+      () => undefined,
+    );
+  };
+
+  /**
    * Back or Forward (`stepThroughHistory`): within the showing in view if it has a visit that
    * way, or else through the app.
    */
@@ -598,6 +646,8 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
     if (showing !== null) {
       const within = history.stepWithin(showing, to, readingPosition(shown));
       if (within) {
+        // Going elsewhere in the document in view leaves the one on its way (ticket 38).
+        void stopIfTheReaderCan();
         const inView = showing;
         const thisStep = ++latestStepWithin;
         void landAtLine(
@@ -611,10 +661,15 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
     showingWhy(askApp("step_history", { step: to }));
   };
 
-  /** A link's scroll to a heading, as one more visit (`visitHeading`). */
+  /**
+   * A link's scroll to a heading, as one more visit (`visitHeading`). Going somewhere new in the
+   * document in view leaves the one on its way, before the app forgets what Forward went to
+   * (ticket 38).
+   */
   const visitHeadingInView = async (heading: string | null) => {
     if (showing === null) return;
     if (heading !== null && !headingTarget(heading)) return;
+    await stopIfTheReaderCan();
     if (history.visitHeading(showing, readingPosition(shown)))
       showingWhy(askApp("forget_forward", { showing }));
     await scrollToHeading(heading);
@@ -630,9 +685,16 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
   ): Promise<void> => {
     if ("notice" in outcome) {
       showNotice(outcome.notice);
+      tellPlaced(outcome.answered);
       return;
     }
     const received = epochMs();
+    if (outcome.reason !== "reload" && waitNote.showLayingOut()) {
+      // Painted before the page takes the document in, which holds it for seconds when the
+      // document is large, so the frozen note says what the window is doing (ticket 38).
+      await afterNextFrame();
+      if (!isLatest()) return;
+    }
     const { content: given } = outcome;
     const content =
       given === null
@@ -654,6 +716,8 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
     };
     replaceContent(outcome, content, before);
     const inserted = epochMs();
+    // The document joins the window's history only now that it is in view (ticket 38).
+    tellPlaced(outcome.answered);
     if (outcome.reason === "shown") {
       markFirstPaint("documentReceived", received);
       markFirstPaint("documentInserted", inserted);
@@ -689,9 +753,9 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
     requesting = true;
     const thisRequest = ++latestRequest;
     const isLatest = () => thisRequest === latestRequest;
-    const answered = waitNote.during(showing, isLatest);
+    const answerCame = waitNote.during(showing, isLatest);
     const outcome = await ask();
-    answered();
+    answerCame();
     if (isLatest()) await place(outcome, isLatest);
     if (!isLatest()) return;
     requesting = false;
@@ -701,6 +765,50 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
     if (awaited !== null && awaited.showing === showing)
       await visitHeadingInView(awaited.heading);
   };
+  /**
+   * Stop (ticket 38): while a document is on its way, drops the request for it, so its answer
+   * never shows, and tells the app, which puts the window back to what the view shows, and leaves
+   * the document's render. The view keeps what it shows, at its reading position; a window that
+   * showed no document asks again once the app has stopped, which shows the empty window. The app
+   * is named the showing of the last answer placed, an error's too, as it holds it. Resolves once
+   * the app has answered, and does nothing while no request is on its way.
+   */
+  const stop = async (): Promise<void> => {
+    if (!requesting) return;
+    ++latestRequest;
+    requesting = false;
+    headingAwaited = null;
+    const inView = answered;
+    settle();
+    const stopped = await askApp("stop_document", { showing: inView }).catch(
+      () => false,
+    );
+    if (stopped && inView === null) await request();
+  };
+  /**
+   * Stop as the reader asks for it, from the note or with Esc, or by going elsewhere in the
+   * document in view: only while the note shows a document on its way, and not once it says
+   * "Laying out", when the page answers nothing. A reload, which shows no note, goes on.
+   */
+  const stopIfTheReaderCan = async (): Promise<void> => {
+    if (waitNote.canStop()) await stop();
+  };
+  // Esc stops too, but closes what is open first (ticket 38's grilling): Find, whichever of the
+  // two listeners runs first, so this one defers to it while it is open or has taken the key. The
+  // settings flyout keeps its Esc to itself, and a menu is the system's, which takes its own keys.
+  addEventListener(
+    "keydown",
+    (event) => {
+      if (event.key !== "Escape" || event.isComposing) return;
+      if (event.ctrlKey || event.altKey || event.metaKey || event.shiftKey)
+        return;
+      if (event.defaultPrevented || isFindOpen() || !waitNote.canStop()) return;
+      event.preventDefault();
+      void stop();
+    },
+    { signal },
+  );
+
   /** Counts the layout changes, so that only the latest one lands. */
   let latestLayoutChange = 0;
 
@@ -737,6 +845,9 @@ export async function startDocumentView(scriptStart: number): Promise<void> {
   // The listeners only start: waiting for them would hold up first paint.
   listenToApp("ask-for-document", () => {
     void request();
+  });
+  listenToApp("stop-document", (inView) => {
+    if (inView === answered) void stop();
   });
   listenToApp("scroll-to-heading", (scroll) => {
     if (scroll.showing === showing) void visitHeadingInView(scroll.heading);

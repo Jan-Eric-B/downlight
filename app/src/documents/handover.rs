@@ -94,8 +94,8 @@ impl Documents {
         self.page_hears_settings(window);
         let mut table = self.lock();
         let record = table.windows.get_mut(window)?;
-        let steps = record.history.steps();
-        let shown = record.shown.as_mut()?;
+        let steps = record.now.history.steps();
+        let shown = record.now.shown.as_mut()?;
         shown.page_asked = true;
         let place = if page_shows == Some(shown.showing) {
             Place::Reload
@@ -107,11 +107,17 @@ impl Documents {
                 Arrival::Stepped => Place::Return,
             }
         };
+        let render = shown
+            .render_ahead
+            .take()
+            .unwrap_or_else(|| render::start(&shown.path).0);
+        // The page waits only for its latest request's render, as after a save or F5 during a
+        // load, so the one before is left (ticket 38).
+        if let Some(before) = shown.rendering.replace(render.leaver()) {
+            before.leave();
+        }
         Some(Handover {
-            render: shown
-                .render_ahead
-                .take()
-                .unwrap_or_else(|| render::start(&shown.path).0),
+            render,
             showing: shown.showing,
             file: DocumentFile::of(&shown.path),
             place,
@@ -131,16 +137,19 @@ impl Documents {
         page_shows: Option<Showing>,
     ) -> Option<PathBuf> {
         let table = self.lock();
-        let shown = table.windows.get(window)?.shown.as_ref()?;
+        let shown = table.windows.get(window)?.now.shown.as_ref()?;
         (page_shows != Some(shown.showing)).then(|| shown.path.clone())
     }
 
-    /// What `window`'s page asking for its document does, for the tests of other modules, which
-    /// have no webview to call [`render_document`]: hands the document over, and gives the
-    /// showing the page then sends with a link (None while the window shows no document).
+    /// What `window`'s page asking for its document and placing it does, for the tests of other
+    /// modules, which have no webview to call [`render_document`]: hands the document over, says
+    /// it arrived (ticket 38), and gives the showing the page then sends with a link (None while
+    /// the window shows no document).
     #[cfg(test)]
     pub fn page_asks(&self, window: &str) -> Option<Showing> {
-        self.handover(window, None).map(|handover| handover.showing)
+        let showing = self.handover(window, None)?.showing;
+        self.arrived(window, showing);
+        Some(showing)
     }
 }
 
@@ -164,12 +173,17 @@ pub async fn render_document(
     let Some(handover) = documents.handover(window.label(), showing) else {
         return Ok(None);
     };
-    let content = match handover.render.await {
+    let content = match handover.render.finished().await {
         Ok(Ok((document, stages))) => {
             timing.report(window.label(), handover.place.reported_as(), &stages);
             Content::Document(document)
         }
-        Ok(Err(error)) => Content::Error(error.into()),
+        Ok(Err(error)) => {
+            if let DocumentError::Left { stages, .. } = &error {
+                timing.report(window.label(), "render-left", stages);
+            }
+            Content::Error(error.into())
+        }
         Err(source) => Content::Error(DocumentError::ReadAndRenderStopped { source }.into()),
     };
     Ok(Some(DocumentToShow {
@@ -347,6 +361,7 @@ pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
             Path::new("a.md"),
             "",
             Disk,
+            &downlight_core::Leave::new(),
         )
         .map(Content::Document)
         .map_err(serde_json::Error::custom)

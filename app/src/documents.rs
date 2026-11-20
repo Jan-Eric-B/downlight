@@ -27,13 +27,16 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
+use downlight_core::Leave;
+
 use crate::message::{Message, Pages};
 use crate::notice::Notice;
 use crate::platform;
 use crate::render::{self, RenderTask};
-use crate::settings::{Settings, SettingsStore};
-use crate::watch::{ReadStamp, Watch};
+use crate::settings::{AccentScale, Settings, SettingsStore};
+use crate::watch::{Change, ReadStamp, Watch};
 
+pub mod arrival;
 pub mod handover;
 pub mod history;
 mod place;
@@ -68,6 +71,10 @@ struct Inner {
     /// table's, never under it: a change tells the pages, which reads the table, while the
     /// settings are held.
     settings: Arc<SettingsStore>,
+    /// Windows' accent scale now, which every page is sent with the settings (window design
+    /// ticket 09); None where the OS has none. Changed only while the settings are held, and read
+    /// under their lock too, so it reaches the pages in the same order as a change of the settings.
+    windows_accent: Mutex<Option<AccentScale>>,
 }
 
 /// Every open window by label, whether it shows a document or none.
@@ -94,13 +101,114 @@ struct WindowTable {
     not_hearing: HashMap<String, bool>,
 }
 
-/// An open window: the document it shows now, None while it shows none, and its history. Kept
-/// apart from the shown document so that the history outlives every change of document, and goes
-/// only with the window.
+/// An open window: what it shows now, and, while its document is on its way, what its page's
+/// view still shows. Kept apart from the shown document so that the history outlives every
+/// change of document, and goes only with the window.
 #[derive(Default)]
 struct WindowRecord {
+    /// The document the window shows now, the one on its way while one is, and its history.
+    now: WindowState,
+    /// What the window was before it was given the document it shows, while that document is
+    /// still on its way: its page's view still shows the document held here (ticket 38). Stop
+    /// puts it back ([`Documents::stop`]), going elsewhere starts from it, and it goes once the
+    /// page says the document arrived ([`Documents::arrived`]), so a document joins the history
+    /// only then.
+    before_arrival: Option<WindowState>,
+}
+
+/// A window's document, None while it shows none, and its history: what the window is now, or
+/// was before its document on its way ([`WindowRecord`]).
+#[derive(Default)]
+struct WindowState {
     shown: Option<ShownDocument>,
     history: History,
+}
+
+impl WindowState {
+    /// The document, while it is the one with `key`.
+    fn document(&self, key: &Path) -> Option<&ShownDocument> {
+        self.shown.as_ref().filter(|shown| shown.key == key)
+    }
+
+    /// The document, while it is the one with `key`.
+    fn document_mut(&mut self, key: &Path) -> Option<&mut ShownDocument> {
+        self.shown.as_mut().filter(|shown| shown.key == key)
+    }
+}
+
+impl WindowRecord {
+    /// The window as its page's view shows it: what it was before the document on its way, if
+    /// one is, or else what it is.
+    fn in_view(&self) -> &WindowState {
+        self.before_arrival.as_ref().unwrap_or(&self.now)
+    }
+
+    /// The window's documents: the one it shows, and the one its page's view still shows while
+    /// that is on its way.
+    fn documents(&self) -> impl Iterator<Item = &ShownDocument> {
+        [Some(&self.now), self.before_arrival.as_ref()]
+            .into_iter()
+            .flatten()
+            .filter_map(|state| state.shown.as_ref())
+    }
+
+    /// Whether the window shows the document with `key`: as its document, or in its page's view
+    /// while its next document is on its way.
+    fn shows(&self, key: &Path) -> bool {
+        self.documents().any(|shown| shown.key == key)
+    }
+
+    /// Whether the document with `key` is on its way to the window: given it, but not placed by
+    /// its page yet.
+    fn is_on_its_way(&self, key: &Path) -> bool {
+        self.before_arrival.is_some() && self.now.document(key).is_some()
+    }
+
+    /// The showing of the document with `key`, while the window holds it in its page's view
+    /// behind its next document on its way.
+    fn held_showing(&self, key: &Path) -> Option<Showing> {
+        Some(self.before_arrival.as_ref()?.document(key)?.showing)
+    }
+
+    /// The document with `key`, whether the window shows it or holds it in view behind its next
+    /// document on its way.
+    fn document_mut(&mut self, key: &Path) -> Option<&mut ShownDocument> {
+        let Self {
+            now,
+            before_arrival,
+        } = self;
+        now.document_mut(key)
+            .or_else(|| before_arrival.as_mut()?.document_mut(key))
+    }
+
+    /// Puts back what the window was before the document on its way, if one is, and gives what
+    /// it leaves, the document on its way, for the caller to drop after the table's lock, since
+    /// dropping a watch stops it.
+    fn leave_the_arriving(&mut self) -> Option<WindowState> {
+        let before = self.before_arrival.take()?;
+        Some(std::mem::replace(&mut self.now, before))
+    }
+
+    /// Moves the window on to what `next` makes of the window in view, and holds what that was
+    /// until the new document arrives. A document still on its way is left first, so the window
+    /// moves on from the one in view, and the one on its way never joins the history (ticket
+    /// 38); it is given back for the caller to drop after the table's lock, since dropping a
+    /// watch stops it.
+    ///
+    /// A reload of the held document that its page hasn't placed yet is lost to the page, which
+    /// drops it for the new document, so the held document reloads if it is put back.
+    fn move_on(&mut self, next: impl FnOnce(&WindowState) -> WindowState) -> Option<WindowState> {
+        let left = self.leave_the_arriving();
+        let next = next(&self.now);
+        let mut before = std::mem::replace(&mut self.now, next);
+        if let Some(held) = before.shown.as_mut()
+            && held.reload_unplaced
+        {
+            held.missed = Some(Change::Changed);
+        }
+        self.before_arrival = Some(before);
+        left
+    }
 }
 
 /// One time a window was given a document. A window given the same document again, after another,
@@ -156,6 +264,24 @@ struct ShownDocument {
     /// succession, the page's latest request still gets the heading; never with a reload, which
     /// keeps the reading position.
     arrival: Arrival,
+    /// What leaves the render last handed to the page, which a later request for the document,
+    /// or the window leaving it, leaves (ticket 38): the page waits for the latest one only.
+    rendering: Option<Leave>,
+    /// Whether the watch started a reload that the page hasn't placed yet
+    /// ([`Documents::arrived`]).
+    reload_unplaced: bool,
+    /// The last change to the document's file while it was held behind a document on its way
+    /// ([`WindowRecord::before_arrival`]), which Stop then acts on.
+    missed: Option<Change>,
+}
+
+impl Drop for ShownDocument {
+    fn drop(&mut self) {
+        // The render ahead leaves itself when it is dropped.
+        if let Some(rendering) = &self.rendering {
+            rendering.leave();
+        }
+    }
 }
 
 /// How a window came to show its document.
@@ -197,11 +323,15 @@ impl ShownDocument {
             page_asked: false,
             held_notice: None,
             arrival,
+            rendering: None,
+            reload_unplaced: false,
+            missed: None,
         }
     }
 
     fn start_reload(&mut self) {
         self.render_ahead = Some(render::start(&self.path).0);
+        self.reload_unplaced = true;
     }
 }
 
@@ -251,8 +381,12 @@ pub enum Given {
     Changed(String),
     /// The document is open already in this window, the one the request came from ([`Target`]),
     /// as for a link to the document that window shows. It is brought to the front and its page
-    /// is told nothing: it scrolls on the link's own result.
+    /// is told nothing: it scrolls on the link's own result. While the window's next document is
+    /// on its way, its page is told to stop that, as Stop does (ticket 38's review).
     AlreadyHere(String),
+    /// The document is on its way to this window, the one the request came from (ticket 38). It
+    /// is brought to the front, and the document stays on its way.
+    OnItsWayHere(String),
     /// The document is open already in this window, another than the one the request came from,
     /// or any window for a launch, and it is brought to the front. Its page has been told to
     /// scroll to the document's heading, if the document came with one and the page listens; a
@@ -266,19 +400,30 @@ enum Claimed {
     /// A new window with this label is to open.
     NewWindow(String),
     /// `window` shows the document now, by `claim`, and is to be retitled and its page told;
-    /// `left`, what the window was before, is put back if that fails.
+    /// what the window was before is held until the document arrives, and put back if that
+    /// fails. `left` is the document still on its way that the claim left, if one was, to be
+    /// dropped after the table's lock, since dropping a watch stops it.
     Changed {
         window: String,
         claim: u64,
-        left: Box<WindowRecord>,
+        left: Option<Box<WindowState>>,
     },
-    /// The document is open already in this window, the one the request came from.
-    AlreadyHere(String),
+    /// The document is open already in `window`, the one the request came from. Its page is to
+    /// stop the window's next document on its way, if `stop` is Some: the showing the page's view
+    /// shows the document as.
+    AlreadyHere {
+        window: String,
+        stop: Option<Showing>,
+    },
+    /// The document is on its way to this window, the one the request came from.
+    OnItsWayHere(String),
     /// The document is open already in `window`, another than the one the request came from.
-    /// Its page is to scroll to `scroll_to` now, if that is Some: the showing the window shows the
-    /// document as, and the heading.
+    /// Its page is to stop the window's next document on its way, if `stop` is Some, as for
+    /// [`Claimed::AlreadyHere`], and then to scroll to `scroll_to`, if that is Some: the showing
+    /// the window shows the document as, and the heading.
     AlreadyElsewhere {
         window: String,
+        stop: Option<Showing>,
         scroll_to: Option<(Showing, String)>,
     },
     /// The target window has closed.
@@ -296,6 +441,7 @@ impl Documents {
                 pages: Box::new(pages),
                 windows: Box::new(windows),
                 settings,
+                windows_accent: Mutex::default(),
             }),
         }
     }
@@ -313,7 +459,12 @@ impl Documents {
         let Some(record) = table.windows.get(window) else {
             return;
         };
-        if let Some(watch) = record.shown.as_ref().and_then(|shown| shown.watch.as_ref()) {
+        if let Some(watch) = record
+            .now
+            .shown
+            .as_ref()
+            .and_then(|shown| shown.watch.as_ref())
+        {
             watch.recheck();
         }
         table.active = Some(window.to_owned());
@@ -381,14 +532,29 @@ impl Documents {
     /// may not be listening, so it gets the heading with its first render instead, the way a
     /// notice is held (ticket 10). A page that has asked may still be placing the render, so the
     /// scroll names the showing, which the page waits to have in view.
+    ///
+    /// While a window's document is on its way, both it and the document its page's view still
+    /// shows are that window's (ticket 38). A request from the window for the one on its way
+    /// leaves it on its way, and tells the page nothing ([`Claimed::OnItsWayHere`]). A request
+    /// for the one in view, from anywhere, has the window's page stop the load, as Stop does
+    /// (ticket 38's review). Another document for the window starts from the one in view, so the
+    /// one on its way never joins the history.
     fn claim(&self, document: DocumentAt<'_>, key: PathBuf, target: Target<'_>) -> Claimed {
         let mut table = self.lock();
-        if let Some(window) = table.window_showing(&key) {
-            if matches!(target, Target::Window(from) | Target::NewWindowFrom(from) if from == window)
-            {
-                return Claimed::AlreadyHere(window);
+        if let Some((window, record)) = table.window_showing(&key) {
+            let window = window.clone();
+            let from_here = matches!(
+                target,
+                Target::Window(from) | Target::NewWindowFrom(from) if from == window
+            );
+            if from_here && record.is_on_its_way(&key) {
+                return Claimed::OnItsWayHere(window);
             }
-            let scroll_to = table.shown_mut(&window, &key).and_then(|shown| {
+            let stop = record.held_showing(&key);
+            if from_here {
+                return Claimed::AlreadyHere { window, stop };
+            }
+            let scroll_to = record.document_mut(&key).and_then(|shown| {
                 let heading = document.heading?.to_owned();
                 if shown.page_asked {
                     return Some((shown.showing, heading));
@@ -398,30 +564,35 @@ impl Documents {
                 };
                 None
             });
-            return Claimed::AlreadyElsewhere { window, scroll_to };
+            return Claimed::AlreadyElsewhere {
+                window,
+                stop,
+                scroll_to,
+            };
         }
         // Made only once a window takes the document, so that an open document or a closed
         // window starts no render.
         match target {
             Target::NewWindow | Target::NewWindowFrom(_) => {
                 let (showing, claim) = (table.next_showing(), table.next_claim());
-                let shown = ShownDocument::given(document, key, showing, claim);
-                let window = table.record_new(WindowRecord {
-                    shown: Some(shown),
-                    history: History::default(),
-                });
-                Claimed::NewWindow(window)
+                let mut record = WindowRecord::default();
+                // Stop leaves the window empty, as it was before it was given the document.
+                let _nothing_left =
+                    record.given(ShownDocument::given(document, key, showing, claim));
+                Claimed::NewWindow(table.record_new(record))
             }
             Target::Window(window) => {
                 let (showing, claim) = (table.next_showing(), table.next_claim());
                 let Some(record) = table.windows.get_mut(window) else {
                     return Claimed::WindowGone;
                 };
-                let left = record.given(ShownDocument::given(document, key, showing, claim));
+                let left = record
+                    .given(ShownDocument::given(document, key, showing, claim))
+                    .map(Box::new);
                 Claimed::Changed {
                     window: window.to_owned(),
                     claim,
-                    left: Box::new(left),
+                    left,
                 }
             }
         }
@@ -434,6 +605,7 @@ impl Documents {
         self.lock()
             .windows
             .get(window)?
+            .now
             .shown
             .as_ref()
             .map(|shown| shown.path.clone())
@@ -442,14 +614,16 @@ impl Documents {
     /// The file of the document `window` shows, while it still shows it as `showing`; None once
     /// the window has been given another document, or closed. For a link, which comes from the
     /// showing its page's view showed when it was clicked (ticket 26): a link in a document the
-    /// window has left would resolve against the new document's folder.
+    /// window has left would resolve against the new document's folder. While the window's
+    /// document is on its way, the one its page's view still shows is still the window's, so a
+    /// link in it goes from there (ticket 38).
     pub fn document_path_shown_as(&self, window: &str, showing: Showing) -> Option<PathBuf> {
-        self.lock()
+        let table = self.lock();
+        table
             .windows
             .get(window)?
-            .shown
-            .as_ref()
-            .filter(|shown| shown.showing == showing)
+            .documents()
+            .find(|shown| shown.showing == showing)
             .map(|shown| shown.path.clone())
     }
 
@@ -503,20 +677,25 @@ fn document_key(document: &Path) -> PathBuf {
 impl WindowTable {
     /// What `window` shows, while it shows the document with `key`.
     fn shown_mut(&mut self, window: &str, key: &Path) -> Option<&mut ShownDocument> {
-        self.windows
-            .get_mut(window)
-            .and_then(|record| record.shown.as_mut())
-            .filter(|shown| shown.key == key)
+        self.windows.get_mut(window)?.now.document_mut(key)
     }
 
-    fn window_showing(&self, key: &Path) -> Option<String> {
-        self.windows.iter().find_map(|(label, record)| {
-            record
-                .shown
-                .as_ref()
-                .is_some_and(|shown| shown.key == key)
-                .then(|| label.clone())
-        })
+    /// The window that shows the document with `key`, by its label, with its record: as its
+    /// document, or in its page's view while its document is on its way (ticket 38), since a
+    /// document is shown in at most one window (ADR 0001).
+    fn window_showing(&mut self, key: &Path) -> Option<(&String, &mut WindowRecord)> {
+        self.windows
+            .iter_mut()
+            .find(|(_, record)| record.shows(key))
+    }
+
+    /// What `window` held behind its document on its way, while it is the document with `key`.
+    fn held_mut(&mut self, window: &str, key: &Path) -> Option<&mut ShownDocument> {
+        self.windows
+            .get_mut(window)?
+            .before_arrival
+            .as_mut()?
+            .document_mut(key)
     }
 
     /// Records a new window as `record`, whose page hears nothing yet, and gives its label.

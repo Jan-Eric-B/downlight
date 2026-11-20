@@ -284,6 +284,30 @@ article.markdown-body {
   display: none;
 }
 
+/* Stop sits at the note's right end (ticket 38), and the note keeps its height while it says
+   "Laying out" without it. */
+.wait-note:not([hidden]) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  box-sizing: content-box;
+  min-height: 28px;
+  padding-right: 16px;
+}
+
+/* github-markdown-css's clearfix on every markdown-body would be two more flex items, at the ends,
+   pushing the text and Stop to the middle. */
+.wait-note::before,
+.wait-note::after {
+  content: none;
+}
+
+/* An icon button (icon-button.ts), in the look below. */
+.wait-note .icon-button {
+  flex: none;
+}
+
 /* A short message at the bottom of the window, such as why a dropped file didn't open. It sits on
    a solid background, since the document may be under it. */
 .notice {
@@ -404,10 +428,10 @@ article.markdown-body {
   white-space: nowrap;
 }
 
-/* The previous, next and close buttons (find.ts), in the title bar's look (title-bar.css): a glyph
-   in the bar's text color, Windows 11's subtle fills under the pointer and while pressed, and the
-   accent's focus ring. Close together, as in Edge's and VS Code's find bars. */
-.find-button {
+/* The page's icon buttons (icon-button.ts): the find bar's previous, next and close, and the wait
+   note's Stop, in the title bar's look (title-bar.css): a glyph in the bar's text color, Windows
+   11's subtle fills under the pointer and while pressed, and the accent's focus ring. */
+.icon-button {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -420,30 +444,31 @@ article.markdown-body {
   color: var(--fgColor-default);
 }
 
-.find-button + .find-button {
+/* Close together in the find bar, as in Edge's and VS Code's find bars. */
+.find-bar .icon-button + .icon-button {
   margin-left: -6px;
 }
 
-.find-button svg {
+.icon-button svg {
   width: 16px;
   height: 16px;
   fill: currentColor;
 }
 
-.find-button:hover:enabled {
+.icon-button:hover:enabled {
   background-color: var(--subtle-fill-hover);
 }
 
-.find-button:active:enabled {
+.icon-button:active:enabled {
   background-color: var(--subtle-fill-pressed);
 }
 
 /* With nothing to step to: Windows 11's disabled text fill, as on an inactive title bar. */
-.find-button:disabled {
+.icon-button:disabled {
   color: light-dark(rgb(0 0 0 / 36.1%), rgb(255 255 255 / 36.3%));
 }
 
-.find-button:focus-visible {
+.icon-button:focus-visible {
   outline: 2px solid var(--accent-emphasis);
   outline-offset: -2px;
 }
@@ -451,18 +476,18 @@ article.markdown-body {
 /* High contrast: the reader's button colors, with the selection's under the pointer, as on the
    title bar. */
 @media (forced-colors: active) {
-  .find-button {
+  .icon-button {
     forced-color-adjust: none;
     color: ButtonText;
   }
 
-  .find-button:hover:enabled,
-  .find-button:active:enabled {
+  .icon-button:hover:enabled,
+  .icon-button:active:enabled {
     background-color: Highlight;
     color: HighlightText;
   }
 
-  .find-button:disabled {
+  .icon-button:disabled {
     color: GrayText;
   }
 }

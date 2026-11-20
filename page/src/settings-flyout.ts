@@ -22,7 +22,7 @@ import {
 } from "./app";
 import { chooseEditor } from "./edit";
 import { showingWhy } from "./notice";
-import { changeSetting, whenSettingsChange } from "./settings";
+import { changeSetting, settingsNow, whenSettingsChange } from "./settings";
 
 const THEME_LABELS: Record<Theme, string> = {
   system: "System",
@@ -37,9 +37,9 @@ const BACKDROP_LABELS: Record<Backdrop, string> = {
   none: "None",
 };
 
-/** Window design ticket 09 adds Windows' accent color here and to `ACCENT_COLORS`. */
 const ACCENT_COLOR_LABELS: Record<AccentColor, string> = {
   amber: "Amber",
+  windows: "Windows",
 };
 
 /** Why Backdrop is disabled where the OS shows no backdrop, as on Windows 10. */
@@ -244,12 +244,11 @@ export function startSettingsFlyout(signal?: AbortSignal): void {
     },
   );
   const editWith = editWithGroup();
-  element.append(
-    theme.element,
-    backdrop.element,
-    accentColor.element,
-    editWith.element,
-  );
+  element.append(theme.element, backdrop.element);
+  // Where the OS has no accent color of its own, Amber is the one choice left, and a group of one
+  // choice is none (window design ticket 09).
+  if (settingsNow().windowsAccent !== null) element.append(accentColor.element);
+  element.append(editWith.element);
   document.body.append(element);
 
   const show = (settings: PageSettings) => {

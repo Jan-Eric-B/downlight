@@ -1,0 +1,124 @@
+//! A document on its way (ticket 38): until the page says it placed the window's document, the
+//! window keeps what it was before (`WindowRecord::before_arrival`), since its page's view still
+//! shows that. Stop puts it back ([`stop_document`]), and the page's word that it placed the
+//! answer for the document, its render or why it can't be shown, lets it go
+//! ([`document_arrived`]), so a document joins the window's history only once the reader has
+//! seen it.
+
+use tauri::{State, WebviewWindow};
+
+use super::{Documents, Showing};
+use crate::message::Message;
+use crate::timing::Timing;
+use crate::watch::Change;
+
+/// Whether Stop put the window back ([`stop_document`]): the page asks for its document again
+/// only then, to show the empty window.
+pub type Stopped = bool;
+
+impl Documents {
+    /// `window`'s page placed the answer for `showing`, a show, a return or a reload, its render
+    /// or why it can't be shown: what the window held while that document was on its way goes,
+    /// and with it the held document's watch, and a reload is no longer unplaced. A page whose
+    /// view shows a showing the window has left since changes nothing.
+    pub fn arrived(&self, window: &str, showing: Showing) {
+        // Dropped after the lock, since dropping a watch stops it.
+        let _left = {
+            let mut table = self.lock();
+            let Some(record) = table.windows.get_mut(window) else {
+                return;
+            };
+            let Some(shown) = record
+                .now
+                .shown
+                .as_mut()
+                .filter(|shown| shown.showing == showing)
+            else {
+                return;
+            };
+            shown.reload_unplaced = false;
+            record.before_arrival.take()
+        };
+    }
+
+    /// The reader stopped `window`'s document on its way, from a page whose last placed answer
+    /// was for `page_shows` (None for the empty window): the window is what it was before it was
+    /// given the document, retitled after it, and the document on its way is dropped, which
+    /// leaves its render. A change to the document put back while it was held reloads it, or
+    /// tells the page it is gone. Changes nothing, and gives false, once the document has
+    /// arrived, or when the page's last answer is another showing than the one held.
+    pub fn stop(&self, window: &str, page_shows: Option<Showing>) -> Stopped {
+        let (left, missed) = {
+            let mut table = self.lock();
+            let Some(record) = table.windows.get_mut(window) else {
+                return false;
+            };
+            let held_shows = record
+                .before_arrival
+                .as_ref()
+                .map(|held| held.shown.as_ref().map(|shown| shown.showing));
+            if held_shows != Some(page_shows) {
+                return false;
+            }
+            let left = record.leave_the_arriving();
+            let missed = record.now.shown.as_mut().and_then(|shown| {
+                let missed = shown.missed.take()?;
+                if missed != Change::Gone {
+                    shown.start_reload();
+                }
+                Some((shown.showing, missed))
+            });
+            (left, missed)
+        };
+        // Outside the lock, since dropping a watch stops it.
+        drop(left);
+        // The window keeps what it was put back to: a title or a message that can't reach it is
+        // nobody's to tell, as the window is closing.
+        let _ = self.retitle(window);
+        let message = missed.map(|(showing, missed)| match missed {
+            Change::Gone => Message::Gone(showing),
+            Change::Changed | Change::Back => Message::AskForDocument,
+        });
+        if let Some(message) = message {
+            let _ = self.send(window, message);
+        }
+        true
+    }
+}
+
+/// The calling window's page placed the answer for `showing` (ticket 38), its render or why it
+/// can't be shown. Passes only the showing, so a page whose view shows a document the window has
+/// left changes nothing.
+#[tauri::command]
+pub fn document_arrived(window: WebviewWindow, showing: Showing, documents: State<'_, Documents>) {
+    documents.arrived(window.label(), showing);
+}
+
+/// The reader stopped the calling window's document on its way, from its wait note or with Esc
+/// (ticket 38), while the page's last placed answer was for `showing`, or for no document.
+/// Passes only the showing: the document the window goes back to comes from the app's own state.
+/// Answers whether it stopped.
+#[tauri::command]
+pub fn stop_document(
+    window: WebviewWindow,
+    showing: Option<Showing>,
+    documents: State<'_, Documents>,
+    timing: State<'_, Timing>,
+) -> Stopped {
+    let stopped = documents.stop(window.label(), showing);
+    if stopped {
+        timing.stopped(window.label());
+    }
+    stopped
+}
+
+/// A sample of each answer [`stop_document`] gives, by name, which the page's tests read
+/// (`app/src/contract.rs`).
+#[cfg(test)]
+pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
+    let (stopped, not_stopped): (Stopped, Stopped) = (true, false);
+    Ok(serde_json::json!({
+        "stopped": serde_json::to_value(stopped)?,
+        "notStopped": serde_json::to_value(not_stopped)?,
+    }))
+}

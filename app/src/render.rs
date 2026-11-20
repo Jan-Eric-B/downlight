@@ -4,7 +4,7 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
-use downlight_core::{RenderError, RenderedDocument};
+use downlight_core::{Leave, RenderError, RenderedDocument};
 use tauri::async_runtime::JoinHandle;
 
 use crate::disk::Disk;
@@ -17,8 +17,40 @@ use crate::watch::ReadStamp;
 /// The rendered document, with how long reading and rendering it took for the timing switch.
 pub type ReadAndRender = Result<(RenderedDocument, Stages), DocumentError>;
 
-/// A document being read and rendered on a blocking thread, by [`start`].
-pub type RenderTask = JoinHandle<ReadAndRender>;
+/// A document being read and rendered on a blocking thread, by [`start`]. Dropped before it is
+/// done, as when the window is given another document before its page took it, it is left
+/// (ticket 38), so that it gives up soon rather than render for nobody.
+pub struct RenderTask {
+    task: JoinHandle<ReadAndRender>,
+    leave: Leave,
+}
+
+impl RenderTask {
+    /// What reading and rendering gave, once done. Fails only when the blocking thread panicked
+    /// or was cancelled.
+    pub async fn finished(mut self) -> Result<ReadAndRender, tauri::Error> {
+        (&mut self.task).await
+    }
+
+    /// A handle that leaves the render, for whoever no longer waits for it once it is handed
+    /// over.
+    pub fn leaver(&self) -> Leave {
+        self.leave.clone()
+    }
+
+    /// Whether the render has been left.
+    #[cfg(test)]
+    pub fn is_left(&self) -> bool {
+        self.leave.is_left()
+    }
+}
+
+impl Drop for RenderTask {
+    fn drop(&mut self) {
+        // Harmless once the render is done.
+        self.leave.leave();
+    }
+}
 
 /// Starts reading and rendering `path` on a blocking thread, off the main thread and the async
 /// runtime's workers. The timing switch reports it by the place the page gets (`Place` in
@@ -30,26 +62,32 @@ pub type RenderTask = JoinHandle<ReadAndRender>;
 pub fn start(path: &Path) -> (RenderTask, ReadStamp) {
     let path = path.to_owned();
     let (noter, read_stamp) = ReadStamp::pending();
+    let leave = Leave::new();
+    let leaving = leave.clone();
     let task = tauri::async_runtime::spawn_blocking(move || {
         noter.note(&path);
-        read_and_render(&path)
+        read_and_render(&path, &leaving)
     });
-    (task, read_stamp)
+    (RenderTask { task, leave }, read_stamp)
 }
 
-fn read_and_render(path: &Path) -> ReadAndRender {
+fn read_and_render(path: &Path, leave: &Leave) -> ReadAndRender {
     let mut stages = Stages::start();
     let bytes = std::fs::read(path).map_err(|source| unread(path, source))?;
     stages.lap("read");
-    let document =
-        downlight_core::render(&bytes, path, &image::origin(), Disk).map_err(|source| {
-            DocumentError::NotRendered {
-                path: path.to_owned(),
-                source,
-            }
-        })?;
+    let rendered = downlight_core::render(&bytes, path, &image::origin(), Disk, leave);
     stages.lap("render");
-    Ok((document, stages))
+    match rendered {
+        Ok(document) => Ok((document, stages)),
+        // With its stages, so the timing switch tells how soon a left render ended.
+        Err(RenderError::Left) => Err(DocumentError::Left {
+            path: path.to_owned(),
+            stages,
+        }),
+        Err(RenderError::NotText) => Err(DocumentError::NotText {
+            path: path.to_owned(),
+        }),
+    }
 }
 
 /// Why `path` couldn't be read. Windows reads a folder as access denied, which would send the
@@ -85,13 +123,19 @@ pub enum DocumentError {
     /// The core refused the file, a binary one: from the command line, as a link's `.md` target,
     /// or a document whose file became binary since it was shown. Open and a drop refuse a binary
     /// file before the window is given it (`open.rs`).
-    NotRendered {
+    NotText {
         path: PathBuf,
-        source: RenderError,
     },
     /// The background task that reads and renders the document panicked or was cancelled.
     ReadAndRenderStopped {
         source: tauri::Error,
+    },
+    /// Nobody waited for the render any more, so it gave up (ticket 38): the reader stopped the
+    /// document or went elsewhere, or a later request for it overtook this one. The reader never
+    /// sees its notice: the page has already dropped the request it answers.
+    Left {
+        path: PathBuf,
+        stages: Stages,
     },
 }
 
@@ -104,12 +148,12 @@ impl From<DocumentError> for Notice {
             DocumentError::Folder { path } => {
                 Self::naming("", NamedFile::at(&path), " is a folder, not a document")
             }
-            DocumentError::NotRendered {
-                path,
-                source: RenderError::NotText,
-            } => not_text(&path),
+            DocumentError::NotText { path } => not_text(&path),
             DocumentError::ReadAndRenderStopped { source } => {
                 format!("Reading and rendering the document stopped: {source}").into()
+            }
+            DocumentError::Left { path, .. } => {
+                Self::naming("Stopped showing ", NamedFile::at(&path), "")
             }
         }
     }
@@ -132,7 +176,7 @@ mod tests {
     #[test]
     fn folder_is_told_apart_from_a_document() {
         let folder = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let Err(error) = read_and_render(folder) else {
+        let Err(error) = read_and_render(folder, &Leave::new()) else {
             panic!("a folder rendered as a document");
         };
         assert_eq!(
@@ -146,7 +190,7 @@ mod tests {
         let icon = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("icons")
             .join("icon.ico");
-        let Err(error) = read_and_render(&icon) else {
+        let Err(error) = read_and_render(&icon, &Leave::new()) else {
             panic!("a binary file rendered as a document");
         };
         assert_eq!(
@@ -161,7 +205,7 @@ mod tests {
     #[test]
     fn text_file_with_another_extension_renders_as_markdown() {
         let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
-        let Ok((document, _)) = read_and_render(&manifest) else {
+        let Ok((document, _)) = read_and_render(&manifest, &Leave::new()) else {
             panic!("a text file was refused");
         };
         assert!(document.as_str().contains("[package]"), "{document:?}");
@@ -177,7 +221,7 @@ mod tests {
         if folder_gone {
             std::fs::remove_dir_all(&folder).unwrap();
         }
-        let read = read_and_render(&folder.join("missing.md"));
+        let read = read_and_render(&folder.join("missing.md"), &Leave::new());
         let _ = std::fs::remove_dir_all(&folder);
         let Err(error) = read else {
             panic!("a missing file rendered as a document");

@@ -19,7 +19,7 @@ use crate::documents::Documents;
 use crate::documents::WindowSize;
 use crate::zoom::Zoom;
 
-pub use look::{AccentColor, Backdrop, Theme, WindowLook};
+pub use look::{AccentColor, AccentScale, Backdrop, Rgb, Theme, WindowLook};
 
 const FILE_NAME: &str = "settings.json";
 
@@ -73,15 +73,17 @@ where
 
 impl Settings {
     /// What of the settings the pages show, as every page gets it: in its URL when its window
-    /// opens, and in a `settings` message whenever it changes (window design ticket 12). The
-    /// editor stays in the app.
-    pub fn page(&self) -> PageSettings {
+    /// opens, and in a `settings` message whenever it changes (window design ticket 12), with
+    /// `windows_accent`, Windows' accent scale now, if the OS has one (window design ticket 09).
+    /// The editor stays in the app.
+    pub fn page(&self, windows_accent: Option<AccentScale>) -> PageSettings {
         PageSettings {
             zoom: self.zoom,
             full_width: self.full_width,
             theme: self.theme,
             backdrop: self.backdrop,
             accent_color: self.accent_color,
+            windows_accent,
         }
     }
 
@@ -112,14 +114,21 @@ pub struct PageSettings {
     /// OS can show (window design ticket 08).
     pub backdrop: Backdrop,
     pub accent_color: AccentColor,
+    /// Windows' accent scale, which the page colors with while the reader's accent color is
+    /// Windows', and changed whenever Windows' changes (window design ticket 09). Not the reader's
+    /// choice but the OS's, sent with the settings so that it reaches every page as they do, held
+    /// for a page that doesn't hear them yet. None where the OS has no accent color of its own,
+    /// and the settings flyout then offers Amber alone.
+    pub windows_accent: Option<AccentScale>,
 }
 
 /// The snapshot of a reader who changed nothing, from [`Settings::default`], so the defaults live
-/// in one place. The page's `DEFAULT_SETTINGS` is checked against it through the page URL's
-/// "defaults" contract sample (`window::contract_samples`).
+/// in one place, on an OS without an accent color of its own. The page's `DEFAULT_SETTINGS` is
+/// checked against it through the page URL's "defaults" contract sample
+/// (`window::contract_samples`).
 impl Default for PageSettings {
     fn default() -> Self {
-        Settings::default().page()
+        Settings::default().page(None)
     }
 }
 
@@ -133,8 +142,8 @@ impl PageSettings {
             full_width: true,
             theme: Theme::Dark,
             backdrop: Backdrop::None,
-            // Amber is the only choice until window design ticket 09.
-            accent_color: AccentColor::Amber,
+            accent_color: AccentColor::Windows,
+            windows_accent: Some(AccentScale::sample()),
         }
     }
 }
@@ -556,7 +565,7 @@ mod tests {
         let (store, error) = folder.load();
         assert!(error.is_none(), "{error:?}");
         assert!(!store.get().full_width);
-        assert!(!store.get().page().full_width);
+        assert!(!store.get().page(None).full_width);
     }
 
     #[test]
@@ -571,7 +580,7 @@ mod tests {
         let (restarted, error) = folder.load();
         assert!(error.is_none(), "{error:?}");
         assert!(restarted.get().full_width);
-        assert!(restarted.get().page().full_width);
+        assert!(restarted.get().page(None).full_width);
     }
 
     #[test]
@@ -598,7 +607,7 @@ mod tests {
         let zoom_in = |folder: &Folder| {
             let (store, error) = folder.load();
             assert!(error.is_none(), "{error:?}");
-            u16::from(store.get().page().zoom)
+            u16::from(store.get().page(None).zoom)
         };
         assert_eq!(zoom_in(&too_large), 300);
         assert_eq!(zoom_in(&too_small), 50);
@@ -659,16 +668,54 @@ mod tests {
     }
 
     #[test]
+    fn saved_windows_accent_color_loads_after_a_restart() {
+        let folder = Folder::new("accent-restart");
+        folder
+            .load()
+            .0
+            .change(|settings| settings.accent_color = AccentColor::Windows)
+            .saved
+            .unwrap();
+        let (restarted, error) = folder.load();
+        assert!(error.is_none(), "{error:?}");
+        assert_eq!(restarted.get().accent_color, AccentColor::Windows);
+    }
+
+    #[test]
     fn page_shows_the_theme_backdrop_and_accent_color() {
         let settings = Settings {
             theme: Theme::Light,
             backdrop: Backdrop::None,
             ..Settings::default()
         };
-        let page = settings.page();
+        let page = settings.page(None);
         assert_eq!(
             (page.theme, page.backdrop, page.accent_color),
             (Theme::Light, Backdrop::None, AccentColor::Amber)
+        );
+    }
+
+    #[test]
+    fn page_shows_windows_accent_scale_whatever_the_reader_chose() {
+        // Sent with Amber chosen too, so a page whose reader picks Windows' has its scale at once.
+        let page = Settings::default().page(Some(AccentScale::sample()));
+        assert_eq!(page.windows_accent, Some(AccentScale::sample()));
+    }
+
+    #[test]
+    fn accent_scale_goes_to_the_page_as_css_colors_by_the_stylesheet_s_shade_names() {
+        let scale = serde_json::to_value(AccentScale::sample()).unwrap();
+        assert_eq!(
+            scale,
+            serde_json::json!({
+                "light-3": "#99ebff",
+                "light-2": "#4cc2ff",
+                "light-1": "#0091f8",
+                "base": "#0078d4",
+                "dark-1": "#0067c0",
+                "dark-2": "#003e92",
+                "dark-3": "#001a68",
+            })
         );
     }
 

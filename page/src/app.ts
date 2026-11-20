@@ -215,11 +215,30 @@ export const BACKDROPS = ["mica", "micaAlt", "acrylic", "none"] as const;
 export type Backdrop = (typeof BACKDROPS)[number];
 
 /**
- * Every Accent color the reader can pick (`AccentColor` in `app/src/settings/look.rs`): amber
- * only, until window design ticket 09 adds Windows' own.
+ * Every Accent color the reader can pick (`AccentColor` in `app/src/settings/look.rs`), in order:
+ * amber, the page's own, and Windows' (window design ticket 09), offered where the OS has one.
  */
-export const ACCENT_COLORS = ["amber"] as const;
+export const ACCENT_COLORS = ["amber", "windows"] as const;
 export type AccentColor = (typeof ACCENT_COLORS)[number];
+
+/**
+ * The accent scale's seven shades, Light 3 to Dark 3 (spec: Accent color), each the
+ * `--accent-<shade>` variable `accent.css` defines, and each a key of the scale the app sends
+ * (`AccentScale` in `app/src/settings/look.rs`). The one list of their names.
+ */
+export const ACCENT_SHADES = [
+  "light-3",
+  "light-2",
+  "light-1",
+  "base",
+  "dark-1",
+  "dark-2",
+  "dark-3",
+] as const;
+export type AccentShade = (typeof ACCENT_SHADES)[number];
+
+/** An accent color's seven shades, each a CSS color `#rrggbb`. */
+export type AccentScale = Record<AccentShade, string>;
 
 /**
  * What the page shows of the reader's settings, one snapshot of all of them (`PageSettings` in
@@ -239,6 +258,12 @@ export type PageSettings = {
   /** The reader's backdrop: with None the page draws its solid background (`backdrop.ts`). */
   backdrop: Backdrop;
   accentColor: AccentColor;
+  /**
+   * Windows' accent scale now, which the page colors with while the reader's accent color is
+   * Windows' (`accent.ts`); a new snapshot comes whenever Windows' changes. Null where the OS has
+   * no accent color of its own, and the settings flyout then offers no choice of accent color.
+   */
+  windowsAccent: AccentScale | null;
 };
 
 /**
@@ -252,6 +277,7 @@ export const DEFAULT_SETTINGS: PageSettings = {
   theme: "system",
   backdrop: "mica",
   accentColor: "amber",
+  windowsAccent: null,
 };
 
 /** Whether `value` is one of `values`. */
@@ -277,7 +303,23 @@ function isPageSettings(value: unknown): value is PageSettings {
     "backdrop" in value &&
     isOneOf(BACKDROPS, value.backdrop) &&
     "accentColor" in value &&
-    isOneOf(ACCENT_COLORS, value.accentColor)
+    isOneOf(ACCENT_COLORS, value.accentColor) &&
+    "windowsAccent" in value &&
+    (value.windowsAccent === null || isAccentScale(value.windowsAccent))
+  );
+}
+
+/** A CSS color as the app writes a shade, which the page sets as it is. */
+const SHADE_COLOR = /^#[0-9a-f]{6}$/;
+
+function isAccentScale(value: unknown): value is AccentScale {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    ACCENT_SHADES.every((shade) => {
+      const color: unknown = (value as Record<string, unknown>)[shade];
+      return typeof color === "string" && SHADE_COLOR.test(color);
+    })
   );
 }
 
@@ -343,6 +385,19 @@ export type Commands = {
    * view instead.
    */
   wait_note: { args: { showing: number | null }; answer: WaitNote | null };
+  /**
+   * The reader stopped the document on its way, from the wait note or with Esc (ticket 38), while
+   * the page's last placed answer was for this showing (`DocumentToShow`'s, also for an answer
+   * that says why the document can't be shown), or null for the empty window: the window goes
+   * back to what it was before it was given the document. Answers whether it did, which it
+   * doesn't once the document has arrived or the showing isn't the one it holds.
+   */
+  stop_document: { args: { showing: number | null }; answer: boolean };
+  /**
+   * The page placed the answer for this showing, a show, a return or a reload, its render or why
+   * it can't be shown, so the document joins the window's history (ticket 38).
+   */
+  document_arrived: { args: { showing: number }; answer: null };
   follow_link: {
     /**
      * The showing whose document the link is in, the link target as the document wrote it, and
@@ -452,6 +507,12 @@ export type Messages = {
    * to scroll to once the view shows that showing.
    */
   "scroll-to-heading": { showing: number; heading: string };
+  /**
+   * The reader asked for the document the view shows as this showing (the showing of the last
+   * answer placed) while the window's next document is on its way, by Ctrl+O, a drop, a link or
+   * a step in another window: the page stops the load, as Stop does (ticket 38's review).
+   */
+  "stop-document": number;
   /** A notice to show the reader. */
   notice: Notice;
   /** The id of the command the reader chose in the right-click menu. */

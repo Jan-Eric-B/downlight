@@ -75,6 +75,7 @@ fn render_block(token: &str, code: &str) -> (Duration, String) {
         Path::new("cost.md"),
         "http://image.localhost",
         Nothing,
+        &downlight_core::Leave::new(),
     )
     .expect("the code is text, so it renders");
     (started.elapsed(), html.as_str().to_owned())

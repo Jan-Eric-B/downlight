@@ -3,6 +3,10 @@
     "accentColor": "amber",
     "setting": "accentColor"
   },
+  "accentColorWindows": {
+    "accentColor": "windows",
+    "setting": "accentColor"
+  },
   "backdropAcrylic": {
     "backdrop": "acrylic",
     "setting": "backdrop"

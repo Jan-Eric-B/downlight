@@ -32,6 +32,7 @@ pub struct Timing {
 /// `Timing` is at hand (a render ahead starts when the window is given its document). What the
 /// work is reported as is decided when it is reported, since a render started for one reason can
 /// be handed over for another (ticket 26).
+#[derive(Debug)]
 pub struct Stages {
     started: SystemTime,
     last_lap: Instant,
@@ -87,6 +88,12 @@ impl Timing {
     /// frame, so for the reader first paint is not before this.
     pub fn window_shown(&self, window: &str) {
         self.report_now(window, "window-shown");
+    }
+
+    /// Notes that the reader stopped `window`'s document on its way (ticket 38), so the time from
+    /// here to the end of its left render, reported as `render-left`, says how soon it ended.
+    pub fn stopped(&self, window: &str) {
+        self.report_now(window, "stop");
     }
 
     /// Reports `window`'s work in stages as `event`, such as `reload`: when it started, then each

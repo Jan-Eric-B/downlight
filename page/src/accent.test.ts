@@ -1,9 +1,20 @@
 // The icon draws with the accent scale's own colors, so a shade changed in the scale can't leave
 // the icon behind (spec: Accent color, story 22). The page takes the accent only through the roles
-// of the spec's use-to-shade table, so swapping the scale recolors every use (ticket 03).
-import { expect, test } from "vitest";
+// of the spec's use-to-shade table, so swapping the scale recolors every use (ticket 03), and
+// swaps it for Windows' when the reader chooses Windows' accent color (ticket 09).
+import { clearMocks, mockWindows } from "@tauri-apps/api/mocks";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import icon from "../../app/icons/icon.svg?raw";
+import { startAccent } from "./accent";
 import accentCss from "./accent.css?raw";
+import {
+  ACCENT_SHADES,
+  DEFAULT_SETTINGS,
+  type AccentScale,
+  type PageSettings,
+} from "./app";
+import { startSettings } from "./settings";
+import { fakeTheApp, openPageAt, tell, WINDOWS_GREEN } from "./test-support";
 
 /**
  * Every other stylesheet of the page, by file, as text, so a stylesheet added later is checked
@@ -17,16 +28,8 @@ const pageStylesheets = Object.entries(
   }),
 ).filter(([file]) => file !== "./accent.css");
 
-/** The scale's shades, as the spec names them. */
-const SHADES = [
-  "light-3",
-  "light-2",
-  "light-1",
-  "base",
-  "dark-1",
-  "dark-2",
-  "dark-3",
-];
+/** The scale's shades, as the spec names them, and as the app's scales name them. */
+const SHADES: readonly string[] = ACCENT_SHADES;
 
 /** The SVG attributes that take a color. */
 const PAINT_ATTRIBUTES = [
@@ -222,8 +225,9 @@ const ROLE_USES: Record<string, string> = {
   ".copy-code:focus-visible / outline": "emphasis",
   ".empty-window button:focus-visible / outline": "emphasis",
   ".find-bar input:focus-visible / outline": "emphasis",
-  // The find bar's arrow and close buttons (v1 ticket 14).
-  ".find-button:focus-visible / outline": "emphasis",
+  // The page's icon buttons: the find bar's arrow and close buttons (v1 ticket 14) and the wait
+  // note's Stop (v1 ticket 38).
+  ".icon-button:focus-visible / outline": "emphasis",
   // The title bar's command buttons (window design ticket 05).
   ".command-button:focus-visible / outline": "emphasis",
   // A switched-on button: Full width and Keep on top (window design tickets 06 and 07).
@@ -324,4 +328,92 @@ test("GitHub's own accent variables stay GitHub's, for its Note alert, and the p
       /--fgColor-accent\b|--borderColor-accent-emphasis\b/,
     );
   }
+});
+
+describe("Windows' accent color", () => {
+  let stopAccent: () => void;
+
+  /** A second scale of Windows', as when the reader picks another color in Windows' settings. */
+  const WINDOWS_RED: AccentScale = {
+    "light-3": "#ffd6d6",
+    "light-2": "#ffadad",
+    "light-1": "#f07070",
+    base: "#d13438",
+    "dark-1": "#a4262c",
+    "dark-2": "#751d1f",
+    "dark-3": "#4a1012",
+  };
+
+  /** On Windows, with Windows' accent color green. */
+  const ON_WINDOWS: PageSettings = {
+    ...DEFAULT_SETTINGS,
+    windowsAccent: WINDOWS_GREEN,
+  };
+
+  const CHOSEN: PageSettings = { ...ON_WINDOWS, accentColor: "windows" };
+
+  beforeEach(() => {
+    mockWindows("document-0");
+    fakeTheApp();
+  });
+
+  afterEach(() => {
+    stopAccent();
+    clearMocks();
+    openPageAt("");
+  });
+
+  /** Opens the page as the app does, with `settings`. */
+  async function startWith(settings: PageSettings): Promise<void> {
+    openPageAt(`?settings=${encodeURIComponent(JSON.stringify(settings))}`);
+    await startSettings();
+    stopAccent = startAccent();
+  }
+
+  /** Each shade the root element sets over the stylesheet's, by name. */
+  function shadesSet(): Record<string, string> {
+    const { style } = document.documentElement;
+    const set: Record<string, string> = {};
+    for (const shade of ACCENT_SHADES) {
+      const color = style.getPropertyValue(`--accent-${shade}`);
+      if (color !== "") set[shade] = color;
+    }
+    return set;
+  }
+
+  test("a window that opens with Windows' accent color chosen shows Windows' shades in place of amber's", async () => {
+    await startWith(CHOSEN);
+    expect(shadesSet()).toEqual(WINDOWS_GREEN);
+  });
+
+  test("with Amber chosen the page shows amber's shades, though Windows has its own", async () => {
+    await startWith(ON_WINDOWS);
+    expect(shadesSet()).toEqual({});
+  });
+
+  test("choosing Windows' accent color from any window shows its shades, and Amber brings amber back", async () => {
+    await startWith(ON_WINDOWS);
+    await tell("settings", CHOSEN);
+    expect(shadesSet()).toEqual(WINDOWS_GREEN);
+    await tell("settings", ON_WINDOWS);
+    expect(shadesSet()).toEqual({});
+  });
+
+  test("a change of Windows' accent color recolors the page without a reload", async () => {
+    await startWith(CHOSEN);
+    await tell("settings", { ...CHOSEN, windowsAccent: WINDOWS_RED });
+    expect(shadesSet()).toEqual(WINDOWS_RED);
+  });
+
+  // The roles share the shades' prefix, and a role set inline would win over accent.css's.
+  test("amber again removes the shades alone, and never sets a role", async () => {
+    await startWith(CHOSEN);
+    expect(document.documentElement.style.length).toBe(ACCENT_SHADES.length);
+    document.documentElement.style.setProperty("--accent-link", "red");
+    await tell("settings", ON_WINDOWS);
+    expect(
+      document.documentElement.style.getPropertyValue("--accent-link"),
+    ).toBe("red");
+    document.documentElement.style.removeProperty("--accent-link");
+  });
 });

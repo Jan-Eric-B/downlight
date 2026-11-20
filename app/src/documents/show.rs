@@ -9,13 +9,13 @@ use std::path::{Path, PathBuf};
 use std::sync::PoisonError;
 
 use super::place::{self, Area, Point, WindowPlace, WindowSize};
-use super::{Claimed, Documents, Given, WindowRecord};
+use super::{Claimed, Documents, Given, Showing, WindowState};
 use crate::APP_NAME;
 use crate::message::Message;
 #[cfg(doc)]
 use crate::message::Pages;
 use crate::notice::file_name_shown;
-use crate::settings::{PageSettings, WindowLook};
+use crate::settings::{AccentScale, PageSettings, WindowLook};
 
 /// What is done to windows themselves, beside what their pages are told ([`Pages`]): Tauri's in
 /// the app (`window.rs`), a recorder in the tests. A trait with two adapters rather than code
@@ -53,6 +53,12 @@ pub trait Windows: Send + Sync + 'static {
     /// the main thread takes them as a window closes ([`Documents::closing`]), so a getter here
     /// would deadlock against a closing window. Tauri's setters only post to the event loop.
     fn set_look(&self, window: &str, look: &WindowLook) -> Result<(), WindowError>;
+
+    /// Windows' accent scale as the system tells it now (window design ticket 09), read afresh
+    /// each time. None when the OS has no accent color, and when a read fails. Called while the
+    /// settings are held, so, as with [`Windows::set_look`], it must never wait for the main
+    /// thread.
+    fn accent_scale(&self) -> Option<AccentScale>;
 }
 
 /// What a new window starts with that the documents module decides: its title, the settings its
@@ -166,16 +172,26 @@ impl Documents {
                 claim,
                 left,
             } => {
-                self.change(&window, claim, *left)
+                self.change(&window, claim, left)
                     .map_err(ShowError::NotTaken)?;
                 self.watch(&window, path, key);
                 Ok(Given::Changed(window))
             }
-            Claimed::AlreadyHere(window) => {
+            Claimed::AlreadyHere { window, stop } => {
+                self.stop_the_load(&window, stop);
                 self.bring_to_front(&window)?;
                 Ok(Given::AlreadyHere(window))
             }
-            Claimed::AlreadyElsewhere { window, scroll_to } => {
+            Claimed::OnItsWayHere(window) => {
+                self.bring_to_front(&window)?;
+                Ok(Given::OnItsWayHere(window))
+            }
+            Claimed::AlreadyElsewhere {
+                window,
+                stop,
+                scroll_to,
+            } => {
+                self.stop_the_load(&window, stop);
                 if let Some((showing, heading)) = scroll_to {
                     // The window that shows the document is brought to the front all the same,
                     // and the page that asked shows only what went wrong with its own request, so
@@ -201,7 +217,7 @@ impl Documents {
         });
         let new_window = NewWindow {
             title: title_of(document),
-            settings: settings.page(),
+            settings: self.page_settings(&settings),
             look: settings.window_look(),
             size,
             at,
@@ -214,9 +230,17 @@ impl Documents {
 
     /// Titles `window` after the document it was just given by `claim`, and tells its page to ask
     /// for it. The title goes first, so that a page told can't show the new document under the
-    /// old title. If either fails, the window is `left` again, what it was before, and titled
-    /// after it, so the table, the title and the page agree again.
-    fn change(&self, window: &str, claim: u64, left: WindowRecord) -> Result<(), WindowError> {
+    /// old title. If either fails, the window is what it was before again, and titled after it,
+    /// so the table, the title and the page agree again.
+    ///
+    /// `left` is the document on its way that the claim left, if one was: it goes once the
+    /// change is made, which leaves its render, and is put back on its way if it fails.
+    fn change(
+        &self,
+        window: &str,
+        claim: u64,
+        left: Option<Box<WindowState>>,
+    ) -> Result<(), WindowError> {
         let changed = self
             .retitle(window)
             .and_then(|()| self.send(window, Message::AskForDocument));
@@ -237,7 +261,7 @@ impl Documents {
     /// reads the window's document and sets its title before the next one reads, and the last
     /// titling comes after the last change, so the title the window is left with names the
     /// document it shows.
-    fn retitle(&self, window: &str) -> Result<(), WindowError> {
+    pub(super) fn retitle(&self, window: &str) -> Result<(), WindowError> {
         let _titling = self
             .inner
             .titles
@@ -247,7 +271,7 @@ impl Documents {
             .lock()
             .windows
             .get(window)
-            .map(|record| record.shown.as_ref().map(|shown| shown.path.clone()))
+            .map(|record| record.now.shown.as_ref().map(|shown| shown.path.clone()))
         else {
             return Ok(());
         };
@@ -256,26 +280,44 @@ impl Documents {
             .set_title(window, &title_of(document.as_deref()))
     }
 
-    /// Makes `window` `left` again, what it was before `claim` gave it a document: the document it
-    /// showed and its history. Unless another claim has changed it since, or it closed. By the
-    /// claim rather than the showing, since a step gives a window back a showing it had, so a
+    /// Makes `window` what it was before `claim` gave it a document: the document its page's view
+    /// shows, which it held until the document arrived, and its history, with `left` on its way
+    /// again if the claim left one. Unless another claim has changed it since, or it closed. By
+    /// the claim rather than the showing, since a step gives a window back a showing it had, so a
     /// later step could have given it the same one.
-    fn put_back(&self, window: &str, claim: u64, left: WindowRecord) {
+    fn put_back(&self, window: &str, claim: u64, left: Option<Box<WindowState>>) {
         // Dropped after the lock, since dropping a watch stops it.
         let _dropped = {
             let mut table = self.lock();
             match table.windows.get_mut(window) {
                 Some(record)
                     if record
+                        .now
                         .shown
                         .as_ref()
                         .is_some_and(|shown| shown.claim == claim) =>
                 {
-                    std::mem::replace(record, left)
+                    let given = record.leave_the_arriving();
+                    if let Some(left) = left {
+                        // On its way again, with the document in view held behind it.
+                        record.before_arrival = Some(std::mem::replace(&mut record.now, *left));
+                    }
+                    given
                 }
-                _ => left,
+                _ => left.map(|left| *left),
             }
         };
+    }
+
+    /// Tells `window`'s page to stop its next document on its way, if `stop` names the showing
+    /// its view shows (ticket 38's review): the reader asked for the document in view. The page
+    /// stops it as Stop does, so the window and its page agree on which document arrived.
+    fn stop_the_load(&self, window: &str, stop: Option<Showing>) {
+        if let Some(showing) = stop {
+            // The window is brought to the front all the same, and a page that can't be told
+            // shows its next document when it arrives, as without the request.
+            let _ = self.send(window, Message::StopDocument(showing));
+        }
     }
 
     fn bring_to_front(&self, window: &str) -> Result<(), ShowError> {

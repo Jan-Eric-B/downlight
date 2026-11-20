@@ -529,6 +529,7 @@ mod tests {
     use std::path::Path;
 
     use super::FILTERED_TAGS;
+    use crate::Leave;
     use crate::files::fake::FakeFiles;
     use crate::render;
 
@@ -538,6 +539,7 @@ mod tests {
             Path::new("README.md"),
             "http://image.localhost",
             FakeFiles::default(),
+            &Leave::new(),
         )
         .unwrap()
         .as_str()

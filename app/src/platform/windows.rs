@@ -2,6 +2,7 @@ use std::ffi::{OsStr, OsString};
 use std::io;
 use std::os::windows::ffi::{OsStrExt as _, OsStringExt as _};
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::time::{Duration, SystemTime};
 
 use tauri::utils::config::WindowEffectsConfig;
@@ -14,6 +15,9 @@ use webview2_com::Microsoft::Web::WebView2::Win32::{
     ICoreWebView2Controller, ICoreWebView2Settings3,
 };
 use webview2_com::{AcceleratorKeyPressedEventHandler, ProcessFailedEventHandler};
+use windows::Foundation::TypedEventHandler;
+use windows::UI::Color;
+use windows::UI::ViewManagement::{UIColorType, UISettings};
 use windows_core::{HRESULT, Interface as _};
 use windows_sys::Win32::Foundation::{
     ERROR_FILE_NOT_FOUND, ERROR_INVALID_DRIVE, ERROR_PATH_NOT_FOUND, FILETIME,
@@ -35,7 +39,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::APP_NAME;
-use crate::settings::Backdrop;
+use crate::settings::{AccentScale, Backdrop, Rgb};
 
 mod title_bar;
 
@@ -136,6 +140,54 @@ pub fn set_backdrop(window: &WebviewWindow, backdrop: Backdrop) -> tauri::Result
         Some(effect) => window.set_effects(EffectsBuilder::new().effect(effect).build()),
         None => Ok(()),
     }
+}
+
+/// The `UISettings` whose `ColorValuesChanged` [`follow_accent`] listens to, kept for the process's
+/// life: an event stops when its source is dropped.
+static ACCENT_SOURCE: OnceLock<UISettings> = OnceLock::new();
+
+/// `changed` is called each time Windows tells that its colors changed (window design ticket
+/// 09), on a thread of Windows' own, which may be another each time. It is told no scale: it
+/// reads one itself ([`accent_scale`]), so that a caller that reads under its own lock stores the
+/// newest. Windows tells of a change of its theme or high contrast too, and of one change more
+/// than once, so the scale may read unchanged. No calls when Windows can't tell of changes. Once
+/// per process.
+pub fn follow_accent(changed: impl Fn() + Send + 'static) {
+    let Ok(source) = UISettings::new() else {
+        return;
+    };
+    let handler = TypedEventHandler::new(move |_: windows_core::Ref<UISettings>, _| {
+        changed();
+        Ok(())
+    });
+    if source.ColorValuesChanged(&handler).is_ok() {
+        let _ = ACCENT_SOURCE.set(source);
+    }
+}
+
+/// Windows' accent scale now (window design ticket 09), read once. None when Windows can't tell
+/// its accent colors, which may be for this read alone.
+pub fn accent_scale() -> Option<AccentScale> {
+    shades_of(&UISettings::new().ok()?).ok()
+}
+
+/// The seven shades of Windows' accent color as `source` tells them, AccentLight3 to AccentDark3,
+/// which Windows derives from the color the reader picked (Accent, the scale's base).
+fn shades_of(source: &UISettings) -> windows_core::Result<AccentScale> {
+    let shade = |kind| {
+        source
+            .GetColorValue(kind)
+            .map(|Color { R, G, B, .. }| Rgb([R, G, B]))
+    };
+    Ok(AccentScale {
+        light_3: shade(UIColorType::AccentLight3)?,
+        light_2: shade(UIColorType::AccentLight2)?,
+        light_1: shade(UIColorType::AccentLight1)?,
+        base: shade(UIColorType::Accent)?,
+        dark_1: shade(UIColorType::AccentDark1)?,
+        dark_2: shade(UIColorType::AccentDark2)?,
+        dark_3: shade(UIColorType::AccentDark3)?,
+    })
 }
 
 /// The browser arguments of every webview, the same for each window: windows in one process share
@@ -639,6 +691,30 @@ mod tests {
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_F5;
 
     use super::*;
+
+    #[test]
+    fn windows_tells_its_accent_scale_from_light_to_dark() {
+        let Some(scale) = accent_scale() else {
+            panic!("Windows told no accent scale");
+        };
+        // Windows derives the shades from the reader's color, each lighter than the next.
+        let lightness =
+            |Rgb([red, green, blue]): Rgb| u32::from(red) + u32::from(green) + u32::from(blue);
+        let shades = [
+            scale.light_3,
+            scale.light_2,
+            scale.light_1,
+            scale.base,
+            scale.dark_1,
+            scale.dark_2,
+            scale.dark_3,
+        ];
+        let lightnesses = shades.map(lightness);
+        assert!(
+            lightnesses.is_sorted_by(|lighter, darker| lighter >= darker),
+            "{shades:?}"
+        );
+    }
 
     /// The value of the browser argument `--name=value`, if it is given.
     fn browser_argument(name: &str) -> Option<&'static str> {

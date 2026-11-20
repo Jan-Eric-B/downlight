@@ -1,5 +1,7 @@
 use std::fmt;
 use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use comrak::nodes::{Node, NodeCodeBlock, NodeValue};
 use comrak::options::Plugins;
@@ -40,17 +42,61 @@ pub enum RenderError {
     /// The file is binary, not text ([`is_text`](crate::is_text)). Every text file renders as
     /// Markdown, whatever its extension (ticket 34).
     NotText,
+    /// The render was left ([`Leave`]) before it was done, so it gave up.
+    Left,
 }
 
 impl fmt::Display for RenderError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NotText => f.write_str("it isn't a text file"),
+            Self::Left => f.write_str("it was stopped"),
         }
     }
 }
 
 impl std::error::Error for RenderError {}
+
+/// Tells a render that nobody waits for it any more, as when the reader stops a document still on
+/// its way or goes elsewhere (ticket 38), so that it gives up soon instead of running on for
+/// seconds. A clone tells the same render. The render looks at it between its stages and while it
+/// writes the HTML; only comrak's parse runs to its end once started.
+#[derive(Debug, Clone, Default)]
+pub struct Leave(Arc<AtomicBool>);
+
+impl Leave {
+    /// A render nobody has left yet.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Leaves the render: it gives up at its next look ([`RenderError::Left`]).
+    pub fn leave(&self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+
+    /// Whether the render has been left.
+    pub fn is_left(&self) -> bool {
+        self.0.load(Ordering::Relaxed)
+    }
+}
+
+/// The HTML comrak writes, which fails once the render is left, so that comrak stops formatting
+/// mid-document rather than writing HTML nobody will see.
+struct UnlessLeft<'a> {
+    html: String,
+    leave: &'a Leave,
+}
+
+impl fmt::Write for UnlessLeft<'_> {
+    fn write_str(&mut self, text: &str) -> fmt::Result {
+        if self.leave.is_left() {
+            return Err(fmt::Error);
+        }
+        self.html.push_str(text);
+        Ok(())
+    }
+}
 
 /// Renders a document's file to HTML, the way GitHub shows it: GitHub Flavored Markdown,
 /// footnotes, alerts, GitHub's heading anchors, emoji shortcodes, and front matter as a YAML code
@@ -71,22 +117,20 @@ impl std::error::Error for RenderError {}
 /// Code blocks with a language are highlighted within the highlight limit: a block too large or
 /// with a line too long, and every block after the document's code used up the limit, shows as
 /// plain code (ticket 31).
+///
+/// Once `leave` says nobody waits for the render any more, it gives up at its next look with
+/// [`RenderError::Left`] and no HTML (ticket 38).
 pub fn render(
     bytes: &[u8],
     path: &Path,
     image_origin: &str,
     files: impl FileSystem + Send + Sync + 'static,
+    leave: &Leave,
 ) -> Result<RenderedDocument, RenderError> {
     if !is_text(bytes) {
         return Err(RenderError::NotText);
     }
-    Ok(render_within(
-        bytes,
-        path,
-        image_origin,
-        files,
-        HIGHLIGHT_LIMIT,
-    ))
+    render_within(bytes, path, image_origin, files, leave, HIGHLIGHT_LIMIT)
 }
 
 /// [`render`] of a text file within a highlight limit of the caller's, so a test can render at
@@ -96,25 +140,42 @@ pub(crate) fn render_within(
     path: &Path,
     image_origin: &str,
     files: impl FileSystem + Send + Sync + 'static,
+    leave: &Leave,
     highlight_limit: HighlightLimit,
-) -> RenderedDocument {
+) -> Result<RenderedDocument, RenderError> {
+    let unless_left = || {
+        if leave.is_left() {
+            Err(RenderError::Left)
+        } else {
+            Ok(())
+        }
+    };
+    unless_left()?;
     let text = decode(bytes);
+    unless_left()?;
     let options = github_options();
     let arena = Arena::new();
     let root = parse_document(&arena, &text, &options);
+    unless_left()?;
     show_front_matter_as_yaml(root);
     keep_line_numbers_on_blocks_only(root);
     drop_from_raw_html(root);
+    unless_left()?;
     let mut plugins = Plugins::default();
-    let highlighter = GithubHighlighter::within(highlight_limit);
+    let highlighter = GithubHighlighter::within(highlight_limit, leave);
     plugins.render.codefence_syntax_highlighter = Some(&highlighter);
-    let mut html = String::new();
-    // Writing to a String never fails, so there is no error to pass on.
-    let _ = format_html_with_plugins(root, &options, &mut html, &plugins);
+    let mut html = UnlessLeft {
+        html: String::new(),
+        leave,
+    };
+    // Writing to a String never fails, so only a render that was left fails here.
+    format_html_with_plugins(root, &options, &mut html, &plugins).map_err(|_| RenderError::Left)?;
+    // Sanitizing runs to its end once started, so it is skipped rather than its result dropped.
+    unless_left()?;
     let images = ImageSources::new(path, image_origin, files);
-    RenderedDocument {
-        html: sanitize(&html, images),
-    }
+    Ok(RenderedDocument {
+        html: sanitize(&html.html, images),
+    })
 }
 
 const FRONT_MATTER_DELIMITER: &str = "---";
@@ -195,6 +256,8 @@ fn yaml_of(front_matter: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::time::{Duration, Instant};
+
     use super::*;
     use crate::files::fake::FakeFiles;
 
@@ -207,6 +270,7 @@ mod tests {
             Path::new("README.md"),
             IMAGE_ORIGIN,
             FakeFiles::default(),
+            &Leave::new(),
         );
         let html = rendered.unwrap();
         let html = html.as_str();
@@ -223,6 +287,7 @@ mod tests {
             Path::new("icon.ico"),
             IMAGE_ORIGIN,
             FakeFiles::default(),
+            &Leave::new(),
         );
         assert_eq!(rendered, Err(RenderError::NotText));
     }
@@ -235,6 +300,7 @@ mod tests {
                 Path::new(name),
                 IMAGE_ORIGIN,
                 FakeFiles::default(),
+                &Leave::new(),
             )
             .map(|rendered| rendered.as_str().to_owned());
             assert!(
@@ -251,6 +317,7 @@ mod tests {
             Path::new("README.md"),
             IMAGE_ORIGIN,
             FakeFiles::default(),
+            &Leave::new(),
         );
         let html = rendered.unwrap();
         let html = html.as_str();
@@ -265,6 +332,7 @@ mod tests {
             Path::new("README.md"),
             IMAGE_ORIGIN,
             FakeFiles::default(),
+            &Leave::new(),
         )
         .unwrap()
         .as_str()
@@ -331,6 +399,7 @@ mod tests {
             Path::new("README.md"),
             IMAGE_ORIGIN,
             FakeFiles::default(),
+            &Leave::new(),
         )
         .unwrap()
         .as_str()
@@ -569,6 +638,54 @@ code
             start_lines(&html, "p").first().copied().flatten(),
             Some(3),
             "{html}"
+        );
+    }
+
+    #[test]
+    fn render_left_before_it_starts_gives_no_html() {
+        let leave = Leave::new();
+        leave.leave();
+        let rendered = render(
+            b"# Title\n\nSome *text*.\n",
+            Path::new("README.md"),
+            IMAGE_ORIGIN,
+            FakeFiles::default(),
+            &leave,
+        );
+        assert_eq!(rendered, Err(RenderError::Left));
+    }
+
+    #[test]
+    fn render_left_while_it_runs_ends_soon_with_no_html() {
+        // About 1 MB of Rust code blocks with prose between them: a test build would highlight it
+        // for its whole highlight time, 30 s.
+        let block = format!(
+            "```rust\n{}```\n\n",
+            "let a = [1, 2, 3]; // x\n".repeat(200)
+        );
+        let markdown = format!("Some *text* here.\n\n{block}").repeat(200);
+        let leave = Leave::new();
+        let leaver = leave.clone();
+        let left = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(200));
+            leaver.leave();
+            Instant::now()
+        });
+        let rendered = render(
+            markdown.as_bytes(),
+            Path::new("README.md"),
+            IMAGE_ORIGIN,
+            FakeFiles::default(),
+            &leave,
+        );
+        let ended = Instant::now();
+        let left = left.join().unwrap();
+
+        assert_eq!(rendered, Err(RenderError::Left));
+        assert!(
+            ended.saturating_duration_since(left) < Duration::from_secs(5),
+            "ended {:?} after it was left",
+            ended.saturating_duration_since(left)
         );
     }
 }

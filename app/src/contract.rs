@@ -33,14 +33,15 @@ const HOW_TO_UPDATE: &str =
 
 /// Each sample file, with what writes it: the answers of the commands that answer with more than
 /// nothing (among them `render_document`, `editor_choices` for the settings flyout's Edit with,
-/// and `wait_note` for a document slow to arrive), the
+/// `wait_note` for a document slow to arrive and `stop_document` for Stop), the
 /// failure of `open_named_folder` for a folder gone since, the messages, the arguments of
 /// `show_document_menu`, the timing reports, `place_maximize_button` and `change_setting`, and
 /// the flags a window tells its page in the page's URL.
-const SAMPLE_FILES: [(&str, Samples); 12] = [
+const SAMPLE_FILES: [(&str, Samples); 13] = [
     ("render_document.json", documents::contract_samples),
     ("editor_choices.json", edit::contract_samples),
     ("wait_note.json", documents::wait_note_samples),
+    ("stop_document.json", documents::arrival::contract_samples),
     ("follow_link.json", links::contract_samples),
     ("keep_on_top.json", keep_on_top::contract_samples),
     ("open_named_folder.json", notice::contract_samples),

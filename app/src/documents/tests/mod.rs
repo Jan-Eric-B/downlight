@@ -17,8 +17,10 @@ use tauri::async_runtime::block_on;
 use super::handover::{Handover, Place};
 use super::recorder::{Recorder, Sent, ToWindow, recorded, recorded_with};
 use super::*;
+use crate::settings::PageSettings;
 use crate::watch::{Change, Report};
 
+mod arrival;
 mod give;
 mod handover;
 mod history;
@@ -81,7 +83,7 @@ fn to<T>(window: &str, what: T) -> (String, T) {
 fn opened(title: &str) -> ToWindow {
     ToWindow::Opened(NewWindow {
         title: title.to_owned(),
-        settings: Settings::default().page(),
+        settings: PageSettings::default(),
         look: Settings::default().window_look(),
         size: super::place::DEFAULT_SIZE,
         at: None,
@@ -119,6 +121,14 @@ fn handover(documents: &Documents, window: &str, page_shows: Option<Showing>) ->
     handover
 }
 
+/// `window`'s page asks for its document while its view shows `page_shows`, and places it, which
+/// it says (ticket 38): the showing it then shows.
+fn arrive(documents: &Documents, window: &str, page_shows: Option<Showing>) -> Showing {
+    let showing = handover(documents, window, page_shows).showing;
+    documents.arrived(window, showing);
+    showing
+}
+
 /// The HTML `window`'s page gets when it asks for its document.
 fn rendered_html(documents: &Documents, window: &str) -> String {
     html_of(handover(documents, window, None).render)
@@ -137,7 +147,7 @@ fn html_of(render: RenderTask) -> String {
     reason = "a helper isn't a #[test] function, and its panic fails the test that called it"
 )]
 fn html_and_start_of(render: RenderTask) -> (String, SystemTime) {
-    match block_on(render) {
+    match block_on(render.finished()) {
         Ok(Ok((document, stages))) => (document.as_str().to_owned(), stages.started()),
         Ok(Err(error)) => panic!("expected a rendered document, got {}", Notice::from(error)),
         Err(error) => panic!("the read and render stopped: {error}"),

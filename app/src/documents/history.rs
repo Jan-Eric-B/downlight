@@ -11,7 +11,10 @@ use std::path::PathBuf;
 
 use tauri::{State, WebviewWindow};
 
-use super::{Arrival, Claimed, Documents, Given, ShowError, Showing, ShownDocument, WindowRecord};
+use super::{
+    Arrival, Claimed, Documents, Given, ShowError, Showing, ShownDocument, WindowRecord,
+    WindowState,
+};
 use crate::notice::{NamedFile, Notice};
 
 /// The documents a window showed before the one it shows, and after it, nearest last.
@@ -94,28 +97,34 @@ impl History {
 
 /// How a window's record in the table changes its history as it changes its document.
 impl WindowRecord {
-    /// Shows `shown` in place of the document shown now, which becomes the last step back, and
-    /// gives back what the window was before, for [`Documents::put_back`].
-    pub(super) fn given(&mut self, shown: ShownDocument) -> Self {
-        let history = self.history.clone();
-        if let Some(left) = &self.shown {
-            self.history.moved_on_from(left);
-        }
-        Self {
-            shown: self.shown.replace(shown),
-            history,
-        }
+    /// Shows `shown` in place of the document in view, which becomes the last step back, and
+    /// holds what the window was until `shown` arrives ([`WindowRecord::move_on`]). Gives the
+    /// document on its way it left, if one was, to drop after the table's lock.
+    pub(super) fn given(&mut self, shown: ShownDocument) -> Option<WindowState> {
+        self.move_on(|in_view| {
+            let mut history = in_view.history.clone();
+            if let Some(left) = &in_view.shown {
+                history.moved_on_from(left);
+            }
+            WindowState {
+                shown: Some(shown),
+                history,
+            }
+        })
     }
 
-    /// Takes `step` to `to`, the document it goes to, in place of the document shown now, and
-    /// gives back what the window was before, for [`Documents::put_back`].
-    fn stepped(&mut self, step: Step, to: ShownDocument) -> Self {
-        let history = self.history.clone();
-        self.history.take(step, self.shown.as_ref());
-        Self {
-            shown: self.shown.replace(to),
-            history,
-        }
+    /// Takes `step` from the document in view to `to`, the document it goes to, and holds what
+    /// the window was until `to` arrives ([`WindowRecord::move_on`]). Gives the document on its
+    /// way it left, if one was, to drop after the table's lock.
+    fn stepped(&mut self, step: Step, to: ShownDocument) -> Option<WindowState> {
+        self.move_on(|in_view| {
+            let mut history = in_view.history.clone();
+            history.take(step, in_view.shown.as_ref());
+            WindowState {
+                shown: Some(to),
+                history,
+            }
+        })
     }
 }
 
@@ -142,7 +151,9 @@ impl Documents {
     }
 
     /// Records `step` in `window`'s history under the table's lock, as [`Documents::claim`]
-    /// records a show, with the document stepped to.
+    /// records a show, with the document stepped to. While the window's document is on its way,
+    /// the step goes from the document its page's view still shows, and the one on its way never
+    /// joins the history (ticket 38).
     fn claim_step(
         &self,
         window: &str,
@@ -150,15 +161,18 @@ impl Documents {
     ) -> Result<Option<(Claimed, Visited)>, StepError> {
         let mut table = self.lock();
         let record = table.windows.get(window).ok_or(StepError::WindowClosed)?;
-        let Some(to) = record.history.next(step).cloned() else {
+        let Some(to) = record.in_view().history.next(step).cloned() else {
             return Ok(None);
         };
-        if let Some(elsewhere) = table
+        if let Some((elsewhere, record)) = table
             .window_showing(&to.key)
-            .filter(|other| other != window)
+            .filter(|(other, _)| *other != window)
         {
+            // A step to the document another window's page's view shows during a load stops the
+            // load there, as a request for it from anywhere does (ticket 38's review).
             let claimed = Claimed::AlreadyElsewhere {
-                window: elsewhere,
+                window: elsewhere.clone(),
+                stop: record.held_showing(&to.key),
                 scroll_to: None,
             };
             return Ok(Some((claimed, to)));
@@ -177,11 +191,11 @@ impl Documents {
             claim,
             Arrival::Stepped,
         );
-        let left = record.stepped(step, arrived);
+        let left = record.stepped(step, arrived).map(Box::new);
         let claimed = Claimed::Changed {
             window: window.to_owned(),
             claim,
-            left: Box::new(left),
+            left,
         };
         Ok(Some((claimed, to)))
     }
@@ -197,11 +211,12 @@ impl Documents {
             match table.windows.get_mut(window) {
                 Some(record)
                     if record
+                        .now
                         .shown
                         .as_ref()
                         .is_some_and(|shown| shown.showing == showing) =>
                 {
-                    std::mem::take(&mut record.history.forward)
+                    std::mem::take(&mut record.now.history.forward)
                 }
                 _ => Vec::new(),
             }

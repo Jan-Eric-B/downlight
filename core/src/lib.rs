@@ -18,4 +18,4 @@ pub use files::{FileSystem, PathKind};
 pub use format::{MARKDOWN_EXTENSIONS, TEXT_CHECK_LENGTH, is_markdown, is_text};
 pub use image::{LocalImage, local_image};
 pub use links::{LinkAction, LinkError, resolve_link};
-pub use render::{RenderError, RenderedDocument, render};
+pub use render::{Leave, RenderError, RenderedDocument, render};

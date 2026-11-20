@@ -5,13 +5,16 @@
 // side fails a test.
 import { clearMocks, mockWindows } from "@tauri-apps/api/mocks";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { startAccent } from "./accent";
 import {
+  ACCENT_SHADES,
   DEFAULT_SETTINGS,
   firstSettings,
   pageFlags,
   type ArgsOf,
   type MenuEntry,
   type NamedFile,
+  type PageSettings,
   type SettingChange,
 } from "./app";
 import { startCommands } from "./commands";
@@ -52,6 +55,7 @@ import {
   spyOnHeadingScrolls,
   shownWaitNote,
   spyOnScrollsToTop,
+  stopDocumentSample,
   tell,
   tellAsSampled,
   timingReportSample,
@@ -352,6 +356,38 @@ test("the app's wait note for a window with no document shows nothing", async ()
   expect(shownWaitNote()).toBeNull();
 });
 
+// `stop_document.json`
+
+test.each([
+  ["stopped", 2],
+  ["notStopped", 1],
+] as const)(
+  "the app's answer %s to Stop in a window that showed no document asks for it again only once stopped",
+  async (name, asked) => {
+    let answered = false;
+    fakeTheApp({
+      render_document: () => {
+        if (answered) return null;
+        answered = true;
+        return new Promise<never>(() => undefined);
+      },
+      wait_note: () => waitNoteSample("withSize"),
+      stop_document: () => stopDocumentSample(name),
+    });
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    void startDocumentView(0);
+    await vi.advanceTimersByTimeAsync(WAIT_NOTE_MS);
+    await vi.waitFor(() => {
+      expect(shownWaitNote()?.querySelector("button")).not.toBeNull();
+    });
+
+    shownWaitNote()?.querySelector("button")?.click();
+    await settle();
+    await settle();
+    expect(requests()).toBe(asked);
+  },
+);
+
 // `messages.json`
 
 test("the app's askForDocument message makes the page ask for its document", async () => {
@@ -405,6 +441,32 @@ test("the app's message to scroll to a heading in the showing in view scrolls to
   await vi.waitFor(() => {
     expect(scrolledTo()).toContain("install");
   });
+});
+
+test("the app's message to stop for the showing in view stops the document on its way", async () => {
+  const stopped: (number | null)[] = [];
+  let answered = false;
+  fakeTheApp({
+    render_document: () => {
+      if (answered) return new Promise<never>(() => undefined);
+      answered = true;
+      return renderDocumentSample("showAtTop");
+    },
+    stop_document: ({ showing }) => {
+      stopped.push(showing);
+      return stopDocumentSample("stopped");
+    },
+  });
+  await startDocumentView(0);
+  await settle();
+  await tellAsSampled(messageSample("askForDocument"));
+  const stop = messageSample("stopDocument");
+  if (stop.event !== "stop-document") throw new Error("The sample is no stop.");
+
+  expect(stop.payload).toBe(showingIn("showAtTop"));
+  await tellAsSampled(stop);
+  await settle();
+  expect(stopped).toEqual([stop.payload]);
 });
 
 test("the app's notice shows", async () => {
@@ -724,10 +786,24 @@ function flyoutChoice(label: string): HTMLInputElement {
   return input;
 }
 
-/** Starts the title bar, the commands and the settings flyout, and opens the flyout. */
+/** The settings the app's sample of its `settings` message gives. */
+function sampledSettings(): PageSettings {
+  const sample = messageSample("settings");
+  if (sample.event !== "settings") {
+    throw new Error("The settings sample is no settings message.");
+  }
+  return sample.payload;
+}
+
+/**
+ * Starts the title bar, the commands and the settings flyout, and opens the flyout, with the
+ * app's sampled settings, whose Windows' accent color makes the flyout offer every accent color.
+ */
 async function openTheSettingsFlyout(): Promise<void> {
   fakeTitleBarLayout();
-  openPageWith("titleBar", "backdropSupported");
+  openPageAt(
+    `?titleBar&backdropSupported&settings=${encodeURIComponent(JSON.stringify(sampledSettings()))}`,
+  );
   await startSettings();
   startTitleBar(stopPage.signal);
   startCommands(stopPage.signal);
@@ -754,20 +830,20 @@ test("the page's changes of the settings are each one the app takes, with its ke
 
   for (const command of ["zoomIn", "zoomOut", "resetZoom", "fullWidth"])
     await tell("menu-command", command);
-  // Each choice of the settings flyout, the one the settings hold last, so each one is new.
+  // Each choice of the settings flyout, the one the sampled settings hold last (Dark, None and
+  // Windows), so each one is new.
   for (const label of [
     "Light",
-    "Dark",
     "System",
+    "Dark",
     "Mica Alt",
     "Acrylic",
-    "None",
     "Mica",
+    "None",
+    "Amber",
+    "Windows",
   ])
     flyoutChoice(label).click();
-  // Amber is the only accent color until window design ticket 09, so it is always checked and
-  // never clicked anew: its change is the browser's for a choice newly checked.
-  flyoutChoice("Amber").dispatchEvent(new Event("change"));
   flyoutChoice("Default").click();
   await settle();
   expect(sent.map(inKeyOrder).toSorted()).toEqual(
@@ -944,6 +1020,34 @@ test("the app's settings message shows its zoom level in the title bar", async (
 
   expect(titleBarZoomLevel().hidden).toBe(false);
   expect(titleBarZoomLevel().textContent).toBe("125%");
+});
+
+// Windows' accent color (window design ticket 09), in the `settings` message.
+
+test("the app's scale of Windows' accent color names each shade the page's accent scale has, and no other", () => {
+  const scale = sampledSettings().windowsAccent;
+  if (scale === null) throw new Error("The settings sample has no scale.");
+
+  // accent.test.ts checks that accent.css defines exactly these shades.
+  expect(Object.keys(scale).toSorted()).toEqual([...ACCENT_SHADES].sort());
+});
+
+test("the app's settings message with Windows' accent color chosen colors the page with its scale", async () => {
+  fakeTheApp();
+  await startSettings();
+  const stopAccent = startAccent();
+  await tellAsSampled(messageSample("settings"));
+
+  const { style } = document.documentElement;
+  const shown = Object.fromEntries(
+    ACCENT_SHADES.map((shade) => [
+      shade,
+      style.getPropertyValue(`--accent-${shade}`),
+    ]),
+  );
+  expect(sampledSettings().accentColor).toBe("windows");
+  expect(shown).toEqual(sampledSettings().windowsAccent);
+  stopAccent();
 });
 
 // `timing_reports.json`. The timing switch is read when `timing.ts` loads, so these tests load the

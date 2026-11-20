@@ -72,9 +72,16 @@ impl Documents {
     /// reach it after the one for a document given in between; the page then asks with the
     /// showing its view still shows, and is answered a show (ticket 23), or, for a `gone`, sees
     /// that it names another showing than its view's (ticket 26).
+    ///
+    /// A change to the document the page's view still shows while the window's next document is
+    /// on its way is kept for Stop, which puts that document back (ticket 38).
     fn changed(&self, window: &str, key: &Path, change: Change) {
         let message = {
             let mut table = self.lock();
+            if let Some(held) = table.held_mut(window, key) {
+                held.missed = Some(change);
+                return;
+            }
             let Some(shown) = table.shown_mut(window, key) else {
                 return;
             };

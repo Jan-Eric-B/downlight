@@ -4,11 +4,11 @@
 
 Spec: [Window design](../spec.md)
 
-**Blocked by:** none
+**Blocked by:** 16 (Mica never shows as active)
 
 **Status:** needs-info
 
-- [ ] Compared side by side by the repo owner (below), with the result recorded here.
+- [x] Compared side by side by the repo owner (below), with the result recorded here.
 - [ ] Decided: keep the system's materials as they are, darken Acrylic in the dark theme, or drop Acrylic.
 
 ## Comments
@@ -31,3 +31,5 @@ Spec: [Window design](../spec.md)
 2. **Darken Acrylic in the dark theme**: the page draws a translucent dark layer (`rgb(0 0 0 / x%)`) on `:root.backdrop` while Backdrop is Acrylic. Cheap, but a tint of Downlight's own over the system's that has to be tuned by eye.
 3. **The Windows App SDK's controllers** for tint control like WinUI 3's: a dependency on the Windows App Runtime and composition code under a WebView2 window in the per-OS module. Not worth it for a tint.
 4. **Drop Acrylic**, following Microsoft's guidance for long-lived windows. It removes a choice a reader may like.
+
+**2026-11-19, the side-by-side check.** The repo owner compared Downlight with WinDown (WinUI 3) on the same wallpaper, both active, dark mode, Mica. WinDown showed Mica tinted by the wallpaper; Downlight showed a flat gray, about `#202020`, the same active and inactive and the same as WinDown when inactive. So the difference isn't a tint: Downlight's backdrop never shows as active. That is ticket 16, which this ticket now waits for. Once it is fixed, compare again before deciding about Acrylic.

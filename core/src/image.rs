@@ -188,6 +188,7 @@ mod tests {
     use std::time::{Duration, SystemTime};
 
     use super::local_image;
+    use crate::Leave;
     use crate::files::fake::FakeFiles;
     use crate::render;
 
@@ -206,6 +207,7 @@ mod tests {
             Path::new(r"C:\docs\guide\README.md"),
             ORIGIN,
             files,
+            &Leave::new(),
         )
         .unwrap()
         .as_str()

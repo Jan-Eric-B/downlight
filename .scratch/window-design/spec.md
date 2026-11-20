@@ -55,9 +55,9 @@ This reverses parts of the [v1 spec](../downlight-v1/spec.md): story 71's native
 28. As a reader, I want a change to apply at once to every open window and be remembered, so that I set it once.
 29. As a reader, I want Esc, a click outside or the gear again to close the flyout, and Tab to move through it, so that it works without the mouse.
 
-### Later
+### Counts
 
-30. As a reader, I want a small status bar at the bottom with line, word and selection counts. (Needs triage: ticket 10.)
+30. As a reader, I want the document's lines and words in the file name's tooltip, and my selection's words and characters in a small bubble while I select, so that I can see how long a document or a passage is without a status bar taking space. (Ticket 10.)
 
 ## Implementation Decisions
 
@@ -127,6 +127,12 @@ This reverses parts of the [v1 spec](../downlight-v1/spec.md): story 71's native
 - Theme sets the window's theme in the app, so Mica's tint, the title bar and the page's `prefers-color-scheme` follow it together.
 - Backdrop: Mica, Mica Alt (Tauri's `Tabbed`), Acrylic, or None (the solid background used where Mica is off). On Windows 10 the choice is disabled and the background is solid.
 
+### Counts
+
+- No status bar: it would take a row from the document and the corner where the link target bubble sits. The document's counts go into the file name's tooltip, under the path ("1,234 lines, 5,678 words"); the selection's show in a bubble at the bottom right while text in the document is selected ("12 words, 68 characters").
+- Lines are the file's, as line numbers are; words and characters are of the text the reader sees, split by UAX #29. Not counted: the document's characters, a reading time, the reading position's line, the encoding.
+- The core counts the document while it renders, so the counts cost the page nothing and a 100 MB document holds nothing up; the page counts only the selection (`Intl.Segmenter`). Ticket 10 has the details.
+
 ### Modules
 
 - **Page:** a title bar module (logo, file name, zoom level, buttons, window buttons), a settings flyout module, and the accent scale as CSS variables. They talk to the app only through `page/src/app.ts`, as every page module does.
@@ -138,6 +144,7 @@ This reverses parts of the [v1 spec](../downlight-v1/spec.md): story 71's native
 - **Page** (Vitest with happy-dom): the title bar shows the file name, its tooltip is the full path, a click asks the app to reveal it; the zoom level shows only off 100% and a click resets it; each button runs its command, and Full width and Keep on top show their state; the flyout opens, closes on Esc, a click outside and the gear, keeps the focus inside, and sends each change to the app.
 - **Contract samples:** each new command and message gets its sample in `app/tests/fixtures/`, as every other does.
 - **App** (`cargo test`): the settings store keeps theme, backdrop, accent color and full width across a restart, and loads defaults when they're missing. The hit test is a pure function from a point and the maximize button's rectangle to the hit test answer, and is tested as one.
+- **Counts:** the core's tests count lines and words through `render`; the page's tests check the tooltip and the selection bubble; the rendered document's new shape gets its contract sample.
 - **Accent scale:** a page test reads the icon's SVG and fails on any color that isn't a shade of the scale.
 - **By hand**, per ticket: light, dark and high contrast; Windows 10's solid path; snap layouts, dragging, double-click, the top border and Alt+Space; the icon at 16, 24, 32 and 48 px.
 
@@ -147,10 +154,10 @@ This reverses parts of the [v1 spec](../downlight-v1/spec.md): story 71's native
 - A settings window, and settings beyond the four above.
 - A logo that follows the accent color.
 - New empty windows from the logo.
-- The status bar: ticket 10 collects what is known, and it gets its own grilling before it is built.
+- A status bar: the counts (ticket 10) take its place.
 
 ## Further Notes
 
 - Reference: WinDown's title bar and settings flyout (screenshots of 2026-11-13). Downlight takes the layout, not WinDown's code.
 - The amber scale and the icon came with that conversation (`downlight-1h-amber.svg`). The icon's embedded C2PA metadata is removed when it is committed.
-- New glossary terms: Title bar, Accent color, Backdrop, Theme, Full width, Keep on top, Settings.
+- New glossary terms: Title bar, Accent color, Backdrop, Theme, Full width, Keep on top, Settings, and Counts (from ticket 10's grilling).

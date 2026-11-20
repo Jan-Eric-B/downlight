@@ -3,6 +3,7 @@ import "./accent.css";
 import "./document.css";
 import "./title-bar.css";
 import "./settings-flyout.css";
+import { startAccent } from "./accent";
 import { startBackdrop } from "./backdrop";
 import { startCommands } from "./commands";
 import { startFind } from "./find";
@@ -19,6 +20,8 @@ const scriptStart = epochMs();
 // First, so every part of the page starts with the settings in the page's URL.
 const hearingSettings = startSettings();
 startBackdrop();
+// Before the first paint, so a reader who chose Windows' accent color never sees amber first.
+startAccent();
 watchLongTasks();
 // Before the title bar draws Keep on top's button.
 startKeepOnTop();

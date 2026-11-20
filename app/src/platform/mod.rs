@@ -6,11 +6,12 @@ mod windows;
 
 #[cfg(windows)]
 pub use windows::{
-    add_maximize_button, ask, custom_scheme_origin, draws_own_title_bar, fold_case, has_backdrop,
-    is_missing, leave_keys_to_the_page, let_take_foreground, menu_item_text, notepad,
-    open_as_text_file, open_folder, open_url, place_maximize_button, process_start, program_name,
-    reveal_file, set_backdrop, show_error, show_window_menu, text_file_program,
-    text_file_program_name, when_webview_stops, with_backdrop, with_browser_arguments,
+    accent_scale, add_maximize_button, ask, custom_scheme_origin, draws_own_title_bar, fold_case,
+    follow_accent, has_backdrop, is_missing, leave_keys_to_the_page, let_take_foreground,
+    menu_item_text, notepad, open_as_text_file, open_folder, open_url, place_maximize_button,
+    process_start, program_name, reveal_file, set_backdrop, show_error, show_window_menu,
+    text_file_program, text_file_program_name, when_webview_stops, with_backdrop,
+    with_browser_arguments,
 };
 
 /// Other systems name no text file program until their ports find theirs.
@@ -164,6 +165,17 @@ pub fn set_backdrop(
 pub fn has_backdrop() -> bool {
     false
 }
+
+/// Other systems report no accent color of their own until their ports, so the settings flyout
+/// offers Amber alone there.
+#[cfg(not(windows))]
+pub fn accent_scale() -> Option<crate::settings::AccentScale> {
+    None
+}
+
+/// Other systems tell of no change of an accent color they don't report.
+#[cfg(not(windows))]
+pub fn follow_accent(_changed: impl Fn() + Send + 'static) {}
 
 /// Other systems don't report when the process started until their ports; timing then counts
 /// from the start of `main`.

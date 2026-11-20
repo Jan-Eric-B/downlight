@@ -70,6 +70,8 @@ fn main() -> ExitCode {
         .invoke_handler(tauri::generate_handler![
             documents::handover::render_document,
             documents::handover::wait_note,
+            documents::arrival::document_arrived,
+            documents::arrival::stop_document,
             links::follow_link,
             open::open_document,
             menu::show_document_menu,
@@ -137,7 +139,14 @@ fn main() -> ExitCode {
             let settings = Arc::new(settings);
             app.manage(Arc::clone(&settings));
             let handle = app.handle().clone();
-            app.manage(Documents::new(handle.clone(), handle, settings));
+            app.manage(Documents::new(handle.clone(), handle.clone(), settings));
+            // Windows' accent color (window design ticket 09): read before `setup` opens the
+            // first window, so its page's URL has it, and followed from then on for every page.
+            // Followed first, so that a change between the two is told, not lost; each call reads
+            // the scale itself, so the one stored last is the newest. The documents are managed
+            // already, so a change told at once finds them.
+            platform::follow_accent(move || handle.state::<Documents>().change_windows_accent());
+            app.state::<Documents>().change_windows_accent();
             app.run(|_, _| {});
             ExitCode::SUCCESS
         }

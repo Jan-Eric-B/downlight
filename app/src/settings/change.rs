@@ -85,13 +85,15 @@ pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
             backdrop: Backdrop::Mica | Backdrop::MicaAlt | Backdrop::Acrylic | Backdrop::None,
         }
         | SettingChange::AccentColor {
-            accent_color: AccentColor::Amber,
+            accent_color: AccentColor::Amber | AccentColor::Windows,
         }
         | SettingChange::ClearEditor => {}
     };
     let zoom = |change| serde_json::to_value(SettingChange::Zoom { change });
     let theme = |theme| serde_json::to_value(SettingChange::Theme { theme });
     let backdrop = |backdrop| serde_json::to_value(SettingChange::Backdrop { backdrop });
+    let accent_color =
+        |accent_color| serde_json::to_value(SettingChange::AccentColor { accent_color });
     Ok(serde_json::json!({
         "zoomIn": zoom(ZoomChange::In)?,
         "zoomOut": zoom(ZoomChange::Out)?,
@@ -104,9 +106,8 @@ pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
         "backdropMicaAlt": backdrop(Backdrop::MicaAlt)?,
         "backdropAcrylic": backdrop(Backdrop::Acrylic)?,
         "backdropNone": backdrop(Backdrop::None)?,
-        "accentColorAmber": serde_json::to_value(SettingChange::AccentColor {
-            accent_color: AccentColor::Amber,
-        })?,
+        "accentColorAmber": accent_color(AccentColor::Amber)?,
+        "accentColorWindows": accent_color(AccentColor::Windows)?,
         "clearEditor": serde_json::to_value(SettingChange::ClearEditor)?,
     }))
 }
@@ -179,7 +180,7 @@ mod tests {
         let picked = changed(
             picked,
             SettingChange::AccentColor {
-                accent_color: AccentColor::Amber,
+                accent_color: AccentColor::Windows,
             },
         );
         assert_eq!(
@@ -187,6 +188,7 @@ mod tests {
             Settings {
                 theme: Theme::Dark,
                 backdrop: Backdrop::Acrylic,
+                accent_color: AccentColor::Windows,
                 ..Settings::default()
             }
         );

@@ -5,16 +5,17 @@ use super::*;
 use crate::documents::history::{Step, StepError, Steps};
 
 /// A window that showed the manifest and was then given `build.rs`, as a link, Ctrl+O or a drop
-/// gives it, with its page asking each time: its label, and the showings of the two.
+/// gives it, with its page asking each time and placing what it got: its label, and the showings
+/// of the two.
 fn window_that_moved_on(documents: &Documents) -> (String, Showing, Showing) {
     let label = open_new(documents, &manifest());
-    let first = handover(documents, &label, None).showing;
+    let first = arrive(documents, &label, None);
     give(
         documents,
         DocumentAt::new(&app_file("build.rs")),
         Target::Window(&label),
     );
-    let second = handover(documents, &label, Some(first)).showing;
+    let second = arrive(documents, &label, Some(first));
     (label, first, second)
 }
 
@@ -58,7 +59,7 @@ fn forward_after_back_gives_the_window_the_document_it_left_as_its_showing() {
     let (documents, _) = documents();
     let (label, first, second) = window_that_moved_on(&documents);
     step(&documents, &label, Step::Back);
-    let _ = handover(&documents, &label, Some(second));
+    arrive(&documents, &label, Some(second));
     assert_eq!(
         step(&documents, &label, Step::Forward),
         Some(Given::Changed(label.clone()))
@@ -96,13 +97,15 @@ fn an_empty_window_given_a_document_has_nothing_to_go_back_to() {
 #[test]
 fn a_document_given_after_back_leaves_nothing_to_go_forward_to() {
     let (documents, _) = documents();
-    let (label, _, _) = window_that_moved_on(&documents);
+    let (label, first, second) = window_that_moved_on(&documents);
     step(&documents, &label, Step::Back);
+    arrive(&documents, &label, Some(second));
     give(
         &documents,
         DocumentAt::new(&app_file("src").join("main.rs")),
         Target::Window(&label),
     );
+    arrive(&documents, &label, Some(first));
     assert_eq!(step(&documents, &label, Step::Forward), None);
     assert_eq!(
         step(&documents, &label, Step::Back),
@@ -114,16 +117,19 @@ fn a_document_given_after_back_leaves_nothing_to_go_forward_to() {
 #[test]
 fn every_document_given_is_one_more_step_back() {
     let (documents, _) = documents();
-    let (label, _, _) = window_that_moved_on(&documents);
+    let (label, _, second) = window_that_moved_on(&documents);
     give(
         &documents,
         DocumentAt::new(&app_file("src").join("main.rs")),
         Target::Window(&label),
     );
+    let third = arrive(&documents, &label, Some(second));
     step(&documents, &label, Step::Back);
     assert_eq!(documents.document_path(&label), Some(app_file("build.rs")));
+    arrive(&documents, &label, Some(third));
     step(&documents, &label, Step::Back);
     assert_eq!(documents.document_path(&label), Some(manifest()));
+    arrive(&documents, &label, Some(second));
     assert_eq!(step(&documents, &label, Step::Back), None);
 }
 
@@ -133,12 +139,14 @@ fn handover_says_whether_the_window_can_go_back_or_forward() {
     let (documents, _) = documents();
     let label = open_new(&documents, &manifest());
     let alone = handover(&documents, &label, None);
+    documents.arrived(&label, alone.showing);
     give(
         &documents,
         DocumentAt::new(&app_file("build.rs")),
         Target::Window(&label),
     );
     let moved_on = handover(&documents, &label, Some(alone.showing));
+    documents.arrived(&label, moved_on.showing);
     step(&documents, &label, Step::Back);
     let back = handover(&documents, &label, Some(moved_on.showing));
     let steps = |back, forward| Steps { back, forward };
@@ -209,18 +217,22 @@ fn back_that_fails_after_forward_and_back_again_keeps_where_they_took_the_window
     // Back that found its own showing in the window again, after a Forward and a Back on another
     // thread, took that for its own and put back the document Back had left, with its history.
     let (documents, recorder) = documents();
-    let (label, _, _) = window_that_moved_on(&documents);
+    // Each step's document arrives before the next, so that each goes from the one before.
+    let (label, first, second) = window_that_moved_on(&documents);
     let (other, window) = (shared(&documents), label.clone());
     recorder.before_next_title(move || {
         meanwhile(other, move |documents| {
+            documents.arrived(&window, first);
             step(documents, &window, Step::Forward);
+            documents.arrived(&window, second);
             step(documents, &window, Step::Back);
         });
         Err(WindowError::new("the window can't be titled"))
     });
     assert!(documents.step(&label, Step::Back).is_err());
-    recorder.wait_until(HELD_UP_END_WAIT, |sent| sent.len() == 3);
+    recorder.wait_until(HELD_UP_END_WAIT, |sent| sent.len() == 4);
     assert_eq!(documents.document_path(&label), Some(manifest()));
+    documents.arrived(&label, first);
     assert_eq!(
         step(&documents, &label, Step::Forward),
         Some(Given::Changed(label.clone()))
@@ -230,10 +242,12 @@ fn back_that_fails_after_forward_and_back_again_keeps_where_they_took_the_window
 
 #[test]
 fn a_link_from_the_document_a_step_left_does_nothing() {
-    // Ticket 26's rule holds for a step too: only the showing in view has links.
+    // Ticket 26's rule holds for a step too: only the showing in view has links, the one stepped
+    // from until the one stepped to has arrived (ticket 38).
     let (documents, _) = documents();
     let (label, first, second) = window_that_moved_on(&documents);
     step(&documents, &label, Step::Back);
+    arrive(&documents, &label, Some(second));
     assert_eq!(documents.document_path_shown_as(&label, second), None);
     assert_eq!(
         documents.document_path_shown_as(&label, first),
@@ -259,13 +273,13 @@ fn a_document_stepped_back_to_is_read_anew_and_reloads_on_a_save() {
     let path = document("step-watched", "# Before");
     let (documents, recorder) = documents();
     let label = open_new(&documents, &path);
-    let first = handover(&documents, &label, None).showing;
+    let first = arrive(&documents, &label, None);
     give(
         &documents,
         DocumentAt::new(&manifest()),
         Target::Window(&label),
     );
-    let second = handover(&documents, &label, Some(first)).showing;
+    let second = arrive(&documents, &label, Some(first));
     std::fs::write(&path, "# After").unwrap();
     step(&documents, &label, Step::Back);
     let shown = html_of(handover(&documents, &label, Some(second)).render);
@@ -287,7 +301,7 @@ fn a_heading_visited_after_back_leaves_nothing_to_go_forward_to() {
     let (documents, _) = documents();
     let (label, first, second) = window_that_moved_on(&documents);
     step(&documents, &label, Step::Back);
-    let _ = handover(&documents, &label, Some(second));
+    arrive(&documents, &label, Some(second));
     documents.forget_forward(&label, first);
     assert_eq!(step(&documents, &label, Step::Forward), None);
     assert_eq!(documents.document_path(&label), Some(manifest()));
@@ -295,10 +309,12 @@ fn a_heading_visited_after_back_leaves_nothing_to_go_forward_to() {
 
 #[test]
 fn a_heading_visited_in_a_showing_the_window_has_left_keeps_its_history() {
-    // The page's view still showed the document the window had just stepped back from.
+    // The heading was visited in the document the window had just stepped back from, before the
+    // page placed the one stepped to: by then the window's view has left it.
     let (documents, _) = documents();
     let (label, _, second) = window_that_moved_on(&documents);
     step(&documents, &label, Step::Back);
+    arrive(&documents, &label, Some(second));
     documents.forget_forward(&label, second);
     assert_eq!(
         step(&documents, &label, Step::Forward),

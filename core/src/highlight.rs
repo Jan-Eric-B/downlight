@@ -20,6 +20,8 @@ use syntect::highlighting::{
 use syntect::parsing::{ParseState, ScopeStack, SyntaxReference, SyntaxSet};
 use syntect::util::LinesWithEndings;
 
+use crate::render::Leave;
+
 /// GitHub's rules from scope to class, as in its Primer syntax themes (the source of
 /// github-markdown-css's `pl-*` colors). The most specific selector wins, as in any TextMate
 /// theme. `None` is the default text color, for scopes that undo a broader rule, and writes no
@@ -172,9 +174,11 @@ pub(crate) const HIGHLIGHT_LIMIT: HighlightLimit = HighlightLimit {
 /// comrak's highlighter plugin, writing GitHub's classes. Unlike comrak's own syntect adapter, it
 /// keeps comrak's attributes on `pre` and `code`: the line number and the language class. One
 /// highlights one document, whose highlight limit it keeps count of.
-pub(crate) struct GithubHighlighter {
+pub(crate) struct GithubHighlighter<'a> {
     limit: HighlightLimit,
     budget: Mutex<Budget>,
+    /// Whether the render was left, which ends a block's highlighting between lines (ticket 38).
+    leave: &'a Leave,
 }
 
 /// What is left of a document's highlight limit.
@@ -183,16 +187,18 @@ struct Budget {
     time: Duration,
 }
 
-impl GithubHighlighter {
+impl<'a> GithubHighlighter<'a> {
     /// A highlighter for one document, within `limit`: [`HIGHLIGHT_LIMIT`], or a test's own,
-    /// since a test build highlights many times slower than the app's.
-    pub(crate) fn within(limit: HighlightLimit) -> Self {
+    /// since a test build highlights many times slower than the app's. It stops once `leave`
+    /// says the render was left.
+    pub(crate) fn within(limit: HighlightLimit, leave: &'a Leave) -> Self {
         Self {
             limit,
             budget: Mutex::new(Budget {
                 bytes: limit.document,
                 time: limit.time,
             }),
+            leave,
         }
     }
 
@@ -212,7 +218,7 @@ impl GithubHighlighter {
             return None;
         };
         let started = Instant::now();
-        let html = highlighted(code, syntax, started + budget.time);
+        let html = highlighted(code, syntax, started + budget.time, self.leave);
         // A block its grammar can't parse shows plain, and spends only the time it took.
         if html.is_some() {
             budget.bytes = bytes_left;
@@ -225,7 +231,7 @@ impl GithubHighlighter {
     }
 }
 
-impl SyntaxHighlighterAdapter for GithubHighlighter {
+impl SyntaxHighlighterAdapter for GithubHighlighter<'_> {
     fn write_highlighted(
         &self,
         output: &mut dyn Write,
@@ -265,14 +271,19 @@ impl SyntaxHighlighterAdapter for GithubHighlighter {
 }
 
 /// `code` as HTML with a span for each run of text in one class, or None if its grammar can't
-/// parse a line or it isn't done by `until`, so the block shows plain.
-fn highlighted(code: &str, syntax: &SyntaxReference, until: Instant) -> Option<String> {
+/// parse a line, it isn't done by `until`, or the render was left, so the block shows plain.
+fn highlighted(
+    code: &str,
+    syntax: &SyntaxReference,
+    until: Instant,
+    leave: &Leave,
+) -> Option<String> {
     let highlighter = Highlighter::new(&THEME);
     let mut parse_state = ParseState::new(syntax);
     let mut highlight_state = HighlightState::new(&highlighter, ScopeStack::new());
     let mut html = Spans::with_capacity(code.len() * 2);
     for line in LinesWithEndings::from(code) {
-        if Instant::now() >= until {
+        if Instant::now() >= until || leave.is_left() {
             return None;
         }
         let changes = parse_state.parse_line(line, &SYNTAXES).ok()?;
@@ -329,6 +340,7 @@ mod tests {
     use std::time::Duration;
 
     use super::{HIGHLIGHT_LIMIT, HighlightLimit, RULES, THEME};
+    use crate::Leave;
     use crate::files::fake::FakeFiles;
     use crate::render;
     use crate::render::render_within;
@@ -339,6 +351,7 @@ mod tests {
             Path::new("README.md"),
             "http://image.localhost",
             FakeFiles::default(),
+            &Leave::new(),
         )
         .unwrap()
         .as_str()
@@ -442,8 +455,10 @@ mod tests {
             Path::new("README.md"),
             "http://image.localhost",
             FakeFiles::default(),
+            &Leave::new(),
             limit,
         )
+        .unwrap()
         .as_str()
         .to_owned()
     }

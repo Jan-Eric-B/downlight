@@ -123,9 +123,13 @@ fn follow(
             // reading position.
             match documents.give(document, target) {
                 Ok(Given::AlreadyHere(_)) => Ok(Followed::ScrollTo { heading }),
-                Ok(Given::NewWindow(_) | Given::Changed(_) | Given::AlreadyElsewhere(_)) => {
-                    Ok(Followed::Nothing)
-                }
+                // The document on its way here arrives as it was going to.
+                Ok(
+                    Given::NewWindow(_)
+                    | Given::Changed(_)
+                    | Given::OnItsWayHere(_)
+                    | Given::AlreadyElsewhere(_),
+                ) => Ok(Followed::Nothing),
                 Err(source) => Err(FollowError::Show { path, source }),
             }
         }
@@ -365,6 +369,8 @@ mod tests {
         let (documents, _) = recorded();
         let (window, showing) = window_showing_notes(&documents);
         follow(&documents, &window, showing, "readme.md", false).unwrap();
+        // The document joins the history once it has arrived (ticket 38).
+        documents.page_asks(&window);
         documents.step(&window, Step::Back).unwrap();
         assert_eq!(
             documents.document_path(&window),
@@ -485,6 +491,8 @@ mod tests {
         documents
             .give(DocumentAt::new(&readme), Target::Window(&window))
             .unwrap();
+        // Until readme.md arrived, notes.md was still in view and had its links (ticket 38).
+        documents.page_asks(&window);
         let followed = follow(&documents, &window, left, "notes.md", false);
         assert_eq!(followed.ok(), Some(Followed::Nothing));
         assert_eq!(documents.document_path(&window), Some(readme));

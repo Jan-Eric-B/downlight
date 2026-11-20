@@ -20,6 +20,7 @@ import {
   tell,
   titleBarButton,
   titleBarButtonRow,
+  WINDOWS_GREEN,
   type FakeApp,
 } from "./test-support";
 import { startTitleBar } from "./title-bar";
@@ -64,12 +65,18 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
+/** A reader's settings who changed none, on Windows, which has an accent color of its own. */
+const ON_WINDOWS: PageSettings = {
+  ...DEFAULT_SETTINGS,
+  windowsAccent: WINDOWS_GREEN,
+};
+
 /**
  * Starts the page's title bar, commands and settings flyout, as in a window where the OS can
  * show a backdrop unless `backdropSupported` is false, with `settings`.
  */
 async function startPage(
-  settings: PageSettings = DEFAULT_SETTINGS,
+  settings: PageSettings = ON_WINDOWS,
   backdropSupported = true,
 ): Promise<void> {
   const flags = backdropSupported ? "titleBar&backdropSupported" : "titleBar";
@@ -194,7 +201,17 @@ test("the gear opens the flyout with Theme, Backdrop, Accent color and Edit with
     "Acrylic",
     "None",
   ]);
-  expect(choicesIn("Accent color")).toEqual(["Amber"]);
+  expect(choicesIn("Accent color")).toEqual(["Amber", "Windows"]);
+});
+
+test("where the OS has no accent color of its own, the flyout offers no choice of accent color", async () => {
+  await startPage(DEFAULT_SETTINGS);
+  await openWithTheGear();
+  expect(
+    [...flyout().querySelectorAll("legend")].map(
+      (legend) => legend.textContent,
+    ),
+  ).toEqual(["Theme", "Backdrop", "Edit with"]);
 });
 
 test("the gear again closes the flyout, and the focus returns to the gear", async () => {
@@ -240,7 +257,7 @@ test("a click outside closes the flyout, and a click inside doesn't", async () =
 });
 
 test("opening puts the focus on the reader's theme, and Tab moves through the controls and stays inside", async () => {
-  await startPage({ ...DEFAULT_SETTINGS, theme: "dark", backdrop: "acrylic" });
+  await startPage({ ...ON_WINDOWS, theme: "dark", backdrop: "acrylic" });
   await openWithTheGear();
   const theme = choice("Theme", "Dark");
   expect(document.activeElement).toBe(theme);
@@ -264,19 +281,21 @@ test("opening puts the focus on the reader's theme, and Tab moves through the co
 test("each choice asks the app to set that value for every window, and the choice the settings hold asks nothing", async () => {
   await startPage();
   await openWithTheGear();
+  // Checked already.
+  choice("Accent color", "Amber").click();
   choice("Theme", "Light").click();
   choice("Backdrop", "Mica Alt").click();
-  // Checked already: Amber is the only accent color until window design ticket 09.
-  choice("Accent color", "Amber").click();
+  choice("Accent color", "Windows").click();
   await settle();
   expect(changes).toEqual([
     { setting: "theme", theme: "light" },
     { setting: "backdrop", backdrop: "micaAlt" },
+    { setting: "accentColor", accentColor: "windows" },
   ]);
 });
 
 test("the flyout shows the settings as they are, and follows a change from any window", async () => {
-  await startPage({ ...DEFAULT_SETTINGS, theme: "light", backdrop: "none" });
+  await startPage({ ...ON_WINDOWS, theme: "light", backdrop: "none" });
   await openWithTheGear();
   expect([
     checkedIn("Theme"),
@@ -284,11 +303,16 @@ test("the flyout shows the settings as they are, and follows a change from any w
     checkedIn("Accent color"),
   ]).toEqual(["Light", "None", "Amber"]);
   await tell("settings", {
-    ...DEFAULT_SETTINGS,
+    ...ON_WINDOWS,
     theme: "dark",
     backdrop: "mica",
+    accentColor: "windows",
   });
-  expect([checkedIn("Theme"), checkedIn("Backdrop")]).toEqual(["Dark", "Mica"]);
+  expect([
+    checkedIn("Theme"),
+    checkedIn("Backdrop"),
+    checkedIn("Accent color"),
+  ]).toEqual(["Dark", "Mica", "Windows"]);
 });
 
 test("where the OS shows no backdrop, Backdrop is disabled and says why", async () => {

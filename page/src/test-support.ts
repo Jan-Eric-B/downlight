@@ -11,11 +11,13 @@ import messageSamples from "../../app/tests/fixtures/messages.json?raw";
 import openNamedFolderSamples from "../../app/tests/fixtures/open_named_folder.json?raw";
 import pageUrlSamples from "../../app/tests/fixtures/page_url.json?raw";
 import renderDocumentSamples from "../../app/tests/fixtures/render_document.json?raw";
+import stopDocumentSamples from "../../app/tests/fixtures/stop_document.json?raw";
 import settingChangeSamplesJson from "../../app/tests/fixtures/setting_changes.json?raw";
 import timingReportSamples from "../../app/tests/fixtures/timing_reports.json?raw";
 import titleBarSamples from "../../app/tests/fixtures/title_bar.json?raw";
 import waitNoteSamples from "../../app/tests/fixtures/wait_note.json?raw";
 import type {
+  AccentScale,
   AnswerOf,
   ArgsOf,
   ButtonRect,
@@ -38,6 +40,20 @@ import type {
 } from "./app";
 import { SCROLLER_SELECTOR, whenDocumentShown } from "./view";
 import { ZOOM_VARIABLE } from "./zoom";
+
+/**
+ * A scale of Windows' accent color, a green unlike amber and unlike the contract samples' blue, so
+ * a test can tell which scale shows.
+ */
+export const WINDOWS_GREEN: AccentScale = {
+  "light-3": "#b7f2b7",
+  "light-2": "#86e386",
+  "light-1": "#4fcf4f",
+  base: "#2fa82f",
+  "dark-1": "#238a23",
+  "dark-2": "#176317",
+  "dark-3": "#0c3f0c",
+};
 
 /** A document shown at a heading, as the app hands it over for a link like `a.md#install`. */
 export interface AtHeading {
@@ -93,6 +109,7 @@ const MUST_BE_ANSWERED: Record<AnsweredWithMore, true> = {
   follow_link: true,
   switch_keep_on_top: true,
   editor_choices: true,
+  stop_document: true,
 };
 
 /** The commands the page asked the fake app for, in turn. */
@@ -197,6 +214,13 @@ export function keepOnTopSample(
   name: "switchedOn" | "switchedOff",
 ): AnswerOf<"switch_keep_on_top"> {
   return sampleIn(keepOnTopSamples, name) as AnswerOf<"switch_keep_on_top">;
+}
+
+/** A sample of the app's answers to `stop_document`, stopped or not. */
+export function stopDocumentSample(
+  name: "stopped" | "notStopped",
+): AnswerOf<"stop_document"> {
+  return sampleIn(stopDocumentSamples, name) as AnswerOf<"stop_document">;
 }
 
 /**

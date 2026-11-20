@@ -2,7 +2,8 @@
 //! that hears it, and held for a page that doesn't yet (ticket 16's review).
 
 use super::*;
-use crate::settings::{Backdrop, PageSettings, Theme, WindowLook};
+use crate::settings::change::SettingChange;
+use crate::settings::{AccentColor, AccentScale, Backdrop, PageSettings, Theme, WindowLook};
 use crate::zoom::Zoom;
 
 /// The `settings` message for the zoom `percent`.
@@ -174,4 +175,106 @@ fn changing_a_setting_no_page_shows_tells_no_page() {
     // Nor later, when it asks again.
     documents.page_asks(&window);
     assert_eq!(recorder.sent(), []);
+}
+
+/// Windows' accent colors change, and the scale reads as `scale` now (None for a read that fails).
+fn windows_accent_reads(documents: &Documents, recorder: &Recorder, scale: Option<AccentScale>) {
+    recorder.set_accent_scale(scale);
+    documents.change_windows_accent();
+}
+
+#[test]
+fn windows_accent_change_reaches_every_page_and_new_windows_open_with_it() {
+    let (documents, recorder) = documents();
+    let first = open_empty(&documents);
+    let second = open_empty(&documents);
+    documents.page_asks(&first);
+    documents.page_asks(&second);
+    let scale = Some(AccentScale::sample());
+    windows_accent_reads(&documents, &recorder, scale);
+    let told = Message::Settings(PageSettings {
+        windows_accent: scale,
+        ..PageSettings::default()
+    });
+    assert_eq!(
+        recorder.sent(),
+        [to(&first, told.clone()), to(&second, told)]
+    );
+    let new_window = open_empty(&documents);
+    assert_eq!(
+        recorder
+            .opened_as(&new_window)
+            .and_then(|opened| opened.settings.windows_accent),
+        scale
+    );
+}
+
+// Windows tells of a change of its theme too, and of one change more than once.
+#[test]
+fn windows_accent_told_unchanged_tells_no_page() {
+    let (documents, recorder) = documents();
+    let window = open_empty(&documents);
+    documents.page_asks(&window);
+    windows_accent_reads(&documents, &recorder, Some(AccentScale::sample()));
+    windows_accent_reads(&documents, &recorder, Some(AccentScale::sample()));
+    assert_eq!(recorder.sent().len(), 1);
+}
+
+// A read that fails says nothing of the accent color: None from a read never means the OS has
+// none, which the pages' settings flyouts decide from once (window design ticket 09's review).
+#[test]
+fn failed_windows_accent_read_keeps_the_scale_the_pages_have() {
+    let (documents, recorder) = documents();
+    let window = open_empty(&documents);
+    documents.page_asks(&window);
+    windows_accent_reads(&documents, &recorder, Some(AccentScale::sample()));
+    let before_failing = recorder.sent().len();
+    windows_accent_reads(&documents, &recorder, None);
+    assert_eq!(recorder.sent()[before_failing..], []);
+    let new_window = open_empty(&documents);
+    assert_eq!(
+        recorder
+            .opened_as(&new_window)
+            .and_then(|opened| opened.settings.windows_accent),
+        Some(AccentScale::sample())
+    );
+}
+
+#[test]
+fn choosing_windows_accent_color_sends_the_scale_windows_has_now() {
+    let (documents, recorder) = documents();
+    let window = open_empty(&documents);
+    documents.page_asks(&window);
+    windows_accent_reads(&documents, &recorder, Some(AccentScale::sample()));
+    let before_choosing = recorder.sent().len();
+    let _ = documents.change_settings(|settings| {
+        SettingChange::AccentColor {
+            accent_color: AccentColor::Windows,
+        }
+        .apply(settings);
+    });
+    assert_eq!(
+        recorder.sent()[before_choosing..],
+        [to(
+            &window,
+            Message::Settings(PageSettings {
+                accent_color: AccentColor::Windows,
+                windows_accent: Some(AccentScale::sample()),
+                ..PageSettings::default()
+            })
+        )]
+    );
+}
+
+#[test]
+fn windows_accent_change_before_a_page_asks_reaches_it_when_it_asks() {
+    let (documents, recorder) = documents();
+    let window = open_new(&documents, &manifest());
+    windows_accent_reads(&documents, &recorder, Some(AccentScale::sample()));
+    assert_eq!(recorder.sent(), []);
+    documents.page_asks(&window);
+    assert!(matches!(
+        recorder.sent().as_slice(),
+        [(_, Message::Settings(settings))] if settings.windows_accent == Some(AccentScale::sample())
+    ));
 }

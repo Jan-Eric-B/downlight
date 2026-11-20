@@ -29,15 +29,19 @@ The one match of Find that Enter and F3 step on from, scrolled into view and hig
 _Avoid_: Active match, selected match
 
 **Tick**:
-A reader's mark on a task list item. It belongs to the window and is never written to the file.
+A reader's mark on a task list item. It belongs to the showing and is never written to the file.
 _Avoid_: Check, complete, done
+
+**Sort**:
+The order a reader gives a table's rows by one of its columns, ascending or descending. It belongs to the showing, as ticks do, and is never written to the file; a reload keeps it while the table still fits it.
+_Avoid_: Order, arrange, filter
 
 **Reload**:
 Showing the document again after its file changed, at the same reading position.
 _Avoid_: Refresh
 
 **History**:
-The documents a window showed and the headings a link scrolled it to, in the order the reader visited them, which Back and Forward step through, each step returning to the reading position the view had there. It belongs to its window, isn't saved and is gone when the window closes. Going somewhere new after Back drops what Forward would have gone to.
+The documents a window showed and the headings a link scrolled it to, in the order the reader visited them, which Back and Forward step through, each step returning to the reading position the view had there. It belongs to its window, isn't saved and is gone when the window closes. Going somewhere new after Back drops what Forward would have gone to. A document joins it only once it has arrived: one the reader stopped or left while it was on its way never does, and going somewhere new then starts from the document in view.
 _Avoid_: Navigation, back stack
 
 **Notice**:
@@ -57,8 +61,12 @@ A document's file turned into the sanitized HTML the page shows. Only the core m
 _Avoid_: Output, HTML string
 
 **Wait note**:
-What a window shows while its document takes longer than half a second to arrive, as a large one does: "Showing **a.md** (100 MB) ...", the file's name and size, until the document replaces it. A reload shows none: the document in view stays until its new render replaces it. Every document is shown, however large.
+What a window shows while its document takes longer than half a second to arrive, as a large one does: "Showing **a.md** (100 MB) ... 12 s", the file's name and size and how long it has been on its way, then "Laying out **a.md** ..." once it has arrived and the window takes it in, until the document replaces it. A reload shows none: the document in view stays until its new render replaces it. Every document is shown, however large, unless the reader stops it.
 _Avoid_: Spinner, loading screen, progress
+
+**Stop**:
+Leaving a document that is still on its way, from its wait note or with Esc. The window returns to where it was before it was given the document: the document it showed, at its reading position and its place in History, reloaded if its file changed meanwhile, or the empty window. A stopped document was never shown, so it never joins History.
+_Avoid_: Cancel, abort
 
 **Highlight limit**:
 How much code a document has highlighted. A code block that is too large or has a line too long shows as plain code, as GitHub shows a large file, and so does every block after the document's code has used up the limit, in size or in time.
@@ -68,8 +76,12 @@ _Avoid_: Highlight budget
 The line of the file where a rendered block starts, shown in the margin. The rendered page has no line numbers of its own.
 _Avoid_: Row, source line
 
+**Counts**:
+The document's lines and words, shown in the title bar's file name tooltip under its path, and the selection's words and characters, shown in a bubble at the bottom right while text is selected. Lines are the file's, as line numbers are; words and characters are those of the text the reader sees.
+_Avoid_: Status bar, statistics, word count
+
 **Overview ruler**:
-The strip beside the scroll bar that marks where headings and Find matches are in the document.
+The strip beside the scroll bar that marks where the document's main headings, Find's matches and its current match are, each level with the scroll bar's thumb when its block is in view. The reader can switch it off in the settings.
 _Avoid_: Minimap, document map
 
 **First paint**:
@@ -121,5 +133,5 @@ A window staying above all others. It belongs to one window and is gone when the
 _Avoid_: Pin, always on top
 
 **Settings**:
-The reader's choices that every window shares (editor, zoom, theme, backdrop, accent color, Full width), kept in one file and changed from the settings flyout under the title bar's gear.
+The reader's choices that every window shares (editor, zoom, theme, backdrop, accent color, Full width, the Overview ruler), kept in one file and changed from the settings flyout under the title bar's gear.
 _Avoid_: Preferences, options, config

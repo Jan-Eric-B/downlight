@@ -18,7 +18,7 @@ use crate::documents::{
     Area, DocumentAt, Documents, NewWindow, Point, ShowError, Target, WindowError, WindowPlace,
     WindowSize, Windows,
 };
-use crate::settings::{PageSettings, Theme, WindowLook};
+use crate::settings::{AccentScale, PageSettings, Theme, WindowLook};
 use crate::timing::Timing;
 use crate::{command_line, platform, title_bar};
 
@@ -175,6 +175,10 @@ impl Windows for AppHandle {
         // which belongs to the WebView2 profile all windows share (window design ticket 13).
         window.set_theme(tauri_theme(look.theme))?;
         Ok(platform::set_backdrop(&window, look.backdrop)?)
+    }
+
+    fn accent_scale(&self) -> Option<AccentScale> {
+        platform::accent_scale()
     }
 }
 

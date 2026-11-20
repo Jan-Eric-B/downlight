@@ -216,8 +216,11 @@ mod tests {
         let readme = repo_file("core/tests/fixtures/readme.md");
         let (documents, _) = recorded();
         let window = documents.open_empty().unwrap();
+        // Each document joins the history once it has arrived (ticket 38).
         show_dropped(&documents, &window, std::slice::from_ref(&notes));
+        documents.page_asks(&window);
         show_dropped(&documents, &window, &[readme]);
+        documents.page_asks(&window);
         documents.step(&window, Step::Back).unwrap();
         assert_eq!(documents.document_path(&window), Some(notes));
     }

@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use super::{Area, Documents, NewWindow, WindowError, WindowPlace, Windows};
 use crate::message::{Message, Pages};
-use crate::settings::{Settings, SettingsStore, WindowLook};
+use crate::settings::{AccentScale, Settings, SettingsStore, WindowLook};
 
 /// A message as a [`Recorder`] keeps it: the window it went to, and the message.
 pub type Sent = (String, Message);
@@ -59,6 +59,9 @@ pub struct Recorder {
     places: Arc<Mutex<HashMap<String, WindowPlace>>>,
     /// The main monitor's work area, as the system would say; None until a test sets one.
     primary_work_area: Arc<Mutex<Option<Area>>>,
+    /// Windows' accent scale, as the system would read it; None until a test sets one, as on an
+    /// OS without one.
+    accent_scale: Arc<Mutex<Option<AccentScale>>>,
 }
 
 /// What another thread does while a window is being titled, for [`Recorder::before_next_title`].
@@ -89,6 +92,12 @@ impl Recorder {
     /// From now on, the main monitor's work area is `area`, as the system would say.
     pub fn set_primary_work_area(&self, area: Area) {
         *lock(&self.primary_work_area) = Some(area);
+    }
+
+    /// From now on, Windows' accent scale reads as `scale`, as the system would say; None as a
+    /// read that fails would.
+    pub fn set_accent_scale(&self, scale: Option<AccentScale>) {
+        *lock(&self.accent_scale) = scale;
     }
 
     /// What `window` opened as, or None if it didn't open.
@@ -181,6 +190,10 @@ impl Windows for Recorder {
 
     fn set_look(&self, window: &str, look: &WindowLook) -> Result<(), WindowError> {
         self.do_to(window, ToWindow::Looked(*look))
+    }
+
+    fn accent_scale(&self) -> Option<AccentScale> {
+        *lock(&self.accent_scale)
     }
 }
 

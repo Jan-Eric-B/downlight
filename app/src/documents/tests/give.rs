@@ -362,10 +362,10 @@ fn link_from_a_showing_the_window_has_left_has_no_document() {
 #[test]
 fn document_given_to_its_own_window_is_already_there() {
     // A link to the shown document scrolls instead of rendering it again. The link was clicked in
-    // the document, so the page has asked for it.
+    // the document, so the page has asked for it and placed it.
     let (documents, _) = documents();
     let label = open_new(&documents, &manifest());
-    let _ = documents.handover(&label, None);
+    let _ = documents.page_asks(&label);
     assert_eq!(
         give(
             &documents,
@@ -389,10 +389,10 @@ fn at<'a>(path: &'a Path, heading: &'a str) -> DocumentAt<'a> {
 
 #[test]
 fn request_from_the_window_that_shows_the_document_is_given_as_already_here() {
-    // A link in the document, and a Ctrl+click on it, so the page has asked for its document.
+    // A link in the document, and a Ctrl+click on it, so the page has asked for its document and placed it.
     let (documents, _) = documents();
     let label = open_new(&documents, &manifest());
-    let _ = documents.handover(&label, None);
+    let _ = documents.page_asks(&label);
     assert_eq!(
         give(
             &documents,
@@ -416,7 +416,7 @@ fn link_to_a_heading_in_the_document_its_own_window_shows_sends_that_window_noth
     // That window's page scrolls on the link's own result (`Followed::ScrollTo`).
     let (documents, pages) = documents();
     let label = open_new(&documents, &manifest());
-    let _ = documents.handover(&label, None);
+    let _ = documents.page_asks(&label);
     give(
         &documents,
         at(&manifest(), "install"),
@@ -429,7 +429,7 @@ fn link_to_a_heading_in_the_document_its_own_window_shows_sends_that_window_noth
 fn ctrl_click_on_a_heading_in_the_document_its_own_window_shows_sends_that_window_nothing() {
     let (documents, pages) = documents();
     let label = open_new(&documents, &manifest());
-    let _ = documents.handover(&label, None);
+    let _ = documents.page_asks(&label);
     assert_eq!(
         give(
             &documents,

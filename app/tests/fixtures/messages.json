@@ -57,11 +57,24 @@
   "settings": {
     "event": "settings",
     "payload": {
-      "accentColor": "amber",
+      "accentColor": "windows",
       "backdrop": "none",
       "fullWidth": true,
       "theme": "dark",
+      "windowsAccent": {
+        "base": "#0078d4",
+        "dark-1": "#0067c0",
+        "dark-2": "#003e92",
+        "dark-3": "#001a68",
+        "light-1": "#0091f8",
+        "light-2": "#4cc2ff",
+        "light-3": "#99ebff"
+      },
       "zoom": 125
     }
+  },
+  "stopDocument": {
+    "event": "stop-document",
+    "payload": 7
   }
 }

@@ -3,6 +3,7 @@
 import nextGlyph from "@fluentui/svg-icons/icons/arrow_down_16_regular.svg?raw";
 import previousGlyph from "@fluentui/svg-icons/icons/arrow_up_16_regular.svg?raw";
 import closeGlyph from "@fluentui/svg-icons/icons/dismiss_16_regular.svg?raw";
+import { iconButton } from "./icon-button";
 import {
   atOrAfterReadingPosition,
   openSectionsAround,
@@ -264,31 +265,6 @@ function firstAfterReadingPosition(
   return low < matches.length ? low : 0;
 }
 
-/**
- * One of the find bar's buttons, showing `glyph`. Its tooltip names the key that does the same, as
- * the title bar's buttons name their shortcuts. A press keeps the focus where it was, in the box
- * while the reader types, so Enter and typing go on working after a click.
- */
-function findBarButton(
-  label: string,
-  tooltip: string,
-  keys: string,
-  glyph: string,
-): HTMLButtonElement {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "find-button";
-  button.setAttribute("aria-label", label);
-  button.setAttribute("aria-keyshortcuts", keys);
-  button.title = tooltip;
-  // The SVG is one of the page's own bundled glyphs.
-  button.innerHTML = glyph;
-  button.addEventListener("mousedown", (event) => {
-    event.preventDefault();
-  });
-  return button;
-}
-
 /** The find bar, the query and its matches. */
 class Find {
   readonly bar: HTMLElement;
@@ -329,25 +305,20 @@ class Find {
     this.box.spellcheck = false;
     this.status = document.createElement("span");
     this.status.setAttribute("role", "status");
-    this.previous = findBarButton(
+    this.previous = iconButton(
       "Previous match",
       "Previous match (Shift+Enter)",
       "Shift+Enter",
       previousGlyph,
     );
-    this.next = findBarButton(
+    this.next = iconButton(
       "Next match",
       "Next match (Enter)",
       "Enter",
       nextGlyph,
     );
     // Named apart from the window's own Close for a screen reader.
-    this.closer = findBarButton(
-      "Close Find",
-      "Close (Esc)",
-      "Escape",
-      closeGlyph,
-    );
+    this.closer = iconButton("Close Find", "Close (Esc)", "Escape", closeGlyph);
     this.bar.append(
       this.box,
       this.status,
@@ -552,6 +523,14 @@ let find: Find | undefined;
 /** Find: shows the bar with the focus in its box, its text selected so typing replaces it. */
 export function openFind(): void {
   find?.open();
+}
+
+/**
+ * Whether the find bar is open: Esc closes it before Esc stops a document on its way
+ * (`startDocumentView`), whichever of their listeners runs first.
+ */
+export function isFindOpen(): boolean {
+  return find?.isOpen ?? false;
 }
 
 /**

@@ -26,6 +26,12 @@ pub enum Message {
     /// to scroll to. It names the showing, since the page may still be placing that document when
     /// it comes, or have left it: the page scrolls only once its view shows that showing.
     ScrollToHeading { showing: Showing, heading: String },
+    /// The reader asked for the document this window's page's view shows as this showing, while
+    /// the window's next document is on its way (ticket 38's review): by Ctrl+O, a drop, a link
+    /// or a step in another window. The page stops the load, as Stop does, so the view keeps the
+    /// document at its reading position. It names the showing, so a page that has placed the next
+    /// document meanwhile keeps it.
+    StopDocument(Showing),
     /// A short message to show the reader for a few seconds, such as why a dropped file didn't
     /// open or why the document's file isn't watched.
     Notice(Notice),
@@ -60,6 +66,7 @@ impl Message {
         match self {
             Self::AskForDocument => ("ask-for-document", None),
             Self::Gone(showing) => ("document-gone", Some(Payload::Showing(*showing))),
+            Self::StopDocument(showing) => ("stop-document", Some(Payload::Showing(*showing))),
             Self::ScrollToHeading { showing, heading } => (
                 "scroll-to-heading",
                 Some(Payload::HeadingIn {
@@ -97,6 +104,7 @@ pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
         Message::AskForDocument
         | Message::Gone(_)
         | Message::ScrollToHeading { .. }
+        | Message::StopDocument(_)
         | Message::Notice(_)
         | Message::MenuCommand(_)
         | Message::WindowState { .. }
@@ -122,6 +130,9 @@ pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
             showing: Showing::sample(),
             heading: "install".to_owned(),
         }),
+        // The showing of the `render_document` samples, so the page's tests can tell a stop for
+        // the showing in view.
+        "stopDocument": sample(Message::StopDocument(Showing::sample())),
         "notice": sample(Message::Notice("Can't watch the document's file".into())),
         "noticeNamingFile": sample(Message::Notice(naming_file)),
         "menuCommand": sample(Message::MenuCommand("open".to_owned())),
