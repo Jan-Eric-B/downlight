@@ -5,8 +5,16 @@ A small, fast viewer for Markdown files, meant to be the default app that opens 
 ## Language
 
 **Document**:
-The file a window shows, rendered as Markdown: a Markdown file, or any other text file, whatever its extension, that the command line, Open or a drop names. A binary file is never one.
+The file a window shows, rendered as Markdown: a Markdown file, or any other text file, whatever its extension, that the command line, Open, a drop or Paste names. A binary file is never one.
 _Avoid_: Page, note
+
+**Paste**:
+Showing the text on the clipboard as a document: Downlight writes it to a file of its own, which the window then shows like any other. The file is temporary: it is gone once no open window can return to it, so a reader who wants to keep it saves a copy.
+_Avoid_: Import, New document, Scratch
+
+**Copy as Markdown**:
+Copying the document's Markdown instead of the text the reader sees: the file's lines of the blocks the selection touches, of a code block or a table only the part selected, or the whole file when nothing is selected. It copies the file as the shown render was made from it, so a **Sort** or a **Tick** never changes what it copies.
+_Avoid_: Copy source, Copy raw
 
 **Binary file**:
 A file that isn't text: a zero byte comes in its first 8000 bytes, as Git tells it, and it starts with no byte order mark. Downlight refuses to show one, however it arrives, and says that it opens text files.
@@ -84,6 +92,10 @@ _Avoid_: Status bar, statistics, word count
 The strip beside the scroll bar that marks where the document's main headings, Find's matches and its current match are, each level with the scroll bar's thumb when its block is in view. The reader can switch it off in the settings.
 _Avoid_: Minimap, document map
 
+**Outline**:
+The list of the shown document's headings down to the fourth level, nested by level, which the reader opens from the title bar, filters by typing and chooses one from to go there, as a heading link goes, so Back returns. It starts on the heading at the reading position.
+_Avoid_: Table of contents, TOC, Sidebar, Navigator
+
 **First paint**:
 The moment the first screen of rendered document text is visible after a file is opened from the file manager. An empty or half-built window doesn't count.
 _Avoid_: Startup time, load time
@@ -91,6 +103,10 @@ _Avoid_: Startup time, load time
 **Local image**:
 An image in a document whose file is on this computer. The page loads it through Downlight's own image scheme, never from the file system directly. An image on a network share is never a local image and doesn't load, nor is one whose path goes through a symbolic link to a network share.
 _Avoid_: Asset, file image
+
+**Lightbox**:
+An image of the document shown on its own over it, as large as the window allows, which the reader can zoom larger or smaller and step from to the document's other images. Its full size is one image pixel per screen pixel, whatever the zoom and Windows' scaling; an SVG has none. The document stays where it was behind it.
+_Avoid_: Image viewer, Overlay, Modal, Preview, Zoom
 
 **Network share**:
 A folder that another computer, its host, shares, named by a path such as `\\host\share`. Looking at anything on one connects to the host, and Windows may sign in there as the reader, so Downlight never loads an image from one, and following a link that leads to one, by its path or through a symbolic link, first asks the reader, naming the host, unless the shown document is on a share of that same host. A mapped drive (`Z:`) is not a network share, though its files are on another computer: the reader connected it on purpose, so loading from it reaches no new host, and a document on it keeps its local images, while the same document opened by its `\\host\share` path loses them.

@@ -271,9 +271,9 @@ Since 2026-11-20 every item below has a ticket of its own, linked from it, and t
 **v1.x**, the next releases:
 
 - full width, Keep on top, full screen (full width and Keep on top moved into v1 with [Window design](../window-design/spec.md); edit at the reading line moved into v1 with ticket 35); full screen: [ticket](../full-screen/issues/01-full-screen.md);
-- pasting or dropping Markdown text: [ticket](../paste-markdown/issues/01-paste-or-drop-markdown-text.md);
+- pasting or dropping Markdown text: [spec](../paste-markdown/spec.md), with dropping text [split off](../paste-markdown/issues/03-drop-text-dragged-from-another-program.md);
 - Copy as Markdown, and as rich text: [ticket](../copy-as-markdown/issues/01-copy-as-markdown.md);
-- Outline, with heading jump keys: [ticket](../outline/issues/01-outline.md);
+- Outline, a flyout of the headings, with heading jump keys (a docked table of contents sidebar was dropped in its grilling, 2026-11-20): [spec](../outline/spec.md);
 - printing and PDF through the webview's print dialog: [ticket](../print/issues/01-print-and-pdf.md);
 - the last 5 documents listed in the empty window, with no automatic reopening, and the reading position kept across launches: [ticket](../recent-documents/issues/01-the-last-5-documents.md).
 
@@ -281,7 +281,6 @@ Since 2026-11-20 every item below has a ticket of its own, linked from it, and t
 
 - Mermaid and math, loaded only for documents that contain them: [ticket](../mermaid-and-math/issues/01-mermaid-and-math.md);
 - Find options (case, whole word, regex): [ticket](../find-options/issues/01-find-options.md);
-- a table of contents sidebar, after Outline: part of the [Outline ticket](../outline/issues/01-outline.md), as its docked placement;
 - the Explorer preview pane: [ticket](../explorer-preview/issues/01-explorer-preview-pane.md);
 - line numbers in the margin, switched with a shortcut, off by default: [ticket](../line-numbers/issues/01-line-numbers-in-the-margin.md);
 - the overview ruler, its own feature, grilled 2026-11-20 ([spec](../overview-ruler/spec.md)); later layers of it: [blocks shaded by kind](../overview-ruler/issues/06-blocks-shaded-by-kind.md), as an option, and [marks for task items](../overview-ruler/issues/07-task-item-marks.md);
@@ -297,7 +296,7 @@ Since 2026-11-20 every item below has a ticket of its own, linked from it, and t
 **Added 2026-11-20 from the [mdhero comparison](../mdhero-comparison/features.md)**, on no list before:
 
 - [right-to-left text](../right-to-left/issues/01-right-to-left-text.md), as GitHub shows it;
-- an [image lightbox](../image-lightbox/issues/01-image-lightbox.md);
+- an [image lightbox](../image-lightbox/spec.md);
 - [About Downlight](../about/issues/01-about.md), with the GPL's notices in the app;
 - [export to HTML](../export-html/issues/01-export-to-html.md);
 - a [Marp slideshow](../slideshow/issues/01-marp-slideshow.md).

@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Outline: where it goes (mockups)</title>
+    <!-- Throwaway, deliberately rough mockups for the Outline's grilling. Not app code. -->
+    <style>
+      body {
+        margin: 0;
+        padding: 24px;
+        background: #e8e8e8;
+        font:
+          13px "Segoe UI",
+          sans-serif;
+        color: #1f2328;
+      }
+      h1.page {
+        font-size: 18px;
+        margin: 0 0 16px;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, 760px);
+        gap: 28px;
+      }
+      .caption {
+        font-weight: 600;
+        margin: 0 0 4px;
+      }
+      .note {
+        margin: 0 0 8px;
+        color: #59636e;
+        max-width: 760px;
+      }
+      .win {
+        position: relative;
+        width: 760px;
+        height: 460px;
+        background: #f3f3f3;
+        border: 1px solid #bbb;
+        border-radius: 8px;
+        overflow: hidden;
+        box-shadow: 0 4px 16px rgb(0 0 0 / 12%);
+      }
+      .win.narrow {
+        width: 520px;
+      }
+      .bar {
+        height: 32px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 0 8px;
+        font-size: 12px;
+      }
+      .logo {
+        width: 14px;
+        height: 14px;
+        background: #fba613;
+        border-radius: 3px;
+      }
+      .name {
+        flex: 1;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .btn {
+        width: 26px;
+        height: 24px;
+        display: grid;
+        place-items: center;
+        border-radius: 4px;
+        color: #444;
+      }
+      .btn.on {
+        background: #ffdbaf;
+        outline: 1px solid #fba613;
+      }
+      .sep {
+        width: 1px;
+        height: 16px;
+        background: #ccc;
+      }
+      .winbtns {
+        letter-spacing: 14px;
+        color: #444;
+        padding-left: 6px;
+      }
+      .body {
+        position: absolute;
+        top: 32px;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        display: flex;
+        justify-content: center;
+        overflow: hidden;
+      }
+      .doc {
+        width: 440px;
+        padding: 8px 28px;
+        background: #fff;
+        border-radius: 6px 6px 0 0;
+        overflow: hidden;
+      }
+      .doc h2 {
+        font-size: 20px;
+        margin: 10px 0 6px;
+        padding-bottom: 4px;
+        border-bottom: 1px solid #d1d9e0;
+      }
+      .doc h3 {
+        font-size: 15px;
+        margin: 12px 0 4px;
+      }
+      .doc p {
+        margin: 0 0 8px;
+        line-height: 1.5;
+      }
+      .line {
+        height: 8px;
+        background: #d8dce0;
+        border-radius: 4px;
+        margin: 7px 0;
+      }
+      .panel {
+        background: #fbfbfb;
+        border: 1px solid #ccc;
+        border-radius: 8px;
+        box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+        padding: 8px;
+        width: 230px;
+      }
+      .panel.docked {
+        box-shadow: none;
+        border-radius: 6px;
+        background: transparent;
+        border: none;
+        border-right: 1px solid #ddd;
+        border-radius: 0;
+        padding: 10px 8px;
+      }
+      .panel .head {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: 6px;
+      }
+      .filter {
+        flex: 1;
+        border: 1px solid #bbb;
+        border-bottom: 2px solid #fba613;
+        border-radius: 4px;
+        padding: 3px 6px;
+        color: #888;
+        background: #fff;
+      }
+      .pin {
+        width: 22px;
+        height: 22px;
+        display: grid;
+        place-items: center;
+        border-radius: 4px;
+        font-size: 12px;
+      }
+      .pin.on {
+        background: #ffdbaf;
+      }
+      .row {
+        padding: 3px 6px;
+        border-radius: 4px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .row.l1 {
+        font-weight: 600;
+      }
+      .row.l2 {
+        padding-left: 16px;
+      }
+      .row.l3 {
+        padding-left: 28px;
+        color: #59636e;
+      }
+      .row.l4 {
+        padding-left: 40px;
+        color: #59636e;
+      }
+      .row.here {
+        background: #ffefdc;
+        box-shadow: inset 3px 0 #fba613;
+      }
+      .callout {
+        position: absolute;
+        background: #fff7c2;
+        border: 1px solid #e0c95b;
+        border-radius: 4px;
+        padding: 3px 6px;
+        font-size: 11px;
+        max-width: 200px;
+      }
+      .sticky {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        background: rgb(255 255 255 / 95%);
+        border-bottom: 1px solid #d1d9e0;
+        padding: 6px 28px;
+        font-size: 12px;
+        color: #59636e;
+        box-shadow: 0 2px 6px rgb(0 0 0 / 8%);
+      }
+      .sticky b {
+        color: #1f2328;
+      }
+      .dim {
+        position: absolute;
+        inset: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <h1 class="page">Outline: where it goes (rough mockups, light theme)</h1>
+    <div class="grid" id="grid"></div>
+
+    <template id="doc">
+      <div class="doc">
+        <h2>Installing</h2>
+        <p>
+          Run the installer and pick a folder. Downlight installs for the
+          current user only.
+        </p>
+        <div class="line"></div>
+        <div class="line" style="width: 80%"></div>
+        <h3>From the command line</h3>
+        <div class="line"></div>
+        <div class="line" style="width: 60%"></div>
+        <h2>Configuration</h2>
+        <p>Settings live in one file and every window shares them.</p>
+        <div class="line"></div>
+        <div class="line" style="width: 90%"></div>
+        <h3>Themes</h3>
+        <div class="line"></div>
+        <div class="line" style="width: 70%"></div>
+        <div class="line"></div>
+        <h3>Backdrops</h3>
+        <div class="line"></div>
+        <div class="line" style="width: 50%"></div>
+      </div>
+    </template>
+
+    <template id="list">
+      <div class="row l1">Downlight guide</div>
+      <div class="row l2">Installing</div>
+      <div class="row l3">From the command line</div>
+      <div class="row l3">From the installer</div>
+      <div class="row l2 here">Configuration</div>
+      <div class="row l3">Themes</div>
+      <div class="row l4">High contrast</div>
+      <div class="row l3">Backdrops</div>
+      <div class="row l2">Keyboard shortcuts</div>
+      <div class="row l2">Troubleshooting</div>
+      <div class="row l3">The window stays empty</div>
+      <div class="row l3">Images don't load</div>
+    </template>
+
+    <script>
+      const doc = document.getElementById("doc").innerHTML;
+      const list = document.getElementById("list").innerHTML;
+
+      function bar({ name = "guide.md", outlineOn = false } = {}) {
+        return `<div class="bar">
+          <span class="logo"></span><span class="name">${name}</span>
+          <span class="btn ${outlineOn ? "on" : ""}" title="Outline">&#9776;</span>
+          <span class="sep"></span>
+          <span class="btn">&#128194;</span><span class="btn">&#9998;</span><span class="sep"></span>
+          <span class="btn">&#8596;</span><span class="btn">&#128204;</span><span class="btn">&#9881;</span>
+          <span class="sep"></span><span class="winbtns">&#8211; &#9633; &#10005;</span>
+        </div>`;
+      }
+
+      function panel({ docked = false, pin = null } = {}) {
+        const pinHtml =
+          pin === null
+            ? ""
+            : `<span class="pin ${pin ? "on" : ""}" title="Pin">&#128204;</span>`;
+        return `<div class="panel ${docked ? "docked" : ""}">
+          <div class="head"><span class="filter">Filter headings</span>${pinHtml}</div>
+          ${list}
+        </div>`;
+      }
+
+      const mockups = [
+        {
+          caption: "A. Flyout (option a, and option c unpinned)",
+          note: "Opens under the title bar's Outline button, or with Ctrl+Shift+O. It lies over the document, so nothing reflows. It starts on the heading at the reading position. Typing filters, and Enter or a click goes there and closes it. The pin is there only in option c.",
+          html: `${bar({ outlineOn: true })}
+            <div class="body">${doc}</div>
+            <div style="position:absolute; top:34px; right:150px">${panel({ pin: false })}</div>
+            <div class="callout" style="top:300px; left:20px">Closes on a choice, Esc or a click outside. You can't watch the mark move while you scroll.</div>`,
+        },
+        {
+          caption:
+            "B. Docked in the left margin (option b, and option c pinned)",
+          note: "The pane sits in the empty margin left of the reading width, so the document doesn't move or rewrap. The mark follows the heading in view as you scroll. In option c the pin is on, and it's kept in the Settings.",
+          html: `${bar({ outlineOn: true })}
+            <div class="body" style="justify-content:flex-start">
+              <div style="width:250px">${panel({ docked: true, pin: true })}</div>
+              <div style="flex:1; display:flex; justify-content:center">${doc}</div>
+            </div>
+            <div class="callout" style="bottom:12px; right:12px">Needs about 980 px of reading width plus 250 px of pane: a wide window.</div>`,
+        },
+        {
+          caption:
+            "C. Option c, pinned, in a narrow window (or with Full width)",
+          note: "No room for the pane next to the reading width, so it falls back to the flyout instead of narrowing the text. The pin stays on and the pane comes back when the window is wide again.",
+          narrow: true,
+          html: `${bar({ outlineOn: true, name: "guide.md" })}
+            <div class="body">${doc}</div>
+            <div style="position:absolute; top:34px; right:120px">${panel({ pin: true })}</div>`,
+        },
+        {
+          caption:
+            "D. Sticky heading at the top of the view (option d, not recommended)",
+          note: "The heading of the section you're in (and its parents) stays at the top of the view, like VS Code's sticky scroll. A click opens the flyout. It's always visible, but it covers the first line of text and it's a second bar under the title bar.",
+          html: `${bar()}
+            <div class="body"><div style="position:relative">${doc}
+              <div class="sticky">Downlight guide &rsaquo; <b>Configuration</b> &rsaquo; Themes</div></div></div>`,
+        },
+      ];
+
+      const grid = document.getElementById("grid");
+      for (const m of mockups) {
+        const cell = document.createElement("div");
+        cell.innerHTML = `<p class="caption">${m.caption}</p><p class="note">${m.note}</p>
+          <div class="win ${m.narrow ? "narrow" : ""}">${m.html}</div>`;
+        grid.append(cell);
+      }
+    </script>
+  </body>
+</html>

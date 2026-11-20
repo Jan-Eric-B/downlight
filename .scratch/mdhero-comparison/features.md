@@ -213,7 +213,7 @@ mdhero: yes / partly / planned / no. Downlight: built / planned / v1.x / later /
 | Tabs | yes, top or side, drag, context menu | later | |
 | A window per document | partly (a launch opens a new process and window unless opt-in) | built, one process (08) | |
 | An open document comes to the front | yes (its tab) | built (08) | |
-| Outline / table of contents sidebar | yes | v1.x (Outline), later (sidebar) | |
+| Outline / table of contents sidebar | yes | v1.x (Outline, a flyout; the sidebar was dropped) | |
 | Link to another Markdown file | yes, new tab | built, same window; Ctrl+click new window (11) | |
 | Link to a heading in another document | no (fragment dropped) | built (11) | |
 | Link to another local file | opens it in its default app (PDF, txt, images, mp4) | built, reveals it in Explorer (11); opening it is later, opt-in | |

@@ -18,3 +18,5 @@ Spec: none yet. Grill it first (`/grill-with-docs`). From the v1 spec's Out of S
 ## Comments
 
 **2026-11-20.** Stub from the v1 spec's Out of Scope list (v1.x). mdhero's home screen lists recent files and remembers the reading position per file (`.scratch/mdhero-comparison/features.md`). Not yet grilled.
+
+**2026-11-20.** Pasted documents are temporary files Downlight deletes ([ADR 0006](../../../docs/adr/0006-a-paste-is-a-file-downlight-writes.md)), so the list skips them.

@@ -10,19 +10,37 @@ full-screen/02 | Esc leaves full screen, last | built, hand checks left | only t
 full-screen/03 | The title bar hides in full screen | built, hand checks left | only the hand check is missing; blocked by full-screen/01
 full-screen/04 | The title bar slides in at the top edge | built, hand checks left | only the hand check is missing; blocked by full-screen/03
 full-screen/05 | The bar's buttons in full screen | built, hand checks left | only the hand check is missing; blocked by full-screen/01 (tests) and full-screen/04 (hand check); slideshow/01 reuses full screen
-paste-markdown/01 | Paste or drop Markdown text | triage | not blocked; needs a new term (a Document is a file); shares the "document without a file" question with converter/01; touches the spec's Out item "stdin / --text"
-image-lightbox/01 | Image lightbox | triage | not blocked; Esc is already used by Find and Stop (also wanted by full-screen/02, which goes after it); images inside links (badges)
-copy-as-markdown/01 | Copy as Markdown, and as rich text | triage | not blocked; must decide file order vs shown order with tables/01, and ticks
+paste-markdown/01 | Ctrl+V and the menu show the clipboard's text | ready | not blocked; a paste is a file Downlight writes (ADR 0006), which converter/01 may reuse; pasted files pile up until paste-markdown/02
+paste-markdown/02 | A pasted file is deleted once no window can return to it | ready | blocked by paste-markdown/01
+paste-markdown/03 | Drop text dragged from another program | triage | not blocked; Tauri's native drop gives only paths, so it may mean rebuilding file drops in the page
+image-lightbox/01 | One place owns Esc's order | ready | not blocked; prefactor, no visible change; touches the Esc listeners of the settings flyout, Find, Stop and full-screen/02
+image-lightbox/02 | A click on an image shows it in the lightbox | ready | blocked by image-lightbox/01; Esc after the flyout, before Find, Stop and full screen
+image-lightbox/03 | Step through the document's images | ready | blocked by image-lightbox/02
+image-lightbox/04 | Zoom and pan the image | ready | blocked by image-lightbox/03; takes Ctrl+wheel and the zoom keys from Downlight's zoom while open
+image-lightbox/05 | A Reload keeps the lightbox on its image | ready | blocked by image-lightbox/03
+image-lightbox/06 | The image's name reveals or opens its file | ready | blocked by image-lightbox/02; a new core link action for an image's source
+image-lightbox/07 | A link to its own image opens the lightbox | ready | blocked by image-lightbox/02; rendering change (fixtures), avoid running it beside right-to-left/01 or another rendering change
+image-lightbox/08 | Alt+click, "Show image" and the keyboard open any image | ready | blocked by image-lightbox/02; adds a context-dependent entry to the right-click menu
+image-lightbox/09 | "Play again" for a local animated image | ready | blocked by image-lightbox/03; core reads GIF, WebP and APNG loop counts (maybe crates: cargo-deny, notices)
+copy-as-markdown/01 | Ctrl+Shift+C and the menu copy the Markdown of whole lines | ready | not blocked; adds Win32 clipboard writing and "shortcuts leave editable fields alone", which paste-markdown/01 also needs (whichever is built first)
+copy-as-markdown/02 | Copy as Markdown of part of a code block | ready | blocked by copy-as-markdown/01
+copy-as-markdown/03 | Copy as Markdown of part of a table | ready | blocked by copy-as-markdown/01; copies rows in the file's order, so a sorted table (tables/01) needs no change
+copy-as-markdown/04 | Ctrl+C puts clean HTML beside its plain text | ready | not blocked; page only; the margin's line numbers (line-numbers/01) and a sort (tables/01) must keep working with it
 v1/38 | A large document's load can be left (Wait note, Stop) | built, hand checks left | only your hand check is missing; all boxes still unchecked; blocks v1/39
 wd/10 | Counts (lines and words in the file name tooltip, selection bubble bottom right) | ready | not blocked; its bubble owns the bottom right corner
 about/01 | About Downlight (version, GPL notices, third-party notices) | triage | not blocked; closes a GPL-3.0 gap (legal notices in the UI); may add a section to the settings flyout, as ruler/02 adds a "View" group
-ruler/01 | Overview ruler: heading marks beside the scroll bar | ready | not blocked; builds the list of headings that outline/01 reuses
+ruler/01 | Overview ruler: heading marks beside the scroll bar | ready | not blocked; builds the list of headings (h1 to h4) that outline/01 to 06 reuse
 ruler/02 | Overview ruler: the switch in the settings (flyout "View" group) | ready | blocked by ruler/01; creates the flyout's "View" group that reader-settings and remote-images may use
 ruler/03 | Overview ruler: Find's marks, and clicking them | ready | blocked by ruler/01; extends Find's interface (find-options and tables/01 must keep it working)
 ruler/04 | Overview ruler: clicking and hovering heading marks | ready | blocked by ruler/01
 ruler/05 | Overview ruler: large documents, measured | ready | blocked by ruler/03; may switch the ruler to a canvas; does not wait for v1/39
-tables/01 | Sort a document's tables | triage, grilled | needs /to-spec and /to-tickets only; Find, the ruler, line numbers and copy follow the shown order
-outline/01 | Outline: headings to jump to (flyout, docked in the left margin), heading jump keys | triage | best after ruler/01 (shares the list of headings); docked placement takes the left margin, which collides with line-numbers/01; jump keys can ship first
+tables/01 | Sort a document's tables | triage, grilled | needs /to-spec and /to-tickets only; Find, the ruler, line numbers and Ctrl+C follow the shown order; Copy as Markdown follows the file (copy-as-markdown spec)
+outline/01 | Alt+Down and Alt+Up step through the headings | ready | blocked by ruler/01 (the list of headings); adds the view's scroll to a heading without a History step; adds the headings fixture unless ruler/01 did
+outline/02 | The Outline lists the headings and goes to one | ready | blocked by ruler/01; title bar button (first, own group), Ctrl+Shift+O, menu entry after Find; closes and is closed by the settings flyout
+outline/03 | Typing filters the Outline | ready | blocked by outline/02
+outline/04 | The Outline across reloads, other documents and the empty window | ready | blocked by outline/03
+outline/05 | The Outline in full screen, and its place in Esc's order | ready | blocked by outline/02; joins image-lightbox/01's one Esc list if that is done, else defers as the settings flyout does (whichever lands second adapts)
+outline/06 | Outline: large documents, measured | ready | blocked by outline/01, 03 and 04; does not wait for v1/39
 print/01 | Printing and PDF | triage | not blocked; shares "laid out for others" styles with export-html/01; check ADR 0003's skipped blocks print at full size
 export-html/01 | Export to HTML | triage | not blocked; first feature that writes a file ("reading only"); share styles with print/01
 mermaid-and-math/01 | Mermaid diagrams and math | triage | not blocked; rendering change (fixtures, see right-to-left/01); needs a cap like the Highlight limit; print and export should show diagrams
@@ -36,9 +54,9 @@ other-formats/01 | CSV and TSV as a table, SVG as an image | triage | not blocke
 other-formats/02 | JSON and XML as collapsible trees | triage | blocked by other-formats/01 or /03 (the format choice, whichever builds it)
 other-formats/04 | Jupyter notebooks | triage | blocked by other-formats/02 (its JSON parsing with lines); outputs are untrusted HTML and images
 explorer-preview/01 | The Explorer preview pane | triage | not blocked; separate COM component, likely its own ADR
-converter/01 | Word, PDF and PowerPoint converter | triage | not blocked; separate optional component; shares the "document without a file" question with paste-markdown/01
+converter/01 | Word, PDF and PowerPoint converter | triage | not blocked; separate optional component; the "document without a file" question has ADR 0006's answer from paste-markdown (a file Downlight writes)
 writing-ticks/01 | Writing ticks to the file, opt-in | triage | not blocked; contradicts the glossary ("reading only", a Tick is never written); its save triggers Downlight's own reload
-line-numbers/01 | Line numbers in the margin | triage | not blocked; left margin collides with outline/01's docked placement; tables/01 puts row numbers out of sequence
+line-numbers/01 | Line numbers in the margin | triage | not blocked; tables/01 puts row numbers out of sequence
 recent-documents/01 | The last 5 documents in the empty window, reading position across launches | triage | not blocked; network share rules; a stored list beside the settings
 slideshow/01 | Marp slideshow | triage | not blocked; F5 is Reload already; relates to full-screen/01; maybe a JavaScript dependency (Marp Core) against ADR 0002's render in Rust
 local-files/01 | Open non-Markdown local files with their default app, opt-in | triage | not blocked; a new link action; safety of untrusted link targets

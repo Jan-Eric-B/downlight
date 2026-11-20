@@ -14,7 +14,7 @@ Spec: none yet. Grill it first (`/grill-with-docs`). Came from the research for 
   - Highlighting with the grammars and GitHub's classes the core already uses (ADR 0004), the language found by extension or file name. The **Highlight limit** applies: a large log shows as plain text.
   - Large files: one `<pre>` is one block, and ADR 0003 lays out only top-level blocks near the view, so the text comes in blocks of some hundreds of lines, each carrying its first line, for the reading position, Reload's anchoring and Edit.
   - Patches (`.diff`, `.patch`): added and removed lines colored as GitHub colors them, or only the diff grammar's highlighting?
-  - Configuration files (`.ini`, `.cfg`, `.conf`, `.toml`, `.yaml`, `.env`, `.properties`, `.reg`): their sections or top-level keys as headings for the Outline (outline/01) and the **Overview ruler**?
+  - Configuration files (`.ini`, `.cfg`, `.conf`, `.toml`, `.yaml`, `.env`, `.properties`, `.reg`): their sections or top-level keys as headings for the Outline (outline spec) and the **Overview ruler**?
   - Editing stays out, for configuration files too: Downlight is reading only, and Edit opens the file in an **Editor** at the reading position's line. Editing in the window would bring saving, undo, keeping the encoding and line endings, and a clash with watching and **Reload** (research.md, section 4).
   - Long lines: wrapped or scrolled sideways (reader-settings/01 has wrapping long code lines)?
   - Which features apply: Find, **Reload** (a log that grows), line numbers in the margin (line-numbers/01, which fits code better than Markdown), the **Counts**.
