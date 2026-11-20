@@ -283,7 +283,7 @@ If the cold start takes more than 1.5 s, the stack is reopened before any featur
 - a table of contents sidebar, after Outline;
 - the Explorer preview pane;
 - line numbers in the margin, switched with a shortcut, off by default;
-- the overview ruler, after Outline;
+- the overview ruler, its own feature, grilled 2026-11-20 (`.scratch/overview-ruler/`); later layers of it: blocks shaded by kind, as an option, and marks for task items;
 - sorting a document's tables, its own feature ([Table sorting](../table-sorting/issues/01-sort-and-filter-tables.md));
 - other formats: CSV/TSV as a table and SVG as an image first, then JSON and XML as collapsible trees. Downlight shows up in "Open with" for them but never asks to be their default app;
 - a Word, PDF and PowerPoint converter, as a separate optional component;

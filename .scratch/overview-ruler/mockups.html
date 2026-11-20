@@ -1,0 +1,1828 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Overview ruler: four options (mockups)</title>
+    <!-- Throwaway design mockups for .scratch/overview-ruler/research.md. Not app code. Colors,
+     fonts and sizes are copied from page/src/accent.css, document.css, title-bar.css and
+     github-markdown-css. The script only builds the four windows from one sample document and
+     places each strip's marks from the sample's real layout, plus the theme and backdrop toggles. -->
+    <style>
+      :root {
+        color-scheme: light;
+        /* accent.css: amber's scale and roles */
+        --accent-light-3: #ffefdc;
+        --accent-light-2: #ffdbaf;
+        --accent-light-1: #fec173;
+        --accent-base: #fba613;
+        --accent-dark-1: #c27f05;
+        --accent-dark-2: #8f5d04;
+        --accent-dark-3: #623f06;
+        --accent-link: light-dark(var(--accent-dark-2), var(--accent-light-1));
+        --accent-selection: light-dark(
+          var(--accent-light-2),
+          var(--accent-dark-2)
+        );
+        --accent-find-match: light-dark(
+          var(--accent-light-3),
+          var(--accent-dark-3)
+        );
+        --accent-find-current: var(--accent-base);
+        --accent-emphasis: light-dark(
+          var(--accent-dark-1),
+          var(--accent-light-1)
+        );
+
+        /* github-markdown-css, light then dark */
+        --fgColor-default: light-dark(#1f2328, #f0f6fc);
+        --fgColor-muted: light-dark(#59636e, #9198a1);
+        --bgColor-default: light-dark(#ffffff, #0d1117);
+        --bgColor-muted: light-dark(#f6f8fa, #151b23);
+        --bgColor-neutral-muted: light-dark(#818b981f, #656c7633);
+        --borderColor-default: light-dark(#d1d9e0, #3d444d);
+        --borderColor-muted: light-dark(#d1d9e0b3, #3d444db3);
+        --pl-c: light-dark(#59636e, #9198a1);
+        --pl-c1: light-dark(#0550ae, #79c0ff);
+        --pl-en: light-dark(#6639ba, #d2a8ff);
+        --pl-k: light-dark(#cf222e, #ff7b72);
+        --pl-s: light-dark(#0a3069, #a5d6ff);
+
+        /* title-bar.css */
+        --subtle-fill-hover: light-dark(
+          rgb(0 0 0 / 3.73%),
+          rgb(255 255 255 / 6.05%)
+        );
+
+        /* The window's backdrop: Mica by default (DEFAULT_SETTINGS.backdrop), approximated by
+     Windows 11's flat Mica base color; None is the page's solid background. */
+        --window-bg: light-dark(#f3f3f3, #202020);
+
+        /* Chromium's Fluent scroll bar, approximated */
+        --sb-track: light-dark(rgb(0 0 0 / 2%), rgb(255 255 255 / 3%));
+        --sb-thumb: light-dark(#868686, #9f9f9f);
+
+        /* The strips. The ruler can't use --accent-find-match as it is: Light 3 (#ffefdc) all but
+     vanishes on a light ruler, so matches take Light 1 in light and Dark 1 in dark here. */
+        --ruler-bg: light-dark(rgb(0 0 0 / 2.5%), rgb(255 255 255 / 3%));
+        --ruler-edge: light-dark(rgb(0 0 0 / 8%), rgb(255 255 255 / 8.4%));
+        --ruler-h1: var(--fgColor-default);
+        --ruler-h: var(--fgColor-muted);
+        --ruler-match: light-dark(var(--accent-light-1), var(--accent-dark-1));
+        --ruler-current: var(--accent-find-current);
+        --ruler-current-edge: light-dark(
+          var(--accent-dark-2),
+          var(--accent-light-2)
+        );
+        --ruler-task-open: var(--fgColor-muted);
+        --ruler-task-ticked: var(--accent-emphasis);
+        --ruler-slider: light-dark(rgb(0 0 0 / 9%), rgb(255 255 255 / 11%));
+        --ruler-slider-edge: light-dark(
+          rgb(0 0 0 / 22%),
+          rgb(255 255 255 / 25%)
+        );
+        /* B's block kinds */
+        --shade-text: light-dark(rgb(89 99 110 / 22%), rgb(145 152 161 / 24%));
+        --shade-list: light-dark(rgb(89 99 110 / 34%), rgb(145 152 161 / 36%));
+        --shade-code: light-dark(rgb(5 80 174 / 26%), rgb(121 192 255 / 28%));
+        --shade-table: light-dark(rgb(26 127 55 / 26%), rgb(63 185 80 / 28%));
+        --shade-image: light-dark(
+          rgb(102 57 186 / 26%),
+          rgb(210 168 255 / 30%)
+        );
+
+        /* The sheet around the windows, which is no part of Downlight */
+        --sheet-bg: light-dark(#e3e6ea, #121417);
+        --sheet-fg: light-dark(#1f2328, #e6e8eb);
+        --sheet-muted: light-dark(#4d5661, #a3abb5);
+        --redline: light-dark(#0969da, #58a6ff);
+      }
+      :root.dark {
+        color-scheme: dark;
+      }
+      :root.solid {
+        --window-bg: var(--bgColor-default);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        background: var(--sheet-bg);
+        color: var(--sheet-fg);
+      }
+      body {
+        margin: 0;
+        padding: 28px 32px 40px;
+        font:
+          14px/1.45 "Segoe UI Variable Text",
+          "Segoe UI",
+          system-ui,
+          sans-serif;
+      }
+
+      /* The sheet */
+      .sheet-head {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 32px;
+        max-width: 1840px;
+        margin-bottom: 18px;
+      }
+      .sheet-head h1 {
+        margin: 0 0 4px;
+        font-size: 22px;
+        font-weight: 600;
+      }
+      .sheet-head p {
+        margin: 0;
+        color: var(--sheet-muted);
+        max-width: 1100px;
+      }
+      .toggles {
+        display: flex;
+        gap: 16px;
+        flex: none;
+      }
+      .toggle {
+        display: inline-flex;
+        border: 1px solid var(--borderColor-default);
+        border-radius: 6px;
+        overflow: hidden;
+      }
+      .toggle span {
+        padding: 4px 10px;
+        color: var(--sheet-muted);
+        font-size: 12px;
+        align-self: center;
+      }
+      .toggle button {
+        padding: 4px 12px;
+        border: none;
+        border-left: 1px solid var(--borderColor-default);
+        background: transparent;
+        color: var(--sheet-fg);
+        font: inherit;
+        font-size: 13px;
+        cursor: pointer;
+      }
+      .toggle button[aria-pressed="true"] {
+        background: var(--accent-emphasis);
+        color: light-dark(#fff, #1f2328);
+      }
+
+      .legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 20px;
+        max-width: 1840px;
+        margin: 0 0 22px;
+        color: var(--sheet-muted);
+        font-size: 12.5px;
+      }
+      .legend b {
+        color: var(--sheet-fg);
+        font-weight: 600;
+      }
+      .legend .key {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .sw {
+        display: inline-block;
+        position: relative;
+        width: 14px;
+        height: 10px;
+        background: var(--ruler-bg);
+        border: 1px solid var(--ruler-edge);
+      }
+      .sw i {
+        position: absolute;
+        display: block;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, 900px);
+        gap: 36px 40px;
+      }
+      .cell {
+        width: 900px;
+      }
+      .caption {
+        margin: 0 0 10px;
+        min-height: 42px;
+      }
+      .caption h2 {
+        display: inline;
+        margin: 0;
+        font-size: 15px;
+        font-weight: 600;
+      }
+      .caption p {
+        display: inline;
+        margin: 0 0 0 6px;
+        color: var(--sheet-muted);
+      }
+      .dim {
+        position: relative;
+        height: 34px;
+        margin-top: 8px;
+        color: var(--redline);
+        font-size: 12px;
+      }
+      .dim .bracket {
+        position: absolute;
+        top: 2px;
+        height: 9px;
+        border: 1px solid var(--redline);
+        border-top: none;
+      }
+      .dim .label {
+        position: absolute;
+        top: 12px;
+        white-space: nowrap;
+      }
+
+      .section-title {
+        margin: 44px 0 6px;
+        font-size: 17px;
+        font-weight: 600;
+      }
+      .section-note {
+        margin: 0 0 14px;
+        color: var(--sheet-muted);
+        max-width: 1300px;
+      }
+      .crops {
+        display: flex;
+        gap: 40px;
+      }
+      .crop .caption {
+        width: 340px;
+        min-height: 0;
+      }
+      .crop .caption p {
+        display: block;
+        margin: 2px 0 0;
+      }
+      .crop-frame {
+        width: 340px;
+        height: 640px;
+        overflow: hidden;
+        display: flex;
+        justify-content: flex-end;
+        border-radius: 0 8px 8px 0;
+      }
+      .crop-frame .window {
+        flex: none;
+        border-radius: 0 8px 8px 0;
+      }
+
+      /* A Downlight window */
+      .window {
+        position: relative;
+        width: 900px;
+        height: 640px;
+        overflow: hidden;
+        border-radius: 8px;
+        background: var(--window-bg);
+        box-shadow:
+          0 0 0 1px light-dark(rgb(0 0 0 / 12%), rgb(255 255 255 / 10%)),
+          0 8px 28px rgb(0 0 0 / 16%);
+      }
+
+      /* title-bar.css, absolute inside the mockup's window instead of fixed */
+      .title-bar {
+        position: absolute;
+        top: 0;
+        right: 0;
+        left: 0;
+        z-index: 4;
+        display: flex;
+        height: 32px;
+        color: light-dark(rgb(0 0 0 / 89.4%), #ffffff);
+        user-select: none;
+      }
+      .bar-item {
+        display: flex;
+        align-items: center;
+        border: none;
+        background: transparent;
+        color: inherit;
+        padding: 0;
+      }
+      .title-bar .logo {
+        flex: none;
+        padding: 0 2px 0 10px;
+      }
+      .title-bar .logo svg {
+        width: 16px;
+        height: 16px;
+      }
+      .title-bar .file-name {
+        margin: 4px 0;
+        padding: 0 6px;
+        border-radius: 4px;
+        font:
+          12px "Segoe UI Variable Text",
+          "Segoe UI",
+          system-ui,
+          sans-serif;
+      }
+      .command-buttons {
+        display: flex;
+        flex: none;
+        align-items: center;
+        margin-left: auto;
+      }
+      .window-buttons {
+        display: flex;
+        flex: none;
+      }
+      .command-button {
+        justify-content: center;
+        width: 32px;
+        height: 28px;
+        border-radius: 4px;
+      }
+      .command-button svg,
+      .window-button svg {
+        width: 16px;
+        height: 16px;
+        fill: currentColor;
+      }
+      .title-bar .separator {
+        flex: none;
+        width: 1px;
+        height: 16px;
+        margin: 0 6px;
+        background-color: light-dark(rgb(0 0 0 / 8%), rgb(255 255 255 / 8.4%));
+      }
+      .window-button {
+        justify-content: center;
+        width: 46px;
+        height: 100%;
+      }
+
+      .body {
+        position: absolute;
+        top: 32px;
+        right: 0;
+        bottom: 0;
+        left: 0;
+        display: flex;
+      }
+      .view-scroller {
+        position: relative;
+        flex: 1 1 auto;
+        min-width: 0;
+        overflow: hidden;
+      }
+
+      /* The ruler or strip, left of the scroll bar */
+      .strip {
+        position: relative;
+        flex: none;
+        height: 100%;
+        background: var(--ruler-bg);
+        box-shadow: inset 1px 0 0 var(--ruler-edge);
+        overflow: hidden;
+      }
+      .strip > i,
+      .track > i {
+        position: absolute;
+        display: block;
+      }
+      .m-h1 {
+        background: var(--ruler-h1);
+      }
+      .m-h2,
+      .m-h3 {
+        background: var(--ruler-h);
+      }
+      .m-h3 {
+        opacity: 0.75;
+      }
+      .m-match {
+        background: var(--ruler-match);
+      }
+      .m-current {
+        background: var(--ruler-current);
+        box-shadow: 0 0 0 1px var(--ruler-current-edge);
+        z-index: 2;
+      }
+      .m-task-open {
+        box-shadow: inset 0 0 0 1px var(--ruler-task-open);
+      }
+      .m-task-ticked {
+        background: var(--ruler-task-ticked);
+      }
+      .m-slider {
+        background: var(--ruler-slider);
+        box-shadow: inset 0 0 0 1px var(--ruler-slider-edge);
+        z-index: 3;
+      }
+      .s-text {
+        background: var(--shade-text);
+      }
+      .s-list {
+        background: var(--shade-list);
+      }
+      .s-code {
+        background: var(--shade-code);
+      }
+      .s-table {
+        background: var(--shade-table);
+      }
+      .s-image {
+        background: var(--shade-image);
+      }
+      .c-band {
+        background: var(--ruler-slider);
+        box-shadow:
+          inset 0 1px 0 var(--ruler-slider-edge),
+          inset 0 -1px 0 var(--ruler-slider-edge);
+      }
+      .c-tick {
+        background: var(--ruler-h);
+        height: 1px;
+      }
+      .c-label {
+        position: absolute;
+        display: block;
+        height: 14px;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+        font:
+          11px/14px "Segoe UI Variable Text",
+          "Segoe UI",
+          system-ui,
+          sans-serif;
+        color: var(--fgColor-muted);
+      }
+      .c-label.lv1 {
+        color: var(--fgColor-default);
+        font-weight: 600;
+      }
+      .c-label.lv2 {
+        color: var(--fgColor-default);
+      }
+      .c-label.in-view {
+        color: var(--fgColor-default);
+        font-weight: 600;
+      }
+      .minimap-doc {
+        position: absolute;
+        transform-origin: 0 0;
+        pointer-events: none;
+        padding: 0 !important;
+        max-width: none !important;
+      }
+      .minimap-doc .find-match {
+        background: var(--ruler-match);
+      }
+      .minimap-doc .find-current {
+        background: var(--ruler-current);
+      }
+
+      /* Chromium's Fluent scroll bar, drawn: arrows at the ends, a thin pill thumb */
+      .scrollbar {
+        position: relative;
+        flex: none;
+        width: 15px;
+        height: 100%;
+        background: var(--sb-track);
+      }
+      .scrollbar .arrow {
+        position: absolute;
+        left: 0;
+        width: 15px;
+        height: 14px;
+      }
+      .scrollbar .arrow::before {
+        content: "";
+        position: absolute;
+        left: 4px;
+        border: 3.5px solid transparent;
+      }
+      .scrollbar .up {
+        top: 0;
+      }
+      .scrollbar .up::before {
+        top: 3px;
+        border-bottom: 4px solid var(--sb-thumb);
+        border-top: none;
+      }
+      .scrollbar .down {
+        bottom: 0;
+      }
+      .scrollbar .down::before {
+        bottom: 3px;
+        border-top: 4px solid var(--sb-thumb);
+        border-bottom: none;
+      }
+      .track {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        right: 0;
+      }
+      .thumb {
+        position: absolute;
+        left: 4.5px;
+        width: 6px;
+        border-radius: 3px;
+        background: var(--sb-thumb);
+        z-index: 2;
+      }
+
+      /* A heading mark's hover label, in .link-target's look */
+      .hover-label {
+        position: absolute;
+        z-index: 5;
+        padding: 2px 8px;
+        white-space: nowrap;
+        border: 1px solid var(--borderColor-default);
+        border-radius: 6px;
+        background-color: var(--bgColor-default);
+        color: var(--fgColor-muted);
+        font:
+          12px/1.5 -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          "Noto Sans",
+          Helvetica,
+          Arial,
+          sans-serif;
+        box-shadow: 0 4px 12px rgb(0 0 0 / 14%);
+      }
+      .pointer {
+        position: absolute;
+        z-index: 6;
+        width: 12px;
+        height: 18px;
+      }
+
+      /* document.css's find bar, absolute inside the mockup's window */
+      .find-bar {
+        position: absolute;
+        top: 44px;
+        z-index: 3;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 0;
+        padding: 6px 8px;
+        border: 1px solid var(--borderColor-default);
+        border-radius: 6px;
+        background-color: var(--bgColor-default);
+        box-shadow: 0 4px 12px rgb(0 0 0 / 20%);
+      }
+      .find-bar input {
+        width: 220px;
+        padding: 3px 8px;
+        border: 1px solid var(--borderColor-default);
+        border-radius: 6px;
+        background-color: var(--bgColor-default);
+        color: var(--fgColor-default);
+        font: inherit;
+        outline: 2px solid var(--accent-emphasis);
+        outline-offset: -1px;
+      }
+      .find-bar [role="status"] {
+        min-width: 6em;
+        color: var(--fgColor-muted);
+        font-size: 12px;
+        white-space: nowrap;
+      }
+      .find-button {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        padding: 0;
+        border: none;
+        border-radius: 4px;
+        background: transparent;
+        color: var(--fgColor-default);
+      }
+      .find-button + .find-button {
+        margin-left: -6px;
+      }
+      .find-button svg {
+        width: 16px;
+        height: 16px;
+        fill: currentColor;
+      }
+
+      /* github-markdown-css, the parts the sample uses */
+      .markdown-body {
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica,
+          Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+        font-size: 16px;
+        line-height: 1.5;
+        word-wrap: break-word;
+        color: var(--fgColor-default);
+      }
+      article.markdown-body {
+        max-width: 980px;
+        margin: 0 auto;
+        padding: 32px;
+      }
+      .markdown-body > :first-child {
+        margin-top: 0 !important;
+      }
+      .markdown-body p,
+      .markdown-body ul,
+      .markdown-body table,
+      .markdown-body .highlight {
+        margin-top: 0;
+        margin-bottom: 16px;
+      }
+      .markdown-body a {
+        color: var(--accent-link);
+        text-decoration: none;
+      }
+      .markdown-body h1,
+      .markdown-body h2,
+      .markdown-body h3 {
+        margin-top: 24px;
+        margin-bottom: 16px;
+        font-weight: 600;
+        line-height: 1.25;
+      }
+      .markdown-body h1 {
+        font-size: 2em;
+        padding-bottom: 0.3em;
+        border-bottom: 1px solid var(--borderColor-muted);
+      }
+      .markdown-body h2 {
+        font-size: 1.5em;
+        padding-bottom: 0.3em;
+        border-bottom: 1px solid var(--borderColor-muted);
+      }
+      .markdown-body h3 {
+        font-size: 1.25em;
+      }
+      .markdown-body code {
+        padding: 0.2em 0.4em;
+        margin: 0;
+        font-size: 85%;
+        white-space: break-spaces;
+        background-color: var(--bgColor-neutral-muted);
+        border-radius: 6px;
+      }
+      .markdown-body code,
+      .markdown-body pre {
+        font-family:
+          ui-monospace,
+          SFMono-Regular,
+          SF Mono,
+          Menlo,
+          Consolas,
+          Liberation Mono,
+          monospace;
+      }
+      .markdown-body .highlight {
+        position: relative;
+      }
+      .markdown-body pre {
+        margin: 0;
+        padding: 16px;
+        overflow: auto;
+        font-size: 85%;
+        line-height: 1.45;
+        color: var(--fgColor-default);
+        background-color: var(--bgColor-muted);
+        border-radius: 6px;
+        word-wrap: normal;
+      }
+      .markdown-body pre code {
+        padding: 0;
+        background: transparent;
+        font-size: 100%;
+        white-space: pre;
+      }
+      .pl-c {
+        color: var(--pl-c);
+      }
+      .pl-c1 {
+        color: var(--pl-c1);
+      }
+      .pl-en {
+        color: var(--pl-en);
+      }
+      .pl-k {
+        color: var(--pl-k);
+      }
+      .pl-s {
+        color: var(--pl-s);
+      }
+      .markdown-body table {
+        border-spacing: 0;
+        border-collapse: collapse;
+        display: block;
+        width: max-content;
+        max-width: 100%;
+        overflow: auto;
+        font-variant: tabular-nums;
+      }
+      .markdown-body table th {
+        font-weight: 600;
+      }
+      .markdown-body table th,
+      .markdown-body table td {
+        padding: 6px 13px;
+        border: 1px solid var(--borderColor-default);
+      }
+      .markdown-body table tr {
+        background-color: var(--bgColor-default);
+        border-top: 1px solid var(--borderColor-muted);
+      }
+      .markdown-body table tr:nth-child(2n) {
+        background-color: var(--bgColor-muted);
+      }
+      .markdown-body ul {
+        padding-left: 2em;
+      }
+      .markdown-body li + li {
+        margin-top: 0.25em;
+      }
+      .markdown-body .task-list-item {
+        list-style-type: none;
+      }
+      .markdown-body .task-list-item input {
+        margin: 0 0.2em 0.25em -1.4em;
+        vertical-align: middle;
+        accent-color: var(--accent-emphasis);
+      }
+      .markdown-body svg.figure {
+        display: block;
+        max-width: 100%;
+        height: auto;
+      }
+      .find-match {
+        background-color: var(--accent-find-match);
+      }
+      .find-current {
+        background-color: var(--accent-find-current);
+        color: light-dark(#1f2328, #0d1117);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="sheet-head">
+      <div>
+        <h1>Overview ruler: four options to compare</h1>
+        <p>
+          One sample document, README.md (<span id="doc-height"
+            >about 3,800</span
+          >
+          px tall in A's window), scrolled to Find's current match for "cache".
+          Every strip maps the whole document's height onto the scroll bar's
+          track (between its arrows), so a mark sits level with the thumb when
+          its block is in view. Mockups only: nothing here was built or
+          measured.
+        </p>
+      </div>
+      <div class="toggles">
+        <div class="toggle" role="group" aria-label="Theme">
+          <span>Theme</span
+          ><button id="theme-light" aria-pressed="true">Light</button
+          ><button id="theme-dark" aria-pressed="false">Dark</button>
+        </div>
+        <div class="toggle" role="group" aria-label="Backdrop">
+          <span>Backdrop</span
+          ><button id="bd-mica" aria-pressed="true">Mica</button
+          ><button id="bd-none" aria-pressed="false">None</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="legend">
+      <b>Marks</b>
+      <span class="key"
+        ><span class="sw"
+          ><i
+            style="
+              left: 0;
+              top: 3px;
+              width: 12px;
+              height: 3px;
+              background: var(--ruler-h1);
+            "
+          ></i></span
+        >h1 (full width)</span
+      >
+      <span class="key"
+        ><span class="sw"
+          ><i
+            style="
+              left: 0;
+              top: 3px;
+              width: 8px;
+              height: 2px;
+              background: var(--ruler-h);
+            "
+          ></i></span
+        >h2</span
+      >
+      <span class="key"
+        ><span class="sw"
+          ><i
+            style="
+              left: 0;
+              top: 3px;
+              width: 5px;
+              height: 2px;
+              background: var(--ruler-h);
+              opacity: 0.75;
+            "
+          ></i></span
+        >h3</span
+      >
+      <span class="key"
+        ><span class="sw"
+          ><i
+            style="
+              right: 0;
+              top: 3px;
+              width: 6px;
+              height: 3px;
+              background: var(--ruler-match);
+            "
+          ></i></span
+        >Find match</span
+      >
+      <span class="key"
+        ><span class="sw"
+          ><i
+            style="
+              left: 0;
+              top: 3px;
+              width: 12px;
+              height: 3px;
+              background: var(--ruler-current);
+              box-shadow: 0 0 0 1px var(--ruler-current-edge);
+            "
+          ></i></span
+        >Current match</span
+      >
+      <span class="key"
+        ><span class="sw"
+          ><i
+            style="
+              left: 1px;
+              top: 3px;
+              width: 4px;
+              height: 3px;
+              box-shadow: inset 0 0 0 1px var(--ruler-task-open);
+            "
+          ></i></span
+        >Open task</span
+      >
+      <span class="key"
+        ><span class="sw"
+          ><i
+            style="
+              left: 1px;
+              top: 3px;
+              width: 4px;
+              height: 3px;
+              background: var(--ruler-task-ticked);
+            "
+          ></i></span
+        >Ticked task</span
+      >
+      <b style="margin-left: 12px">B's shading</b>
+      <span class="key"
+        ><span class="sw" style="background: var(--shade-text)"></span
+        >Paragraph</span
+      >
+      <span class="key"
+        ><span class="sw" style="background: var(--shade-list)"></span
+        >List</span
+      >
+      <span class="key"
+        ><span class="sw" style="background: var(--shade-code)"></span>Code
+        block</span
+      >
+      <span class="key"
+        ><span class="sw" style="background: var(--shade-table)"></span
+        >Table</span
+      >
+      <span class="key"
+        ><span class="sw" style="background: var(--shade-image)"></span
+        >Image</span
+      >
+    </div>
+
+    <div class="grid">
+      <div class="cell" id="cell-a">
+        <div class="caption">
+          <h2>A. Overview ruler, marks only</h2>
+          <p>
+            The research's recommendation. Cost: one page module of a few
+            hundred lines with its tests, a Find listener and a painter seam; no
+            app, core or contract change. Measure typing in Find and scrolling
+            on 1, 20 and 100 MB.
+          </p>
+        </div>
+        <div class="slot" data-option="a"></div>
+      </div>
+      <div class="cell" id="cell-b">
+        <div class="caption">
+          <h2>B. Blocks shaded by kind</h2>
+          <p>
+            Small on top of A: a binary search per pixel row, so it scales to
+            100 MB. Risk: noise beside the scroll bar, five tints to keep
+            working in light, dark, on Mica and with the accent color, likely
+            off in high contrast; its slider repeats the thumb.
+          </p>
+        </div>
+        <div class="slot" data-option="b"></div>
+      </div>
+      <div class="cell" id="cell-c">
+        <div class="caption">
+          <h2>C. Heading labels in a wide strip</h2>
+          <p>
+            Medium cost, mostly layout and design: 120 px comes out of the
+            reading width, so toggling it rewraps the text and moves the reading
+            position, and the find bar has to move left. The table of contents
+            sidebar in disguise.
+          </p>
+        </div>
+        <div class="slot" data-option="c"></div>
+      </div>
+      <div class="cell" id="cell-d">
+        <div class="caption">
+          <h2>D. A scaled picture of the page (minimap)</h2>
+          <p>
+            High cost: a second DOM doubles memory and needs the whole-document
+            layout ADR 0003 avoids; Find's highlights, ticks, Sort, zoom and
+            Full width must be mirrored; no way to 100 MB. At
+            <span id="d-scale">6</span> % the prose is grey bars.
+          </p>
+        </div>
+        <div class="slot" data-option="d"></div>
+      </div>
+    </div>
+
+    <h2 class="section-title">Where A's marks go</h2>
+    <p class="section-note">
+      The right edge of the same window, the two placements the research names.
+      Beside the scroll bar the marks take 14 px and can be click targets with a
+      hover label; over the track they take no width, but the thumb hides the
+      marks under it and clicks go to the scroll bar.
+    </p>
+    <div class="crops">
+      <div class="crop" id="crop-strip">
+        <div class="caption">
+          <h2>A strip beside the scroll bar</h2>
+          <p>14 px of its own; takes clicks.</p>
+        </div>
+        <div class="crop-frame"><div class="slot" data-option="a"></div></div>
+      </div>
+      <div class="crop" id="crop-track">
+        <div class="caption">
+          <h2>Marks over the scroll bar's track</h2>
+          <p>No width; as Chromium paints its find tickmarks.</p>
+        </div>
+        <div class="crop-frame"><div class="slot" data-option="t"></div></div>
+      </div>
+    </div>
+
+    <template id="title-bar">
+      <header class="title-bar">
+        <span class="bar-item logo"
+          ><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">
+            <defs>
+              <linearGradient
+                id="downlight-logo-beam"
+                x1="0"
+                y1="0"
+                x2="1"
+                y2="0.7"
+              >
+                <stop offset="0" stop-color="#FEC173" />
+                <stop offset="1" stop-color="#FBA613" />
+              </linearGradient>
+            </defs>
+            <path
+              d="M11,4 H30 L40,14 V41 A3,3 0 0 1 37,44 H11 A3,3 0 0 1 8,41 V7 A3,3 0 0 1 11,4 Z"
+              fill="#FFEFDC"
+            />
+            <path d="M30,4 V11 A3,3 0 0 0 33,14 H40 Z" fill="#FEC173" />
+            <path
+              d="M14,4 H27 V20 L20.5,26 L14,20 Z"
+              fill="url(#downlight-logo-beam)"
+            />
+            <g fill="#C27F05">
+              <rect x="13" y="31" width="22" height="2.5" rx="1.25" />
+              <rect x="13" y="37" width="15" height="2.5" rx="1.25" />
+            </g></svg
+        ></span>
+        <span class="bar-item file-name"><span>README.md</span></span>
+        <div class="command-buttons">
+          <span class="bar-item command-button"
+            ><svg viewBox="0 0 16 16">
+              <path
+                d="M2 4.5v4.6l.92-1.6A3 3 0 0 1 5.52 6h6.4c-.21-.58-.77-1-1.42-1H7a.5.5 0 0 1-.35-.15l-1.71-1.7A.5.5 0 0 0 4.59 3H3.5C2.67 3 2 3.67 2 4.5M7.07 14H3.5A2.5 2.5 0 0 1 1 11.5v-7A2.5 2.5 0 0 1 3.5 2h1.09c.4 0 .78.16 1.06.44L7.2 4h3.29a2.5 2.5 0 0 1 2.46 2.04 2.5 2.5 0 0 1 1.7 3.71l-1.58 2.75a3 3 0 0 1-2.6 1.5zM5.52 7A2 2 0 0 0 3.8 8L2.2 10.75A1.5 1.5 0 0 0 3.5 13h6.98a2 2 0 0 0 1.73-1l1.59-2.75A1.5 1.5 0 0 0 12.5 7z"
+              /></svg
+          ></span>
+          <span class="bar-item command-button"
+            ><svg viewBox="0 0 16 16">
+              <path
+                d="M14.24 1.76a2.6 2.6 0 0 0-3.71 0L2.66 9.64q-.57.57-.78 1.35l-.86 3.39a.5.5 0 0 0 .6.6l3.39-.86q.78-.21 1.35-.78l7.88-7.87a2.6 2.6 0 0 0 0-3.7m-3 .71a1.62 1.62 0 1 1 2.29 2.3l-.78.77-2.3-2.29zM9.75 3.96l2.3 2.29-6.4 6.39q-.37.37-.89.5l-2.57.67.66-2.57q.14-.52.51-.9z"
+              /></svg
+          ></span>
+          <div class="separator"></div>
+          <span class="bar-item command-button"
+            ><svg viewBox="0 0 16 16">
+              <path
+                d="M2.15 8.85a.5.5 0 0 1 0-.7l3-3a.5.5 0 1 1 .7.7L3.71 8h8.58l-2.14-2.15a.5.5 0 0 1 .7-.7l3 3c.2.2.2.5 0 .7l-3 3a.5.5 0 0 1-.7-.7L12.29 9H3.71l2.14 2.15a.5.5 0 1 1-.7.7z"
+              /></svg
+          ></span>
+          <span class="bar-item command-button"
+            ><svg viewBox="0 0 16 16">
+              <path
+                d="M10.06 2.45a1.5 1.5 0 0 0-2.39.35L5.65 6.59l-2.8.94a.5.5 0 0 0-.2.82l2.14 2.15-2.64 2.65L2 14l.85-.15 2.65-2.64 2.15 2.14a.5.5 0 0 0 .82-.2l.94-2.8 3.78-2.03a1.5 1.5 0 0 0 .35-2.38zm-1.5.82a.5.5 0 0 1 .8-.12l3.48 3.5a.5.5 0 0 1-.12.8l-3.96 2.1a.5.5 0 0 0-.23.3l-.75 2.22-3.85-3.85 2.23-.75a.5.5 0 0 0 .28-.23z"
+              /></svg
+          ></span>
+          <span class="bar-item command-button"
+            ><svg viewBox="0 0 16 16">
+              <path
+                d="M8 6a2 2 0 1 0 0 4 2 2 0 0 0 0-4M7 8a1 1 0 1 1 2 0 1 1 0 0 1-2 0m3.62-3.6a.7.7 0 0 1-.83-.57l-.26-1.42a.4.4 0 0 0-.27-.28 6 6 0 0 0-2.52 0 .4.4 0 0 0-.27.29L6.2 3.83l-.03.11a.7.7 0 0 1-.9.43L3.9 3.88a.4.4 0 0 0-.38.1q-.86.96-1.26 2.17-.06.23.1.38l1.1.93a.7.7 0 0 1 0 1.08l-1.1.93q-.16.16-.1.38.4 1.21 1.26 2.17.17.16.38.1l1.36-.49.11-.03a.7.7 0 0 1 .83.57l.26 1.41q.05.23.27.29a6 6 0 0 0 2.52 0 .4.4 0 0 0 .27-.29l.26-1.41.03-.11a.7.7 0 0 1 .9-.43l1.37.49q.21.06.38-.1.86-.96 1.26-2.17a.4.4 0 0 0-.1-.38l-1.1-.93-.09-.08a.7.7 0 0 1 .08-1l1.1-.93q.18-.16.11-.38-.4-1.21-1.26-2.17a.4.4 0 0 0-.38-.1l-1.36.49zM4 4.98l.94.33a1.7 1.7 0 0 0 2.25-1.3l.18-.97a5 5 0 0 1 1.26 0l.18.97a1.7 1.7 0 0 0 2.25 1.3l.94-.33q.39.5.63 1.08l-.75.64a1.7 1.7 0 0 0 0 2.6l.75.64q-.24.59-.63 1.08l-.94-.33a1.7 1.7 0 0 0-2.25 1.3l-.18.97a5 5 0 0 1-1.26 0l-.18-.97a1.7 1.7 0 0 0-2.25-1.3l-.94.33q-.39-.5-.63-1.08l.75-.64a1.7 1.7 0 0 0 0-2.6l-.75-.64q.24-.58.63-1.08"
+              /></svg
+          ></span>
+          <div class="separator"></div>
+        </div>
+        <div class="window-buttons">
+          <span class="bar-item window-button"
+            ><svg viewBox="0 0 16 16">
+              <path
+                d="M3 8c0-.28.22-.5.5-.5h9a.5.5 0 0 1 0 1h-9A.5.5 0 0 1 3 8"
+              /></svg
+          ></span>
+          <span class="bar-item window-button"
+            ><svg viewBox="0 0 16 16">
+              <path
+                d="M2 4.5A2.5 2.5 0 0 1 4.5 2h7A2.5 2.5 0 0 1 14 4.5v7a2.5 2.5 0 0 1-2.5 2.5h-7A2.5 2.5 0 0 1 2 11.5zM4.5 3C3.67 3 3 3.67 3 4.5v7c0 .83.67 1.5 1.5 1.5h7c.83 0 1.5-.67 1.5-1.5v-7c0-.83-.67-1.5-1.5-1.5z"
+              /></svg
+          ></span>
+          <span class="bar-item window-button"
+            ><svg viewBox="0 0 16 16">
+              <path
+                d="m2.59 2.72.06-.07a.5.5 0 0 1 .63-.06l.07.06L8 7.29l4.65-4.64a.5.5 0 0 1 .7.7L8.71 8l4.64 4.65c.18.17.2.44.06.63l-.06.07a.5.5 0 0 1-.63.06l-.07-.06L8 8.71l-4.65 4.64a.5.5 0 0 1-.7-.7L7.29 8 2.65 3.35a.5.5 0 0 1-.06-.63l.06-.07z"
+              /></svg
+          ></span>
+        </div>
+      </header>
+    </template>
+
+    <template id="find-bar">
+      <div class="find-bar markdown-body">
+        <input type="text" value="cache" aria-label="Find" />
+        <span role="status"></span>
+        <span class="find-button"
+          ><svg viewBox="0 0 16 16">
+            <path
+              d="M7.5 13.5a.5.5 0 0 0 1 0V3.8l3.63 4.03a.5.5 0 0 0 .74-.66l-4.5-5a.5.5 0 0 0-.74 0l-4.5 5a.5.5 0 0 0 .74.66L7.5 3.8z"
+            /></svg
+        ></span>
+        <span class="find-button"
+          ><svg viewBox="0 0 16 16">
+            <path
+              d="M8.5 2.5a.5.5 0 1 0-1 0v9.7L3.87 8.17a.5.5 0 1 0-.74.66l4.5 5a.5.5 0 0 0 .74 0l4.5-5a.5.5 0 0 0-.74-.66L8.5 12.2z"
+            /></svg
+        ></span>
+        <span class="find-button"
+          ><svg viewBox="0 0 16 16">
+            <path
+              d="m2.59 2.72.06-.07a.5.5 0 0 1 .63-.06l.07.06L8 7.29l4.65-4.64a.5.5 0 0 1 .7.7L8.71 8l4.64 4.65c.18.17.2.44.06.63l-.06.07a.5.5 0 0 1-.63.06l-.07-.06L8 8.71l-4.65 4.64a.5.5 0 0 1-.7-.7L7.29 8 2.65 3.35a.5.5 0 0 1-.06-.63l.06-.07z"
+            /></svg
+        ></span>
+      </div>
+    </template>
+
+    <template id="doc">
+      <h1>Tidepool</h1>
+      <p>
+        Tidepool keeps a folder of Markdown notes in step across your computers,
+        without a server of its own. Each machine watches its copy of the
+        folder, and when a file changes it sends only the changed blocks to the
+        others over your local network, or through any folder you already sync,
+        such as a shared drive. Read the <a href="#">design notes</a> for why it
+        works this way, or jump to <a href="#">Install</a> to try it.
+      </p>
+      <p>
+        It is a single program of about two megabytes. It needs no account,
+        keeps no telemetry, and never edits a note you didn't change: when two
+        machines change the same note, it keeps both versions and tells you.
+      </p>
+      <h2>Install</h2>
+      <p>
+        Download the latest release for your system from the
+        <a href="#">releases page</a>, or build it from source with a recent
+        Rust toolchain:
+      </p>
+      <div class="highlight highlight-source-shell">
+        <pre><code><span class="pl-en">git</span> clone https://example.com/tidepool.git
+<span class="pl-c1">cd</span> tidepool
+<span class="pl-en">cargo</span> build --release
+<span class="pl-c"># The program is now in target/release/</span>
+./target/release/tidepool --version
+tidepool 0.9.2</code></pre>
+      </div>
+      <p>
+        On first start Tidepool asks which folder to keep in step and writes a
+        config file next to it. Run it again on each computer that should share
+        the folder, and point it at the same folder there.
+      </p>
+      <h2>Configure</h2>
+      <p>
+        Tidepool reads its settings from <code>tidepool.toml</code> in the
+        folder it keeps in step. Every setting has a default, so a new config
+        file can be empty; most people change only the peers and the cache size.
+        The cache holds the blocks of every note that was sent or received
+        recently, so a note that changes back and forth doesn't travel twice.
+      </p>
+      <h3>The config file</h3>
+      <p>
+        A config file for two computers on the same network, with a larger cache
+        and a few folders left out, looks like this:
+      </p>
+      <div class="highlight highlight-source-toml">
+        <pre><code><span class="pl-c"># tidepool.toml, in the folder Tidepool keeps in step</span>
+[<span class="pl-en">folder</span>]
+name = <span class="pl-s">"notes"</span>
+ignore = [<span class="pl-s">"drafts/"</span>, <span class="pl-s">"*.tmp"</span>, <span class="pl-s">".obsidian/"</span>]
+
+[<span class="pl-en">peers</span>]
+<span class="pl-c"># Found on the local network by name; add an address for one that isn't.</span>
+laptop = <span class="pl-s">"auto"</span>
+desk = <span class="pl-s">"192.168.1.20:7140"</span>
+
+[<span class="pl-en">cache</span>]
+size = <span class="pl-s">"512 MB"</span>
+path = <span class="pl-s">".tidepool/cache"</span>
+keep_days = <span class="pl-c1">30</span>
+
+[<span class="pl-en">watch</span>]
+debounce_ms = <span class="pl-c1">250</span>
+follow_links = <span class="pl-c1">false</span>
+
+[<span class="pl-en">log</span>]
+level = <span class="pl-s">"info"</span></code></pre>
+      </div>
+      <h3>Options</h3>
+      <p>
+        Each section of the file takes the options below. Sizes take a unit (KB,
+        MB or GB), and times are in the unit their name ends in.
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>Option</th>
+            <th>Default</th>
+            <th>What it does</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>folder.name</code></td>
+            <td>the folder's name</td>
+            <td>how the other peers name this folder</td>
+          </tr>
+          <tr>
+            <td><code>folder.ignore</code></td>
+            <td><code>[]</code></td>
+            <td>patterns of files and folders never sent</td>
+          </tr>
+          <tr>
+            <td><code>peers.&lt;name&gt;</code></td>
+            <td>none</td>
+            <td>
+              <code>"auto"</code> to find the peer by name, or its address
+            </td>
+          </tr>
+          <tr>
+            <td><code>cache.size</code></td>
+            <td><code>256 MB</code></td>
+            <td>the most the block cache may hold</td>
+          </tr>
+          <tr>
+            <td><code>cache.path</code></td>
+            <td><code>.tidepool/cache</code></td>
+            <td>where the cache is kept, inside the folder</td>
+          </tr>
+          <tr>
+            <td><code>cache.keep_days</code></td>
+            <td><code>14</code></td>
+            <td>how long a block stays in the cache unused</td>
+          </tr>
+          <tr>
+            <td><code>watch.debounce_ms</code></td>
+            <td><code>250</code></td>
+            <td>how long to wait after a change before sending</td>
+          </tr>
+          <tr>
+            <td><code>watch.follow_links</code></td>
+            <td><code>false</code></td>
+            <td>whether to follow symbolic links out of the folder</td>
+          </tr>
+          <tr>
+            <td><code>log.level</code></td>
+            <td><code>"warn"</code></td>
+            <td>
+              <code>error</code>, <code>warn</code>, <code>info</code> or
+              <code>debug</code>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <p>
+        A smaller cache only means more blocks travel again; Tidepool never
+        loses a note because the cache was full. Clearing the cache folder by
+        hand is safe while Tidepool is stopped.
+      </p>
+      <h2>How syncing works</h2>
+      <p>
+        Tidepool splits every note into blocks at its headings and blank lines,
+        and names each block by the hash of its text. When a note changes, only
+        the blocks with new names travel; the others are already on every peer.
+        The picture shows one change going from the laptop to the desk.
+      </p>
+      <p>
+        <svg
+          class="figure"
+          width="640"
+          height="220"
+          viewBox="0 0 640 220"
+          role="img"
+          aria-label="sync-flow.png"
+        >
+          <rect
+            x="0.5"
+            y="0.5"
+            width="639"
+            height="219"
+            rx="6"
+            style="
+              fill: var(--bgColor-muted);
+              stroke: var(--borderColor-default);
+            "
+          />
+          <g style="fill: var(--bgColor-default); stroke: var(--fgColor-muted)">
+            <rect x="40" y="50" width="150" height="120" rx="8" />
+            <rect x="450" y="50" width="150" height="120" rx="8" />
+          </g>
+          <g style="fill: var(--fgColor-muted)">
+            <rect x="60" y="80" width="110" height="10" rx="2" />
+            <rect
+              x="60"
+              y="98"
+              width="80"
+              height="10"
+              rx="2"
+              style="fill: var(--pl-c1)"
+            />
+            <rect x="60" y="116" width="100" height="10" rx="2" />
+            <rect
+              x="60"
+              y="134"
+              width="70"
+              height="10"
+              rx="2"
+              style="fill: var(--pl-c1)"
+            />
+            <rect x="470" y="80" width="110" height="10" rx="2" />
+            <rect
+              x="470"
+              y="98"
+              width="80"
+              height="10"
+              rx="2"
+              style="fill: var(--pl-c1)"
+            />
+            <rect x="470" y="116" width="100" height="10" rx="2" />
+            <rect
+              x="470"
+              y="134"
+              width="70"
+              height="10"
+              rx="2"
+              style="fill: var(--pl-c1)"
+            />
+          </g>
+          <path
+            d="M205 110 H430"
+            style="stroke: var(--fgColor-muted); stroke-width: 2"
+          />
+          <path
+            d="M430 103 L442 110 L430 117 Z"
+            style="fill: var(--fgColor-muted)"
+          />
+          <g
+            style="
+              font:
+                13px &quot;Segoe UI&quot;,
+                sans-serif;
+              fill: var(--fgColor-default);
+            "
+            text-anchor="middle"
+          >
+            <text x="115" y="38">laptop</text>
+            <text x="525" y="38">desk</text>
+            <text x="320" y="98" style="fill: var(--fgColor-muted)">
+              2 new blocks
+            </text>
+            <text
+              x="320"
+              y="200"
+              style="fill: var(--fgColor-muted); font-size: 11px"
+            >
+              sync-flow.png
+            </text>
+          </g>
+        </svg>
+      </p>
+      <p>
+        A peer that was offline asks each of the others for the names of the
+        blocks it missed when it comes back, and fetches only those. Nothing is
+        ever sent to a peer that isn't in the config file, and every connection
+        is encrypted with the peer's key, which Tidepool writes to
+        <code>.tidepool/keys/</code> on first start.
+      </p>
+      <h3>Conflicts</h3>
+      <p>
+        Two peers can change the same note before either has heard of the
+        other's change. Tidepool notices this when the second change arrives:
+        the block names on both sides descend from the same older version, and
+        both differ from it. It then keeps both. The note you changed keeps your
+        version, and the other version goes next to it as
+        <code>note.conflict-desk.md</code>, named after the peer it came from.
+      </p>
+      <p>
+        Nothing is merged for you. Open both files, keep what you want in the
+        note, and delete the conflict file; Tidepool sends the result to every
+        peer as an ordinary change. The blocks of both versions stay in the
+        cache until <code>cache.keep_days</code> has passed, so a conflict file
+        deleted by mistake can be brought back with
+        <code>tidepool restore</code>.
+      </p>
+      <h3>Watching folders</h3>
+      <p>
+        Tidepool watches the folder with the system's own file events, so it
+        notices a change within a fraction of a second and costs nothing while
+        nothing changes. It waits for <code>watch.debounce_ms</code> after the
+        last change before sending, so an editor that saves in several steps
+        sends one change, not five.
+      </p>
+      <ul>
+        <li>
+          On Windows it uses <code>ReadDirectoryChangesW</code>, and watches
+          network drives only when they report changes.
+        </li>
+        <li>
+          On macOS it uses FSEvents, which may merge several changes into one
+          event.
+        </li>
+        <li>
+          On Linux it uses inotify, whose watch limit large folders can reach;
+          raise <code>fs.inotify.max_user_watches</code> if the log says so.
+        </li>
+        <li>
+          Files on removable drives are watched only while the drive is
+          connected.
+        </li>
+      </ul>
+      <h2>Roadmap</h2>
+      <p>
+        Tidepool is used every day by its authors, but it is young. This is what
+        is done and what comes next for version 1.0, in no particular order:
+      </p>
+      <ul class="contains-task-list">
+        <li class="task-list-item">
+          <input type="checkbox" checked /> Send only changed blocks
+        </li>
+        <li class="task-list-item">
+          <input type="checkbox" checked /> Find peers on the local network by
+          name
+        </li>
+        <li class="task-list-item">
+          <input type="checkbox" checked /> Keep both versions of a conflicting
+          change
+        </li>
+        <li class="task-list-item">
+          <input type="checkbox" /> Restore a deleted note from the cache
+        </li>
+        <li class="task-list-item">
+          <input type="checkbox" checked /> Encrypt every connection with the
+          peer's key
+        </li>
+        <li class="task-list-item">
+          <input type="checkbox" /> Sync through a shared drive when no peer is
+          online
+        </li>
+        <li class="task-list-item">
+          <input type="checkbox" /> A small window that shows what is being sent
+        </li>
+        <li class="task-list-item">
+          <input type="checkbox" /> Packages for Windows, macOS and Linux
+        </li>
+      </ul>
+      <h2>FAQ</h2>
+      <h3>Why not use Git?</h3>
+      <p>
+        Git is a fine way to keep notes, if you remember to commit and push.
+        Tidepool is for people who want every save to arrive on their other
+        computers without doing anything, and who would rather resolve a rare
+        conflict than a daily merge.
+      </p>
+      <h3>Does it work offline?</h3>
+      <p>
+        Yes. Each peer keeps the whole folder, so notes can be read and changed
+        with no network at all. Changes are kept in the cache until a peer is
+        reachable again, and then sent in the order they were made.
+      </p>
+      <h3>Where is the cache kept?</h3>
+      <p>
+        In <code>.tidepool/cache</code> inside the folder, unless
+        <code>cache.path</code> says otherwise. The cache folder is never sent
+        to other peers, and it can be deleted while Tidepool is stopped: the
+        next start builds the cache again from the notes.
+      </p>
+      <h2>License</h2>
+      <p>
+        Tidepool is free software under the <a href="#">MIT license</a>.
+        Contributions are welcome; read <a href="#">CONTRIBUTING</a> first.
+      </p>
+    </template>
+
+    <script>
+      // Strip widths in CSS pixels; "t" is A's marks drawn over the scroll bar's track.
+      const STRIP = { a: 14, b: 20, c: 120, d: 56, t: 0 };
+      const SCROLL_BAR = 15;
+      const ARROW = 14;
+
+      // Find: wrap every "cache" in the sample, as Find's highlights would paint them.
+      const doc = document.getElementById("doc").content;
+      const walker = document.createTreeWalker(doc, NodeFilter.SHOW_TEXT);
+      const texts = [];
+      while (walker.nextNode()) texts.push(walker.currentNode);
+      for (const node of texts) {
+        const parts = node.data.split(/(cache)/i);
+        if (parts.length === 1) continue;
+        const frag = document.createDocumentFragment();
+        parts.forEach((part, i) => {
+          if (i % 2) {
+            const span = document.createElement("span");
+            span.className = "find-match";
+            span.textContent = part;
+            frag.append(span);
+          } else if (part) frag.append(part);
+        });
+        node.replaceWith(frag);
+      }
+      const allMatches = [...doc.querySelectorAll(".find-match")];
+      const currentIndex = allMatches.findIndex((m) => m.closest("table"));
+      allMatches[currentIndex].classList.add("find-current");
+      const statusText = `${currentIndex + 1} of ${allMatches.length}`;
+
+      function el(tag, cls, style) {
+        const e = document.createElement(tag);
+        if (cls) e.className = cls;
+        if (style) Object.assign(e.style, style);
+        return e;
+      }
+      function mark(parent, cls, x, y, w, h) {
+        parent.append(
+          el("i", cls, {
+            left: x + "px",
+            top: y + "px",
+            width: w + "px",
+            height: h + "px",
+          }),
+        );
+      }
+
+      function buildWindow(slot, option) {
+        const win = el("div", "window");
+        win.dataset.option = option;
+        win.append(
+          document.getElementById("title-bar").content.cloneNode(true),
+        );
+        const body = el("div", "body");
+        const scroller = el("div", "view-scroller");
+        const article = el("article", "markdown-body");
+        article.append(doc.cloneNode(true));
+        scroller.append(article);
+        body.append(scroller);
+        if (STRIP[option]) {
+          body.append(el("div", "strip", { width: STRIP[option] + "px" }));
+        }
+        const bar = el("div", "scrollbar");
+        bar.innerHTML =
+          '<div class="arrow up"></div><div class="track"><div class="thumb"></div></div><div class="arrow down"></div>';
+        body.append(bar);
+        win.append(body);
+        const find = document
+          .getElementById("find-bar")
+          .content.cloneNode(true);
+        find.querySelector('[role="status"]').textContent = statusText;
+        win.append(find);
+        win.querySelector(".find-bar").style.right =
+          9 + SCROLL_BAR + STRIP[option] + "px";
+        slot.append(win);
+        return win;
+      }
+
+      function kindOf(block) {
+        if (/^H[1-6]$/.test(block.tagName)) return "heading";
+        if (block.classList.contains("highlight")) return "code";
+        if (block.tagName === "TABLE") return "table";
+        if (block.tagName === "UL") return "list";
+        if (block.querySelector("svg.figure, img")) return "image";
+        return "text";
+      }
+
+      function layOut(win) {
+        const option = win.dataset.option;
+        const W = STRIP[option];
+        const body = win.querySelector(".body");
+        const scroller = win.querySelector(".view-scroller");
+        const article = scroller.querySelector("article");
+        scroller.scrollTop = 0;
+        const base = scroller.getBoundingClientRect().top;
+        const topOf = (e) => e.getBoundingClientRect().top - base;
+        const blocks = [...article.children].map((b) => ({
+          top: topOf(b),
+          h: b.getBoundingClientRect().height,
+          kind: kindOf(b),
+        }));
+        const headings = [...article.querySelectorAll("h1, h2, h3")].map(
+          (h) => ({ y: topOf(h), level: +h.tagName[1], text: h.textContent }),
+        );
+        const matches = [...article.querySelectorAll(".find-match")].map(
+          (m) => ({
+            y: topOf(m),
+            current: m.classList.contains("find-current"),
+          }),
+        );
+        const tasks = [...article.querySelectorAll(".task-list-item")].map(
+          (t) => ({ y: topOf(t), ticked: t.querySelector("input").checked }),
+        );
+        const scrollH = scroller.scrollHeight;
+        const clientH = scroller.clientHeight;
+        const current = matches.find((m) => m.current);
+        const anchor = headings.find((h) => h.text === "Options");
+        const scrollTop = Math.max(
+          0,
+          Math.min(scrollH - clientH, Math.round(anchor.y - 16)),
+        );
+        scroller.scrollTop = scrollTop;
+        win.dataset.scrollTop = scrollTop;
+
+        // The scroll bar's thumb, and the map from a document y to the track, which both share.
+        const H = body.clientHeight;
+        const trackLen = H - 2 * ARROW;
+        const thumbH = Math.max(17, (clientH / scrollH) * trackLen);
+        const thumbTop =
+          ARROW + (scrollTop / (scrollH - clientH)) * (trackLen - thumbH);
+        const thumb = win.querySelector(".thumb");
+        thumb.style.top = thumbTop + "px";
+        thumb.style.height = thumbH + "px";
+        const map = (y) => Math.round(ARROW + (y / scrollH) * trackLen);
+
+        const strip = win.querySelector(".strip");
+
+        function drawMarks(parent, width) {
+          const headW = {
+            1: width,
+            2: Math.round(width * 0.62),
+            3: Math.round(width * 0.4),
+          };
+          const headH = { 1: 3, 2: 2, 3: 2 };
+          for (const h of headings)
+            mark(
+              parent,
+              "m-h" + h.level,
+              0,
+              map(h.y),
+              headW[h.level],
+              headH[h.level],
+            );
+          for (const t of tasks)
+            mark(
+              parent,
+              t.ticked ? "m-task-ticked" : "m-task-open",
+              1,
+              map(t.y) + 1,
+              4,
+              3,
+            );
+          for (const m of matches)
+            if (!m.current) mark(parent, "m-match", width - 6, map(m.y), 6, 3);
+          mark(parent, "m-current", 0, map(current.y) - 1, width, 3);
+        }
+
+        if (option === "a") {
+          drawMarks(strip, W);
+          // The cheap way to the headings' names: a hover label beside a heading mark.
+          const target = headings.find((h) => h.text === "Conflicts");
+          const label = el("div", "hover-label");
+          label.textContent = "Conflicts";
+          label.style.top = map(target.y) - 11 + "px";
+          label.style.right = W + SCROLL_BAR + 8 + "px";
+          body.append(label);
+          const pointer = el("div", "pointer");
+          pointer.innerHTML =
+            '<svg viewBox="0 0 12 18" width="12" height="18"><path d="M1 1 L1 14 L4.2 11 L6.6 16.4 L8.6 15.5 L6.3 10.3 L10.6 10.3 Z" fill="#fff" stroke="#000" stroke-width="1"/></svg>';
+          pointer.style.top = map(target.y) + 1 + "px";
+          pointer.style.right = SCROLL_BAR + 2 + "px";
+          body.append(pointer);
+        }
+
+        if (option === "t") {
+          drawMarks(win.querySelector(".track"), SCROLL_BAR);
+        }
+
+        if (option === "b") {
+          const shape = {
+            text: [2, W - 4],
+            list: [5, W - 7],
+            code: [2, W - 4],
+            table: [2, W - 4],
+            image: [4, W - 8],
+          };
+          for (const b of blocks) {
+            if (b.kind === "heading") continue;
+            const y0 = map(b.top);
+            const y1 = map(b.top + b.h);
+            const [x, w] = shape[b.kind];
+            mark(strip, "s-" + b.kind, x, y0, w, Math.max(1, y1 - y0));
+          }
+          drawMarks(strip, W);
+          mark(
+            strip,
+            "m-slider",
+            0,
+            Math.round(thumbTop),
+            W,
+            Math.round(thumbH),
+          );
+        }
+
+        if (option === "c") {
+          mark(
+            strip,
+            "c-band",
+            0,
+            map(scrollTop),
+            W,
+            map(scrollTop + clientH) - map(scrollTop),
+          );
+          for (const m of matches)
+            mark(
+              strip,
+              m.current ? "m-current" : "m-match",
+              W - 4,
+              map(m.y) - (m.current ? 1 : 0),
+              4,
+              3,
+            );
+          let lastBottom = -Infinity;
+          for (const h of headings) {
+            const y = map(h.y);
+            // The label hangs below its heading's position, as the heading's text starts there.
+            const top = Math.max(y - 1, lastBottom + 1);
+            lastBottom = top + 14;
+            const indent = 8 + (h.level - 1) * 10;
+            mark(strip, "c-tick", 0, y, 4, 1);
+            const inView = h.y >= scrollTop && h.y < scrollTop + clientH;
+            const label = el(
+              "span",
+              "c-label lv" + h.level + (inView ? " in-view" : ""),
+              {
+                top: top + "px",
+                left: indent + "px",
+                width: W - indent - 8 + "px",
+              },
+            );
+            label.textContent = h.text;
+            strip.append(label);
+          }
+        }
+
+        if (option === "d") {
+          // The picture: the same article again, at the scale that fits its text column in the strip.
+          const contentW = article.clientWidth - 64;
+          const s = (W - 8) / contentW;
+          const clone = article.cloneNode(true);
+          clone.classList.add("minimap-doc");
+          Object.assign(clone.style, {
+            width: contentW + "px",
+            left: "4px",
+            top: "4px",
+            transform: `scale(${s})`,
+          });
+          strip.append(clone);
+          const toMini = (y) => Math.round(4 + (y - 32) * s);
+          mark(
+            strip,
+            "m-slider",
+            0,
+            toMini(scrollTop),
+            W,
+            Math.round(clientH * s),
+          );
+          document.getElementById("d-scale").textContent = (
+            Math.round(s * 1000) / 10
+          ).toString();
+        }
+
+        return { scrollH, articleW: article.clientWidth };
+      }
+
+      function addDimension(cell, win, option, info) {
+        const W = STRIP[option];
+        const dim = el("div", "dim");
+        const right = SCROLL_BAR;
+        dim.append(
+          el("div", "bracket", { right: right + "px", width: W + "px" }),
+        );
+        const label = el("div", "label", { right: right + W + 8 + "px" });
+        const column = info.articleW - 64;
+        label.textContent = `${W} px strip beside the 15 px scroll bar; the text column is ${column} px, ${821 - column} px narrower than without it`;
+        dim.append(label);
+        cell.append(dim);
+      }
+
+      const built = [...document.querySelectorAll(".slot")].map((slot) =>
+        buildWindow(slot, slot.dataset.option),
+      );
+      for (const win of built) {
+        const info = layOut(win);
+        const cell = win.closest(".cell");
+        if (cell) addDimension(cell, win, win.dataset.option, info);
+        if (cell && cell.id === "cell-a") {
+          document.getElementById("doc-height").textContent =
+            info.scrollH.toLocaleString("en-US");
+        }
+      }
+
+      function setPressed(on, off) {
+        on.setAttribute("aria-pressed", "true");
+        off.setAttribute("aria-pressed", "false");
+      }
+      const root = document.documentElement;
+      const ids = (id) => document.getElementById(id);
+      function setTheme(dark) {
+        root.classList.toggle("dark", dark);
+        dark
+          ? setPressed(ids("theme-dark"), ids("theme-light"))
+          : setPressed(ids("theme-light"), ids("theme-dark"));
+      }
+      function setSolid(solid) {
+        root.classList.toggle("solid", solid);
+        solid
+          ? setPressed(ids("bd-none"), ids("bd-mica"))
+          : setPressed(ids("bd-mica"), ids("bd-none"));
+      }
+      ids("theme-light").onclick = () => setTheme(false);
+      ids("theme-dark").onclick = () => setTheme(true);
+      ids("bd-mica").onclick = () => setSolid(false);
+      ids("bd-none").onclick = () => setSolid(true);
+      const params = new URLSearchParams(location.search);
+      if (params.get("theme") === "dark") setTheme(true);
+      if (params.get("backdrop") === "none") setSolid(true);
+      // ?only=a shows one option's cell by itself, magnified by ?zoom=, for the close-up screenshots.
+      // Applied after the layout above, so the marks were placed at 1x.
+      const only = params.get("only");
+      if (only) {
+        for (const hide of document.querySelectorAll(
+          ".sheet-head, .legend, .section-title, .section-note, .crops",
+        ))
+          hide.style.display = "none";
+        for (const cell of document.querySelectorAll(".cell"))
+          if (cell.id !== "cell-" + only) cell.style.display = "none";
+        document.querySelector(".grid").style.display = "block";
+        document.body.style.padding = "16px";
+        document.querySelector("#cell-" + only).style.zoom =
+          params.get("zoom") || "1";
+        // Zoom moves the scroll position; put the view back where the strip says it is.
+        for (const win of built) {
+          win.querySelector(".view-scroller").scrollTop =
+            +win.dataset.scrollTop;
+        }
+      }
+    </script>
+  </body>
+</html>
