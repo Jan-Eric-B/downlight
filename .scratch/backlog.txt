@@ -5,11 +5,14 @@ ID = folder/number under .scratch/<folder>/issues/<number>-*.md (v1 = downlight-
 Status: ready = ready-for-agent, triage = needs-triage (grill first), info = needs-info (investigate).
 Move lines to change the order. A new ticket gets a line here; a closed ticket's line is removed.
 
+- Update defautl window size: Currently I think the widht is more than the height. For text this does not make sense. Find a good default window size
+
 full-screen/01 | F11 and the menu switch full screen | built, hand checks left | only the hand check is missing
 full-screen/02 | Esc leaves full screen, last | built, hand checks left | only the hand check is missing; blocked by full-screen/01; Esc after the flyout, Find and Stop, and image-lightbox/02 before it; image-lightbox/01 moves its Esc into one ordered list
 full-screen/03 | The title bar hides in full screen | built, hand checks left | only the hand check is missing; blocked by full-screen/01
 full-screen/04 | The title bar slides in at the top edge | built, hand checks left | only the hand check is missing; blocked by full-screen/03
 full-screen/05 | The bar's buttons in full screen | built, hand checks left | only the hand check is missing; blocked by full-screen/01 (tests) and full-screen/04 (hand check); slideshow/01 reuses full screen
+full-screen/06 | A repeated Notice shows once (F11 spam stacks the full screen Notice) | ready | not blocked; bug, page only; changes every Notice, not only full screen's
 paste-markdown/01 | Ctrl+V and the menu show the clipboard's text | ready | not blocked; a paste is a file Downlight writes (ADR 0006), which converter/01 may reuse; pasted files pile up until paste-markdown/02
 paste-markdown/02 | A pasted file is deleted once no window can return to it | ready | blocked by paste-markdown/01
 paste-markdown/03 | Drop text dragged from another program | triage | not blocked; Tauri's native drop gives only paths, so it may mean rebuilding file drops in the page
@@ -28,6 +31,7 @@ copy-as-markdown/03 | Copy as Markdown of part of a table | ready | blocked by c
 copy-as-markdown/04 | Ctrl+C puts clean HTML beside its plain text | ready | not blocked; page only; the margin's line numbers (line-numbers/01) and a sort (tables/01) must keep working with it
 v1/38 | A large document's load can be left (Wait note, Stop) | built, hand checks left | only your hand check is missing; all boxes still unchecked; blocks v1/39
 wd/10 | Counts (lines and words in the file name tooltip, selection bubble bottom right) | ready | not blocked; its bubble owns the bottom right corner
+wd/17 | A tall default window for reading (900 px wide, 90% of the work area high) | ready | not blocked; app only (window placement); only the first window before any closed, a kept size still wins
 about/01 | About Downlight (version, GPL notices, third-party notices) | triage | not blocked; closes a GPL-3.0 gap (legal notices in the UI); may add a section to the settings flyout, as ruler/02 adds a "View" group
 ruler/01 | Overview ruler: heading marks beside the scroll bar | ready | not blocked; builds the list of headings (h1 to h4) that outline/01 to 06 reuse
 ruler/02 | Overview ruler: the switch in the settings (flyout "View" group) | ready | blocked by ruler/01; creates the flyout's "View" group that reader-settings and remote-images may use
