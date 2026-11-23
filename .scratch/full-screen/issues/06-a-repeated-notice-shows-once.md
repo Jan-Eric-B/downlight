@@ -14,4 +14,4 @@ Spec: [Full screen](../spec.md) (story 40, Implementation Decisions, "The Notice
 - [x] A Notice with a file in it counts as the same only when its text and its file are the same; the same message about two different files is two lines.
 - [x] A notice held by the pointer or the focus on its folder link is held as before.
 - [x] Page tests: the reproduction above; the same plain message shown twice gives one line and restarts the 4 s; two different messages give two lines; the same message about two files gives two lines.
-- [ ] `npm run check` passes.
+- [x] `npm run check` passes.
