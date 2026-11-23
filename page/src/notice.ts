@@ -76,15 +76,25 @@ function createNotice(): HTMLElement {
  * Shows a short message at the bottom of the window for a few seconds: why a dropped file didn't
  * open, or why a document couldn't be shown. A message that comes while others still show goes on
  * a line below them rather than over them, since two can come at once (a held "Can't watch"
- * notice and a failed drop), and all go 4 s after the last. A notice whose folder opens stays
- * while the pointer is on it or the focus in it, and goes 4 s after.
+ * notice and a failed drop), and all go 4 s after the last. A message the notice already shows
+ * adds no line: its line becomes the newest (full screen ticket 06). A notice whose folder opens
+ * stays while the pointer is on it or the focus in it, and goes 4 s after.
  */
 export function showNotice(message: Notice): void {
   const notice =
     document.querySelector<HTMLElement>(".notice") ?? createNotice();
   const line = document.createElement("div");
   line.append(noticeContent(message));
-  notice.append(line);
+  const shown = [...notice.children].find(
+    (other) => other.textContent === line.textContent,
+  );
+  if (shown) {
+    // The lines after it move in front of it rather than it moving to the end, which would take
+    // the focus off its folder link.
+    while (shown.nextElementSibling) shown.before(shown.nextElementSibling);
+  } else {
+    notice.append(line);
+  }
   while (notice.childElementCount > MOST_MESSAGES) {
     notice.firstElementChild?.remove();
   }

@@ -59,6 +59,46 @@ test("a notice shows at most 3 messages, dropping the oldest", () => {
   expect(shownLines()).toEqual(["two", "three", "four"]);
 });
 
+test("a message the notice already shows adds no line, and the notice stays 4 s from the repeat", () => {
+  showNotice("Downlight opens Markdown files (.md).");
+  vi.advanceTimersByTime(3000);
+  showNotice("Downlight opens Markdown files (.md).");
+  expect(shownLines()).toEqual(["Downlight opens Markdown files (.md)."]);
+
+  vi.advanceTimersByTime(3999);
+  expect(shownLines()).toEqual(["Downlight opens Markdown files (.md)."]);
+  vi.advanceTimersByTime(1);
+  expect(shownLines()).toEqual([]);
+});
+
+test("a repeated message moves to the end, as the newest, and is the last to be dropped", () => {
+  showNotice("one");
+  showNotice("two");
+  showNotice("one");
+  expect(shownLines()).toEqual(["two", "one"]);
+
+  showNotice("three");
+  showNotice("four");
+  expect(shownLines()).toEqual(["one", "three", "four"]);
+});
+
+test("the same message about two files is two lines", () => {
+  showNotice({
+    before: "Can't find ",
+    file: { name: "a.md", folder: "C:\\docs", folderOpens: false },
+    after: ".",
+  });
+  showNotice({
+    before: "Can't find ",
+    file: { name: "b.md", folder: "C:\\docs", folderOpens: false },
+    after: ".",
+  });
+  expect(shownLines()).toEqual([
+    "Can't find a.md in C:\\docs.",
+    "Can't find b.md in C:\\docs.",
+  ]);
+});
+
 test("a notice after the last one has gone shows alone", () => {
   showNotice("one");
   vi.advanceTimersByTime(4000);

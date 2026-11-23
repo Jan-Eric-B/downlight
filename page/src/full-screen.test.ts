@@ -241,8 +241,10 @@ test("each time the window goes full screen a Notice says how to leave, and leav
   expect(noticeLines()).toEqual([LEAVE_NOTICE]);
   pressF11();
   await vi.waitFor(() => {
-    expect(noticeLines()).toEqual([LEAVE_NOTICE, LEAVE_NOTICE]);
+    expect(checkedInMenu()).toBe(true);
   });
+  // Ticket 06: going full screen again within the notice's 4 s shows its line once.
+  expect(noticeLines()).toEqual([LEAVE_NOTICE]);
 });
 
 test("F11 switches full screen in a window that shows no document", async () => {
