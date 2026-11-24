@@ -43,6 +43,14 @@ interface Command {
    */
   repeatsWhileHeld?: boolean;
   /**
+   * Whether its shortcut is left to an editable field that has the focus, such as the Find box,
+   * so the field does with the key what it always does: Ctrl+V pastes into the field (paste-markdown
+   * ticket 01). Off unless a command asks for it, so Ctrl+W still closes the window from the Find
+   * box. Such a command isn't offered in the right-click menu over a field, or while one has the
+   * focus, either: chosen there, the reader would take it for the field's own.
+   */
+  leavesEditableFields?: boolean;
+  /**
    * The mouse button that runs it, by `MouseEvent.button`: 3 is the side button for Back and 4
    * the one for Forward. Any other button, and a command without one, does what it did.
    */
@@ -124,6 +132,16 @@ const commands = {
     run: findPrevious,
   },
   open: { label: "Open...", shortcuts: [{ ctrl: true, key: "o" }], run: open },
+  // The app reads the clipboard itself, so a large paste never passes through the page, and
+  // Win+V's clipboard history, which pastes with Ctrl+V, works too (paste-markdown spec).
+  paste: {
+    label: "Paste",
+    shortcuts: [{ ctrl: true, key: "v" }],
+    leavesEditableFields: true,
+    run: () => {
+      showingWhy(askApp("paste_clipboard"));
+    },
+  },
   // Without a document the app has nothing to open; Ctrl+E still asks it, which says so.
   edit: {
     label: "Edit",
@@ -238,6 +256,7 @@ const menu: MenuLine[] = [
   "separator",
   "edit",
   "open",
+  "paste",
   "separator",
   "zoomIn",
   "zoomOut",
@@ -253,8 +272,9 @@ const menu: MenuLine[] = [
   "settings",
 ];
 
-/** The menu as the app's `show_document_menu` takes it. */
-function menuEntries(): MenuEntry[] {
+/** The menu as the app's `show_document_menu` takes it, right-clicked on `target`. */
+function menuEntries(target: EventTarget | null): MenuEntry[] {
+  const inField = isEditable(target) || isEditable(document.activeElement);
   return menu.map((line): MenuEntry => {
     if (line === "separator" || line === "copy") return { kind: line };
     const command: Command = commands[line];
@@ -263,7 +283,9 @@ function menuEntries(): MenuEntry[] {
       id: line,
       label: command.label,
       shortcut: shortcutOf(command),
-      enabled: command.available?.() ?? true,
+      enabled:
+        !(inField && command.leavesEditableFields) &&
+        (command.available?.() ?? true),
       // Only a command that switches something has a check mark, ticked or not.
       ...(command.pressed && { checked: command.pressed() }),
     };
@@ -386,6 +408,25 @@ function typesANonLatinLetter(event: KeyboardEvent): boolean {
   return /^\p{L}$/u.test(event.key) && !/^\p{Script=Latin}$/u.test(event.key);
 }
 
+/** The kinds of `input` the reader types text into; the others, such as a radio button, take none. */
+const TEXT_INPUT_TYPES = new Set([
+  "text",
+  "search",
+  "url",
+  "tel",
+  "email",
+  "password",
+  "number",
+]);
+
+/** Whether `target`, where a key was pressed, is a field the reader types text into. */
+function isEditable(target: EventTarget | null): boolean {
+  if (target instanceof HTMLTextAreaElement) return true;
+  if (target instanceof HTMLInputElement)
+    return TEXT_INPUT_TYPES.has(target.type);
+  return target instanceof HTMLElement && target.isContentEditable;
+}
+
 function isLetter(key: string): boolean {
   return /^[a-z]$/.test(key);
 }
@@ -421,6 +462,7 @@ export function startCommands(signal?: AbortSignal): void {
         (candidate: Command) => pressesShortcutOf(event, candidate),
       );
       if (!command) return;
+      if (command.leavesEditableFields && isEditable(event.target)) return;
       // A repeat is taken from the webview too, for webviews whose browser keys are still on: the
       // other systems' until their ports, and a window whose keys the app couldn't turn off.
       event.preventDefault();
@@ -508,7 +550,9 @@ export function startCommands(signal?: AbortSignal): void {
     (event) => {
       // The app shows a native menu in place of the webview's own.
       event.preventDefault();
-      showingWhy(askApp("show_document_menu", { entries: menuEntries() }));
+      showingWhy(
+        askApp("show_document_menu", { entries: menuEntries(event.target) }),
+      );
     },
     { signal },
   );

@@ -6,6 +6,7 @@ import { startCommands } from "./commands";
 import { findMatches, startFind } from "./find";
 import {
   answerAsTheApp,
+  askedOfTheApp,
   giveAnotherDocument,
   layOut,
   fakeTheApp,
@@ -157,6 +158,14 @@ test("Ctrl+F while the bar is open selects the text in its box", () => {
   ctrlF();
   expect(document.activeElement).toBe(box());
   expect([box().selectionStart, box().selectionEnd]).toEqual([0, 4]);
+});
+
+// Ctrl+V is Paste's everywhere else (paste-markdown ticket 01).
+test("Ctrl+V in the box is the box's, to paste the text to find, not a document", () => {
+  ctrlF();
+  const event = press({ ctrlKey: true, key: "v", code: "KeyV" });
+  expect(event.defaultPrevented).toBe(false);
+  expect(askedOfTheApp()).not.toContain("paste_clipboard");
 });
 
 test("typing counts the matches, ignoring case", () => {

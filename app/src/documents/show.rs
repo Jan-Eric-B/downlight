@@ -8,6 +8,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::PoisonError;
 
+use super::pasted_files::HeldDocument;
 use super::place::{self, Area, Point, WindowPlace, WindowSize};
 use super::{Claimed, Documents, Given, Showing, WindowState};
 use crate::APP_NAME;
@@ -201,7 +202,12 @@ impl Documents {
                 self.bring_to_front(&window)?;
                 Ok(Given::AlreadyElsewhere(window))
             }
-            Claimed::WindowGone => Err(ShowError::WindowClosed),
+            Claimed::WindowGone => {
+                // No window took the document, so a pasted file given to a window that closed
+                // first is let go of as it is refused.
+                self.let_go(HeldDocument { key: &key, path });
+                Err(ShowError::WindowClosed)
+            }
         }
     }
 
@@ -234,7 +240,8 @@ impl Documents {
     /// so the table, the title and the page agree again.
     ///
     /// `left` is the document on its way that the claim left, if one was: it goes once the
-    /// change is made, which leaves its render, and is put back on its way if it fails.
+    /// change is made, which leaves its render, and its file too if it is a pasted file no
+    /// window holds, and it is put back on its way if the change fails.
     fn change(
         &self,
         window: &str,
@@ -249,6 +256,8 @@ impl Documents {
             // The error that failed the change is the one the reader is told; a title that can't
             // be put back either stays as wrong as the failure left it.
             let _ = self.retitle(window);
+        } else {
+            self.let_go(left);
         }
         changed
     }
@@ -284,10 +293,11 @@ impl Documents {
     /// shows, which it held until the document arrived, and its history, with `left` on its way
     /// again if the claim left one. Unless another claim has changed it since, or it closed. By
     /// the claim rather than the showing, since a step gives a window back a showing it had, so a
-    /// later step could have given it the same one.
+    /// later step could have given it the same one. A pasted file among what is dropped that no
+    /// window holds goes.
     fn put_back(&self, window: &str, claim: u64, left: Option<Box<WindowState>>) {
         // Dropped after the lock, since dropping a watch stops it.
-        let _dropped = {
+        let dropped = {
             let mut table = self.lock();
             match table.windows.get_mut(window) {
                 Some(record)
@@ -307,6 +317,7 @@ impl Documents {
                 _ => left.map(|left| *left),
             }
         };
+        self.let_go(dropped);
     }
 
     /// Tells `window`'s page to stop its next document on its way, if `stop` names the showing

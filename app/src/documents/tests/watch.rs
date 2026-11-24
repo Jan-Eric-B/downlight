@@ -126,26 +126,6 @@ fn change_for_a_closed_window_is_ignored() {
 /// hangs it.
 const REPORT_WAIT: Duration = Duration::from_secs(3);
 
-/// Saves `path` until its watch has reported it to `window`'s page, and returns every message sent
-/// by then. The watch starts on a thread of its own after the window was given the document, and a
-/// save before it started goes unreported, so the file is saved again until one is reported.
-#[expect(
-    clippy::unwrap_used,
-    clippy::panic,
-    reason = "a helper isn't a #[test] function, and its panic fails the test that called it"
-)]
-fn save_until_reported(pages: &Recorder, window: &str, path: &Path) -> Vec<Sent> {
-    let before = pages.sent().len();
-    for save in 0..10 {
-        std::fs::write(path, format!("# Saved {save}")).unwrap();
-        let sent = pages.wait_until(Duration::from_millis(500), |sent| sent.len() > before);
-        if sent.len() > before {
-            return sent;
-        }
-    }
-    panic!("no save to {} was reported to {window}", path.display());
-}
-
 #[test]
 fn document_given_and_then_saved_reloads_with_the_saved_text() {
     let path = document("saved", "# First");

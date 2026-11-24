@@ -409,6 +409,12 @@ export type Commands = {
   };
   open_document: { args: undefined; answer: null };
   /**
+   * Paste (paste-markdown ticket 01): the clipboard's text, which the app reads itself, written to a
+   * file of its own and given to the window as Open gives it a file. Rejects with why, such as a
+   * clipboard that holds no text, and the window stays as it was.
+   */
+  paste_clipboard: { args: undefined; answer: null };
+  /**
    * Back or Forward to another document in the window's history, which the window is then given
    * as it is any other (`ask-for-document`). Nowhere to go does nothing.
    */

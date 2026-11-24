@@ -6,12 +6,12 @@ mod windows;
 
 #[cfg(windows)]
 pub use windows::{
-    accent_scale, add_maximize_button, ask, custom_scheme_origin, draws_own_title_bar, fold_case,
-    follow_accent, has_backdrop, is_missing, leave_keys_to_the_page, let_take_foreground,
-    menu_item_text, notepad, open_as_text_file, open_folder, open_url, place_maximize_button,
-    process_start, program_name, reveal_file, set_backdrop, show_error, show_window_menu,
-    text_file_program, text_file_program_name, when_webview_stops, with_backdrop,
-    with_browser_arguments,
+    accent_scale, add_maximize_button, ask, clipboard_text, custom_scheme_origin,
+    draws_own_title_bar, fold_case, follow_accent, has_backdrop, is_missing,
+    leave_keys_to_the_page, let_take_foreground, local_time, menu_item_text, notepad,
+    open_as_text_file, open_folder, open_url, place_maximize_button, process_start, program_name,
+    reveal_file, set_backdrop, show_error, show_window_menu, text_file_program,
+    text_file_program_name, when_webview_stops, with_backdrop, with_browser_arguments,
 };
 
 /// Other systems name no text file program until their ports find theirs.
@@ -195,4 +195,24 @@ pub fn fold_case(path: std::path::PathBuf) -> std::path::PathBuf {
 #[cfg(not(windows))]
 pub fn custom_scheme_origin(scheme: &str) -> String {
     format!("{scheme}://localhost")
+}
+
+/// Other systems read their clipboards with their ports; Paste says it isn't available yet.
+#[cfg(not(windows))]
+pub fn clipboard_text() -> crate::paste::Clipboard {
+    crate::paste::Clipboard::NotAvailable
+}
+
+/// Other systems give a fixed time: Paste isn't available there until their ports, so no file is
+/// ever named by it.
+#[cfg(not(windows))]
+pub const fn local_time() -> crate::paste::LocalTime {
+    crate::paste::LocalTime {
+        year: 1970,
+        month: 1,
+        day: 1,
+        hour: 0,
+        minute: 0,
+        second: 0,
+    }
 }

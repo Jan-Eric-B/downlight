@@ -8,6 +8,7 @@ import { startSettings } from "./settings";
 import {
   answerAsTheApp,
   askedOfTheApp,
+  failingWith,
   fakeTheApp,
   menuEntryOf,
   settle,
@@ -159,6 +160,106 @@ describe("Ctrl+O opens a document", () => {
         "Can't show C:\\docs\\a.md",
       );
     });
+  });
+});
+
+// The app reads the clipboard itself, so the page sends no text (paste-markdown ticket 01).
+describe("Ctrl+V pastes the clipboard's text", () => {
+  test("on a QWERTY layout", () => {
+    const event = press({ ctrlKey: true, key: "v", code: "KeyV" });
+    expect(askedOfTheApp()).toEqual(["paste_clipboard"]);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  test("on a Cyrillic layout, by the key in V's place", () => {
+    press({ ctrlKey: true, key: "м", code: "KeyV" });
+    expect(askedOfTheApp()).toEqual(["paste_clipboard"]);
+  });
+
+  // Held down, each repeat would paste another file into the window's history.
+  test("once while held down", () => {
+    press({ ctrlKey: true, key: "v", code: "KeyV" });
+    const repeat = press({
+      ctrlKey: true,
+      key: "v",
+      code: "KeyV",
+      repeat: true,
+    });
+    expect(askedOfTheApp()).toEqual(["paste_clipboard"]);
+    expect(repeat.defaultPrevented).toBe(true);
+  });
+
+  test("and a failed paste shows the app's notice", async () => {
+    app.paste_clipboard = () =>
+      failingWith(
+        "The clipboard holds no text. To open a file, drop it here or use Open.",
+      );
+    press({ ctrlKey: true, key: "v", code: "KeyV" });
+    await vi.waitFor(() => {
+      expect(document.querySelector(".notice")?.textContent).toBe(
+        "The clipboard holds no text. To open a file, drop it here or use Open.",
+      );
+    });
+  });
+
+  // The field pastes the text into itself, as before Paste was a command.
+  test.each([
+    ["a text box", () => document.createElement("input")],
+    ["a text area", () => document.createElement("textarea")],
+    [
+      "an editable element",
+      () => {
+        const element = document.createElement("div");
+        element.contentEditable = "true";
+        return element;
+      },
+    ],
+  ])("but not in %s, which gets the key", (_field, create) => {
+    const field = create();
+    document.body.append(field);
+    const event = new KeyboardEvent("keydown", {
+      ctrlKey: true,
+      key: "v",
+      code: "KeyV",
+      bubbles: true,
+      cancelable: true,
+    });
+    field.dispatchEvent(event);
+    expect(askedOfTheApp()).toEqual([]);
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  // A radio button, as in the settings flyout, takes no text, so Ctrl+V there pastes a document.
+  test("in a radio button", () => {
+    const radio = document.createElement("input");
+    radio.type = "radio";
+    document.body.append(radio);
+    radio.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        ctrlKey: true,
+        key: "v",
+        code: "KeyV",
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    expect(askedOfTheApp()).toEqual(["paste_clipboard"]);
+  });
+
+  // Other shortcuts still run from a text box, as Ctrl+W closes the window from the Find box.
+  test("while Ctrl+W still closes the window from a text box", () => {
+    const field = document.createElement("input");
+    document.body.append(field);
+    field.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        ctrlKey: true,
+        key: "w",
+        code: "KeyW",
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    expect(askedOfTheApp()).toEqual(["close_window"]);
   });
 });
 
@@ -396,7 +497,7 @@ describe("the right-click menu", () => {
     return menuEntryOf(entries, id)?.enabled;
   }
 
-  test("replaces the webview's menu with Back, Forward, Reload, Find, Edit, Open, Zoom in, Zoom out, Reset zoom, Full width, Keep on top, Full screen, Copy and Settings", async () => {
+  test("replaces the webview's menu with Back, Forward, Reload, Find, Edit, Open, Paste, Zoom in, Zoom out, Reset zoom, Full width, Keep on top, Full screen, Copy and Settings", async () => {
     // A window without a document.
     app.render_document = () => null;
     await startDocumentView(0);
@@ -420,6 +521,8 @@ describe("the right-click menu", () => {
       command("edit", "Edit", "Ctrl+E"),
       // Choose editor... is in the settings flyout's Edit with now (window design ticket 08).
       command("open", "Open...", "Ctrl+O"),
+      // Beside Open, as the other way to give the window a document (paste-markdown spec).
+      command("paste", "Paste", "Ctrl+V"),
       { kind: "separator" },
       // As Windows names the keys, as in Notepad's menu.
       command("zoomIn", "Zoom in", "Ctrl+Plus"),
@@ -466,6 +569,56 @@ describe("the right-click menu", () => {
     const bar = document.querySelector<HTMLElement>(".find-bar");
     expect(bar?.hidden).toBe(false);
     expect(document.activeElement).toBe(bar?.querySelector("input"));
+  });
+
+  test("runs Paste chosen in the menu", async () => {
+    await settle();
+    await tell("menu-command", "paste");
+    expect(askedOfTheApp()).toEqual(["paste_clipboard"]);
+  });
+
+  test("offers Paste over the document", () => {
+    expect(enabledInMenu("paste")).toBe(true);
+  });
+
+  // As Ctrl+V is left to a field, the menu's Paste, which would paste a document rather than into
+  // the field, isn't offered there either (paste-markdown spec).
+  test.each([
+    ["a text box", () => document.createElement("input")],
+    ["a text area", () => document.createElement("textarea")],
+    [
+      "an editable element",
+      () => {
+        const element = document.createElement("div");
+        element.contentEditable = "true";
+        return element;
+      },
+    ],
+  ])("offers no Paste when right-clicked in %s", (_field, create) => {
+    const field = create();
+    document.body.append(field);
+    field.dispatchEvent(
+      new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+    );
+    expect(menuEntryOf(entries, "paste")?.enabled).toBe(false);
+  });
+
+  test("offers no Paste while a text box has the focus", () => {
+    const field = document.createElement("input");
+    document.body.append(field);
+    field.focus();
+    expect(enabledInMenu("paste")).toBe(false);
+  });
+
+  // A radio button, as in the settings flyout, takes no text, as for Ctrl+V.
+  test("offers Paste when right-clicked in a radio button", () => {
+    const radio = document.createElement("input");
+    radio.type = "radio";
+    document.body.append(radio);
+    radio.dispatchEvent(
+      new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+    );
+    expect(menuEntryOf(entries, "paste")?.enabled).toBe(true);
   });
 
   test("ignores a command it doesn't know", async () => {

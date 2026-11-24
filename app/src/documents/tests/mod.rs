@@ -15,7 +15,7 @@ use std::time::{Duration, SystemTime};
 use tauri::async_runtime::block_on;
 
 use super::handover::{Handover, Place};
-use super::recorder::{Recorder, Sent, ToWindow, recorded, recorded_with};
+use super::recorder::{Recorder, Sent, ToWindow, recorded, recorded_pasting, recorded_with};
 use super::*;
 use crate::settings::PageSettings;
 use crate::watch::{Change, Report};
@@ -24,6 +24,7 @@ mod arrival;
 mod give;
 mod handover;
 mod history;
+mod paste;
 mod place;
 mod settings;
 mod watch;
@@ -227,4 +228,24 @@ fn report_callback(documents: &Documents, window: &str, path: &Path) -> impl FnM
 fn watch_callback(documents: &Documents, window: &str, path: &Path) -> impl FnMut(Change) + use<> {
     let mut on_report = report_callback(documents, window, path);
     move |change| on_report(Report::Change(change))
+}
+
+/// Saves `path` until its watch has reported it to `window`'s page, and returns every message sent
+/// by then. The watch starts on a thread of its own after the window was given the document, and a
+/// save before it started goes unreported, so the file is saved again until one is reported.
+#[expect(
+    clippy::unwrap_used,
+    clippy::panic,
+    reason = "a helper isn't a #[test] function, and its panic fails the test that called it"
+)]
+fn save_until_reported(pages: &Recorder, window: &str, path: &Path) -> Vec<Sent> {
+    let before = pages.sent().len();
+    for save in 0..10 {
+        std::fs::write(path, format!("# Saved {save}")).unwrap();
+        let sent = pages.wait_until(Duration::from_millis(500), |sent| sent.len() > before);
+        if sent.len() > before {
+            return sent;
+        }
+    }
+    panic!("no save to {} was reported to {window}", path.display());
 }

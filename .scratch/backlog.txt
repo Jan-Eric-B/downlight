@@ -12,9 +12,9 @@ full-screen/02 | Esc leaves full screen, last | built, hand checks left | only t
 full-screen/03 | The title bar hides in full screen | built, hand checks left | only the hand check is missing; blocked by full-screen/01
 full-screen/04 | The title bar slides in at the top edge | built, hand checks left | only the hand check is missing; blocked by full-screen/03
 full-screen/05 | The bar's buttons in full screen | built, hand checks left | only the hand check is missing; blocked by full-screen/01 (tests) and full-screen/04 (hand check); slideshow/01 reuses full screen
-full-screen/06 | A repeated Notice shows once (F11 spam stacks the full screen Notice) | ready | not blocked; bug, page only; changes every Notice, not only full screen's
-paste-markdown/01 | Ctrl+V and the menu show the clipboard's text | ready | not blocked; a paste is a file Downlight writes (ADR 0006), which converter/01 may reuse; pasted files pile up until paste-markdown/02
-paste-markdown/02 | A pasted file is deleted once no window can return to it | ready | blocked by paste-markdown/01
+full-screen/06 | A repeated Notice shows once (F11 spam stacks the full screen Notice) | built, hand checks left | only the hand check is missing (F11 quickly a few times); changes every Notice, not only full screen's
+paste-markdown/01 | Ctrl+V and the menu show the clipboard's text | built, hand checks left | only the measurement (DOWNLIGHT_TIMING's paste line on the 1 MB document) and the hand checks are missing
+paste-markdown/02 | A pasted file is deleted once no window can return to it | built, hand checks left | only the hand checks are missing (closing a paste's window, ending the process and the next start's sweep, first paint with pastes left)
 paste-markdown/03 | Drop text dragged from another program | triage | not blocked; Tauri's native drop gives only paths, so it may mean rebuilding file drops in the page
 image-lightbox/01 | One place owns Esc's order | ready | not blocked; prefactor, no visible change; touches the Esc listeners of the settings flyout, Find, Stop and full-screen/02
 image-lightbox/02 | A click on an image shows it in the lightbox | ready | blocked by image-lightbox/01; Esc after the flyout, before Find, Stop and full screen
@@ -25,7 +25,7 @@ image-lightbox/06 | The image's name reveals or opens its file | ready | blocked
 image-lightbox/07 | A link to its own image opens the lightbox | ready | blocked by image-lightbox/02; rendering change (fixtures), avoid running it beside right-to-left/01 or another rendering change
 image-lightbox/08 | Alt+click, "Show image" and the keyboard open any image | ready | blocked by image-lightbox/02; adds a context-dependent entry to the right-click menu
 image-lightbox/09 | "Play again" for a local animated image | ready | blocked by image-lightbox/03; core reads GIF, WebP and APNG loop counts (maybe crates: cargo-deny, notices)
-copy-as-markdown/01 | Ctrl+Shift+C and the menu copy the Markdown of whole lines | ready | not blocked; adds Win32 clipboard writing and "shortcuts leave editable fields alone", which paste-markdown/01 also needs (whichever is built first)
+copy-as-markdown/01 | Ctrl+Shift+C and the menu copy the Markdown of whole lines | ready | not blocked; adds Win32 clipboard writing; "shortcuts leave editable fields alone" is built (paste-markdown/01, `leavesEditableFields` in the commands table)
 copy-as-markdown/02 | Copy as Markdown of part of a code block | ready | blocked by copy-as-markdown/01
 copy-as-markdown/03 | Copy as Markdown of part of a table | ready | blocked by copy-as-markdown/01; copies rows in the file's order, so a sorted table (tables/01) needs no change
 copy-as-markdown/04 | Ctrl+C puts clean HTML beside its plain text | ready | not blocked; page only; the margin's line numbers (line-numbers/01) and a sort (tables/01) must keep working with it

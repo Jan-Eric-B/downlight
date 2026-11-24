@@ -14,6 +14,8 @@
 //!   it (ticket 10).
 //! - [`history`]: the documents a window showed before and after the one it shows, which Back and
 //!   Forward give it back (ticket 12).
+//! - [`pasted_files`]: deleting each pasted file the table lets go of once no window holds it, and
+//!   emptying the pasted folder at startup (paste-markdown ticket 02).
 //! - [`settings`]: changing the reader's settings, since they shape every new window and reach
 //!   every page when they change ([`Documents::change_settings`], window design ticket 12).
 //!
@@ -31,6 +33,7 @@ use downlight_core::Leave;
 
 use crate::message::{Message, Pages};
 use crate::notice::Notice;
+use crate::paste::PastedFolder;
 use crate::platform;
 use crate::render::{self, RenderTask};
 use crate::settings::{AccentScale, Settings, SettingsStore};
@@ -39,6 +42,7 @@ use crate::watch::{Change, ReadStamp, Watch};
 pub mod arrival;
 pub mod handover;
 pub mod history;
+mod pasted_files;
 mod place;
 #[cfg(test)]
 pub mod recorder;
@@ -49,6 +53,7 @@ mod watching;
 #[cfg(test)]
 pub use handover::{contract_samples, wait_note_samples};
 use history::History;
+use pasted_files::Pastes;
 pub use place::{Area, Point, WindowPlace, WindowSize};
 pub use show::{NewWindow, ShowError, WindowError, Windows};
 
@@ -75,6 +80,9 @@ struct Inner {
     /// ticket 09); None where the OS has none. Changed only while the settings are held, and read
     /// under their lock too, so it reaches the pages in the same order as a change of the settings.
     windows_accent: Mutex<Option<AccentScale>>,
+    /// The pasted folder, whose files the table deletes once it lets go of them (paste-markdown
+    /// ticket 02).
+    pastes: Pastes,
 }
 
 /// Every open window by label, whether it shows a document or none.
@@ -432,8 +440,13 @@ enum Claimed {
 
 impl Documents {
     /// No window shows a document yet; what pages are told goes to `pages`, what is done to
-    /// windows to `windows`, and new windows open with `settings`.
-    pub fn new(pages: impl Pages, windows: impl Windows, settings: Arc<SettingsStore>) -> Self {
+    /// windows to `windows`, new windows open with `settings`, and pastes are written to `pasted`.
+    pub fn new(
+        pages: impl Pages,
+        windows: impl Windows,
+        settings: Arc<SettingsStore>,
+        pasted: PastedFolder,
+    ) -> Self {
         Self {
             inner: Arc::new(Inner {
                 table: Mutex::default(),
@@ -442,6 +455,7 @@ impl Documents {
                 windows: Box::new(windows),
                 settings,
                 windows_accent: Mutex::default(),
+                pastes: Pastes::new(pasted),
             }),
         }
     }
@@ -628,10 +642,11 @@ impl Documents {
     }
 
     /// Forgets a window that closed or never opened, so its document opens anew. A render started
-    /// for it, the watch on its document and its history go with it.
+    /// for it, the watch on its document and its history go with it, and so does each pasted
+    /// file among them that no other window holds.
     pub fn forget(&self, window: &str) {
         // Dropped after the lock, since dropping a watch stops it.
-        let _forgotten = {
+        let forgotten = {
             let mut table = self.lock();
             if table.active.as_deref() == Some(window) {
                 table.active = None;
@@ -639,6 +654,7 @@ impl Documents {
             table.not_hearing.remove(window);
             table.windows.remove(window)
         };
+        self.let_go(forgotten);
     }
 
     /// Sends `window`'s page `message`. Every message a page gets goes through here, also those
@@ -661,7 +677,8 @@ impl Documents {
 /// What two paths to the same document have in common: the path with links, `..` and short names
 /// resolved, in the case the file system compares names in. A missing file keeps its name as
 /// given, in its resolved folder; with its folder missing too, the path stays as given, absolute
-/// already, as launches, the open dialog and dropping all give it.
+/// already, as launches, the open dialog and dropping all give it. Deleting pasted files tells a
+/// pasted file by it, so that one named another way still counts.
 fn document_key(document: &Path) -> PathBuf {
     let resolved = std::fs::canonicalize(document)
         .or_else(|_| {

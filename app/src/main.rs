@@ -18,6 +18,7 @@ mod menu;
 mod message;
 mod notice;
 mod open;
+mod paste;
 mod platform;
 mod render;
 mod settings;
@@ -75,6 +76,7 @@ fn main() -> ExitCode {
             documents::arrival::stop_document,
             links::follow_link,
             open::open_document,
+            paste::paste_clipboard,
             menu::show_document_menu,
             window::close_window,
             window::show_window,
@@ -108,6 +110,10 @@ fn main() -> ExitCode {
             let folder = std::env::current_dir().unwrap_or_default();
             let documents = app.state::<Documents>();
             let failures = window::open_launch(&documents, std::env::args_os(), &folder);
+            // After the first window's show has started, so first paint never waits for it
+            // (paste-markdown ticket 02). Only here: a second launch has handed over and exited
+            // while the plugins were initialized, before `setup` runs.
+            documents.sweep_pastes();
             let Some(report) = window::failure_report(&failures) else {
                 return Ok(());
             };
@@ -141,7 +147,12 @@ fn main() -> ExitCode {
             let settings = Arc::new(settings);
             app.manage(Arc::clone(&settings));
             let handle = app.handle().clone();
-            app.manage(Documents::new(handle.clone(), handle.clone(), settings));
+            app.manage(Documents::new(
+                handle.clone(),
+                handle.clone(),
+                settings,
+                paste::PastedFolder::in_temp(),
+            ));
             // Windows' accent color (window design ticket 09): read before `setup` opens the
             // first window, so its page's URL has it, and followed from then on for every page.
             // Followed first, so that a change between the two is told, not lost; each call reads
@@ -149,7 +160,13 @@ fn main() -> ExitCode {
             // already, so a change told at once finds them.
             platform::follow_accent(move || handle.state::<Documents>().change_windows_accent());
             app.state::<Documents>().change_windows_accent();
-            app.run(|_, _| {});
+            app.run(|app, event| {
+                // Closing the last window ends the process right after its pasted file is let
+                // go of, so the deleting is finished first, rather than left to the next start.
+                if matches!(event, tauri::RunEvent::Exit) {
+                    app.state::<Documents>().finish_deleting_pastes();
+                }
+            });
             ExitCode::SUCCESS
         }
         Err(error) => {

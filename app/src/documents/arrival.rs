@@ -19,11 +19,13 @@ pub type Stopped = bool;
 impl Documents {
     /// `window`'s page placed the answer for `showing`, a show, a return or a reload, its render
     /// or why it can't be shown: what the window held while that document was on its way goes,
-    /// and with it the held document's watch, and a reload is no longer unplaced. A page whose
-    /// view shows a showing the window has left since changes nothing.
+    /// and with it the held document's watch, and a reload is no longer unplaced. What goes
+    /// includes the documents Forward went to, when the arrival went somewhere new after Back,
+    /// and each pasted file among them that no window holds goes too. A page whose view shows a
+    /// showing the window has left since changes nothing.
     pub fn arrived(&self, window: &str, showing: Showing) {
         // Dropped after the lock, since dropping a watch stops it.
-        let _left = {
+        let left = {
             let mut table = self.lock();
             let Some(record) = table.windows.get_mut(window) else {
                 return;
@@ -39,14 +41,16 @@ impl Documents {
             shown.reload_unplaced = false;
             record.before_arrival.take()
         };
+        self.let_go(left);
     }
 
     /// The reader stopped `window`'s document on its way, from a page whose last placed answer
     /// was for `page_shows` (None for the empty window): the window is what it was before it was
     /// given the document, retitled after it, and the document on its way is dropped, which
-    /// leaves its render. A change to the document put back while it was held reloads it, or
-    /// tells the page it is gone. Changes nothing, and gives false, once the document has
-    /// arrived, or when the page's last answer is another showing than the one held.
+    /// leaves its render, and deletes its file if that is a pasted file no window holds. A change
+    /// to the document put back while it was held reloads it, or tells the page it is gone.
+    /// Changes nothing, and gives false, once the document has arrived, or when the page's last
+    /// answer is another showing than the one held.
     pub fn stop(&self, window: &str, page_shows: Option<Showing>) -> Stopped {
         let (left, missed) = {
             let mut table = self.lock();
@@ -70,8 +74,7 @@ impl Documents {
             });
             (left, missed)
         };
-        // Outside the lock, since dropping a watch stops it.
-        drop(left);
+        self.let_go(left);
         // The window keeps what it was put back to: a title or a message that can't reach it is
         // nobody's to tell, as the window is closing.
         let _ = self.retitle(window);

@@ -11,6 +11,7 @@ use std::path::PathBuf;
 
 use tauri::{State, WebviewWindow};
 
+use super::pasted_files::{HeldDocument, HoldsDocuments};
 use super::{
     Arrival, Claimed, Documents, Given, ShowError, Showing, ShownDocument, WindowRecord,
     WindowState,
@@ -41,6 +42,26 @@ impl Visited {
             path: shown.path.clone(),
             key: shown.key.clone(),
         }
+    }
+}
+
+/// The document, as [`Documents::let_go`] takes it.
+impl HoldsDocuments for Visited {
+    fn held(&self) -> impl Iterator<Item = HeldDocument<'_>> {
+        std::iter::once(HeldDocument {
+            key: &self.key,
+            path: &self.path,
+        })
+    }
+}
+
+/// Every document Back and Forward could give the window.
+impl HoldsDocuments for History {
+    fn held(&self) -> impl Iterator<Item = HeldDocument<'_>> {
+        self.back
+            .iter()
+            .chain(&self.forward)
+            .flat_map(HoldsDocuments::held)
     }
 }
 
@@ -203,10 +224,10 @@ impl Documents {
     /// The reader went somewhere new in the document `window` shows as `showing`: its page
     /// scrolled to a heading on a link. As in a browser, Forward has nowhere to go any more. A
     /// window that has left that showing since keeps its history, since the page's view showed
-    /// a document the window had stepped away from.
+    /// a document the window had stepped away from. Each pasted file Forward went to that no
+    /// window holds any more goes.
     pub fn forget_forward(&self, window: &str, showing: Showing) {
-        // Dropped after the lock, though the documents forgotten hold only their paths.
-        let _forgotten = {
+        let forgotten = {
             let mut table = self.lock();
             match table.windows.get_mut(window) {
                 Some(record)
@@ -221,6 +242,7 @@ impl Documents {
                 _ => Vec::new(),
             }
         };
+        self.let_go(forgotten);
     }
 }
 

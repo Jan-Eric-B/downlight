@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use super::{Area, Documents, NewWindow, WindowError, WindowPlace, Windows};
 use crate::message::{Message, Pages};
+use crate::paste::PastedFolder;
 use crate::settings::{AccentScale, Settings, SettingsStore, WindowLook};
 
 /// A message as a [`Recorder`] keeps it: the window it went to, and the message.
@@ -35,11 +36,23 @@ pub fn recorded() -> (Documents, Recorder) {
 }
 
 /// The documents module with no window open yet and `settings`, which are never saved, whose
-/// pages and windows `Recorder` keeps.
+/// pages and windows `Recorder` keeps. Its pasted folder is one no test pastes into, so that no
+/// test ever deletes from the real one.
 pub fn recorded_with(settings: Settings) -> (Documents, Recorder) {
+    let nowhere = std::env::temp_dir().join("downlight-tests-pasted-nowhere");
+    recorded_as(settings, PastedFolder::at(nowhere))
+}
+
+/// The documents module with no window open yet and the default settings, whose pages and windows
+/// `Recorder` keeps, which writes pastes to `pasted` and deletes them from there.
+pub fn recorded_pasting(pasted: PastedFolder) -> (Documents, Recorder) {
+    recorded_as(Settings::default(), pasted)
+}
+
+fn recorded_as(settings: Settings, pasted: PastedFolder) -> (Documents, Recorder) {
     let recorder = Recorder::default();
     let settings = Arc::new(SettingsStore::holding(settings));
-    let documents = Documents::new(recorder.clone(), recorder.clone(), settings);
+    let documents = Documents::new(recorder.clone(), recorder.clone(), settings, pasted);
     (documents, recorder)
 }
 

@@ -446,7 +446,7 @@ function createEmptyState(): HTMLElement {
     open();
   });
   const hint = document.createElement("p");
-  hint.textContent = "or drop a file here";
+  hint.textContent = "or drop a file here, or paste Markdown (Ctrl+V)";
   empty.append(button, hint);
   return empty;
 }
