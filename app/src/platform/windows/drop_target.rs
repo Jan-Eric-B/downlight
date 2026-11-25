@@ -5,10 +5,13 @@
 //! drag without any, which wry's drop target refuses.
 //!
 //! All of it runs on the main thread: Tauri runs `with_webview`'s closure there, the webview's
-//! windows that take drops belong to it, and OLE calls a drop target on its window's thread.
+//! windows that take drops belong to it, and OLE calls a drop target on its window's thread. Only
+//! copying a text drop's text out of the drag's memory, which grows with its size, is left to the
+//! background task that shows it.
 
 use std::cell::RefCell;
 use std::ffi::OsString;
+use std::mem::ManuallyDrop;
 use std::os::windows::ffi::OsStringExt as _;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -36,8 +39,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows_core::{BOOL, Interface as _, PCWSTR, Ref, implement, w};
 
-use super::global_memory::LockedGlobal;
-use crate::open::{DRAG_TAG, Dropped};
+use super::global_memory::{LockedGlobal, OwnedGlobal};
+use crate::open::{DRAG_TAG, Dropped, DroppedText};
 
 /// What a drop onto a window's page is handed to.
 type OnDrop = Rc<dyn Fn(Dropped)>;
@@ -197,9 +200,12 @@ struct DropTarget {
     /// The label of the window whose page this is, which refuses the drags its page tagged.
     label: Rc<str>,
     /// What the drag over the window carries, kept from `DragEnter` until `DragLeave` or `Drop`
-    /// when the window takes it. A text drag's medium is the target's from `GetData` until it is
-    /// released, so `Drop` reads the text from it instead of having the source copy all of it
-    /// across processes again, on the main thread.
+    /// when the window takes it. Each `DragEnter` reads the drag afresh, so a drag that leaves and
+    /// comes back has its source copy its text again, on the main thread: the cursor rule (text of
+    /// only whitespace gets the no-drop cursor) needs the text, and a data object seen before may
+    /// hold other data by now. A text drag's medium is the target's from `GetData`
+    /// until it is released, so `Drop` hands its memory on instead of having the source copy the
+    /// text across processes a second time.
     drag: RefCell<Option<Drag>>,
 }
 
@@ -213,7 +219,7 @@ impl IDropTarget_Impl for DropTarget_Impl {
     ) -> windows_core::Result<()> {
         // A drag the window can't copy is never taken, so its data isn't read at all.
         let drag = if allows_copy(effect) {
-            Drag::onto(data.as_ref(), &self.label)
+            data.as_ref().and_then(|data| Drag::onto(data, &self.label))
         } else {
             None
         };
@@ -247,9 +253,9 @@ impl IDropTarget_Impl for DropTarget_Impl {
         effect: *mut DROPEFFECT,
     ) -> windows_core::Result<()> {
         // Drop is given the data object DragEnter was given, so the drag kept there is the one
-        // dropped: its text is copied out of the kept medium before this returns, and the medium
-        // released after. The effect tells the source what became of its data: left unset it would still
-        // hold every effect the source allows, a move among them.
+        // dropped. A text drop's memory goes along with what is dropped, for the background task
+        // that shows it to copy the text out of. The effect tells the source what became of its
+        // data: left unset it would still hold every effect the source allows, a move among them.
         let drag = self.drag.take();
         let copies = answer(effect, drag.is_some());
         if let Some(dropped) = drag.filter(|_| copies).and_then(Drag::take) {
@@ -296,8 +302,7 @@ impl Drag {
     /// What `data`, dragged onto the window labelled `label`, carries, or None for a drag the
     /// window refuses: one that started in its own page, or one with neither paths nor text to
     /// show. Paths come first, so a drag with any is a file drop, as before text drops.
-    fn onto(data: Option<&IDataObject>, label: &str) -> Option<Self> {
-        let data = data?;
+    fn onto(data: &IDataObject, label: &str) -> Option<Self> {
         if started_in(data, label) {
             return None;
         }
@@ -312,13 +317,11 @@ impl Drag {
         shows.then_some(Self::Text(text))
     }
 
-    /// What is dropped, its text copied out of the drag's medium.
+    /// What is dropped, a text drop's text still in the drag's medium.
     fn take(self) -> Option<Dropped> {
         match self {
             Self::Files(paths) => Some(Dropped::Files(paths)),
-            Self::Text(medium) => Some(Dropped::Text(String::from_utf16_lossy(
-                medium.lock()?.text(),
-            ))),
+            Self::Text(medium) => medium.into_text().map(Dropped::Text),
         }
     }
 }
@@ -497,6 +500,30 @@ impl Medium {
         // memory in `hGlobal`, which stays allocated until the medium is released, and the guard
         // borrows the medium, which releases it.
         unsafe { LockedGlobal::lock(self, self.0.u.hGlobal.0) }
+    }
+
+    /// The medium's text, for the task that shows it to read off the main thread. Memory with
+    /// nothing to release it (`pUnkForRelease` null, as a source usually leaves it) is the
+    /// target's to free (`ReleaseStgMedium` would `GlobalFree` it), so it goes along unread. Memory its provider releases
+    /// stays the provider's, through an `IUnknown` bound to this thread, so its text is copied out
+    /// here instead.
+    fn into_text(self) -> Option<DroppedText> {
+        if self.0.pUnkForRelease.is_some() {
+            let text = String::from_utf16_lossy(self.lock()?.text());
+            return Some(DroppedText::new(move || text));
+        }
+        let medium = ManuallyDrop::new(self);
+        // SAFETY: a medium asked for as TYMED_HGLOBAL, and checked to be one, holds its global
+        // memory in `hGlobal`. With nothing to release it, ReleaseStgMedium would free it with
+        // GlobalFree, which the owned memory does in its place: the medium is never released.
+        let memory = unsafe { OwnedGlobal::new(medium.0.u.hGlobal.0) };
+        // The memory locked at DragEnter locks again; should it not, the drop shows nothing, as
+        // text with nothing to show does.
+        Some(DroppedText::new(move || {
+            memory.lock().map_or_else(String::new, |locked| {
+                String::from_utf16_lossy(locked.text())
+            })
+        }))
     }
 }
 

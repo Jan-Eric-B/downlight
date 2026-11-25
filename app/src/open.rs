@@ -65,7 +65,37 @@ pub enum Dropped {
     /// The paths of the files dropped: a drag with any is a file drop.
     Files(Vec<PathBuf>),
     /// The text of a drag with no paths, dragged from another program (paste-markdown ticket 04).
-    Text(String),
+    Text(DroppedText),
+}
+
+/// The text of a text drop, still to be read out of the drag's memory. Reading it grows with its
+/// size, so the background task that shows it reads it, not the main thread the drop arrives on
+/// (CODING_STANDARDS.md, Responsiveness).
+#[cfg_attr(
+    not(windows),
+    allow(dead_code, reason = "only Windows' own drop target takes text drops")
+)]
+pub struct DroppedText(Box<dyn FnOnce() -> String + Send>);
+
+#[cfg_attr(
+    not(windows),
+    allow(dead_code, reason = "only Windows' own drop target takes text drops")
+)]
+impl DroppedText {
+    /// The text that `read` gives when it is called, once, off the main thread.
+    pub fn new(read: impl FnOnce() -> String + Send + 'static) -> Self {
+        Self(Box::new(read))
+    }
+
+    fn read(self) -> String {
+        (self.0)()
+    }
+}
+
+impl std::fmt::Debug for DroppedText {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("DroppedText")
+    }
 }
 
 /// The `dataTransfer` type the page tags each drag that starts in it with, its window's label the
@@ -119,8 +149,12 @@ fn show_dropped_off_the_main_thread(app: AppHandle, window: String, dropped: Dro
         match dropped {
             Dropped::Files(paths) => show_dropped(&documents, &window, &paths),
             Dropped::Text(text) => {
+                // The file is named by when the text was dropped, before reading it takes a while.
+                let at = platform::local_time();
                 let mut stages = Stages::start();
-                paste::show_dropped_text(&documents, &window, &text, platform::local_time());
+                let text = text.read();
+                stages.lap("read");
+                paste::show_dropped_text(&documents, &window, &text, at);
                 stages.lap("show");
                 // As for a paste, the time grows with the text (CODING_STANDARDS.md).
                 app.state::<Timing>().report(&window, "drop", &stages);
