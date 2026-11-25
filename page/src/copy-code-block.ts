@@ -9,7 +9,12 @@ import { rangeWithin } from "./view";
  * has its opening fence before the code and its closing fence after it.
  */
 
-/** Selects the code of a rendered code block, the only code that comes from a Markdown block. */
+/**
+ * Selects the code of a rendered code block, the only code that comes from a Markdown block. A
+ * block drawn in place of its code, such as a diagram, must sit outside its `pre > code`, or its
+ * drawing's text is copied and counted as code lines, and must keep the `data-sourcepos` of its
+ * block, or a selection in it copies the whole file.
+ */
 const CODE_SELECTOR = "pre[data-sourcepos] > code";
 
 /** The code of the code block that `node` is in, or null outside every code block. */

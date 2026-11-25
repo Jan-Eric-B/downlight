@@ -7,6 +7,7 @@ use comrak::nodes::{Node, NodeCodeBlock, NodeValue};
 use comrak::options::Plugins;
 use comrak::{Arena, Options, format_html_with_plugins, parse_document};
 
+use crate::copy::lines_of;
 use crate::decode::decode;
 use crate::files::FileSystem;
 use crate::format::is_text;
@@ -157,6 +158,7 @@ pub(crate) fn render_within(
     let arena = Arena::new();
     let root = parse_document(&arena, &text, &options);
     unless_left()?;
+    end_unclosed_fences_on_their_last_code_line(root, &text);
     show_front_matter_as_yaml(root);
     keep_line_numbers_on_blocks_only(root);
     drop_from_raw_html(root);
@@ -225,6 +227,35 @@ fn show_front_matter_as_yaml<'a>(root: Node<'a>) {
         literal: yaml,
         closed: true,
     }));
+}
+
+/// comrak ends an unclosed fence whose last line is blank before that line: at column 0 of it,
+/// which the page reads as the line before (`lineRangeOf`), or, in a list item that the list's end
+/// leaves it in, on its opening fence line, before all its code. Copy as Markdown copies a code
+/// block by its line numbers, so an unclosed fence ends on its last code line, counted from the
+/// line after its opening fence, and at a column of that line, never 0 (copy-as-markdown ticket
+/// 02). The file's lines are split only for a document with such a fence.
+fn end_unclosed_fences_on_their_last_code_line<'a>(root: Node<'a>, text: &str) {
+    let mut file_lines = None;
+    for node in root.descendants() {
+        let mut data = node.data_mut();
+        let NodeValue::CodeBlock(block) = &data.value else {
+            continue;
+        };
+        if !block.fenced || block.closed {
+            continue;
+        }
+        let code_lines = lines_of(&block.literal).len();
+        if code_lines == 0 {
+            continue;
+        }
+        let last = data.sourcepos.start.line + code_lines;
+        let length = file_lines
+            .get_or_insert_with(|| lines_of(text))
+            .get(last - 1)
+            .map_or(0, |line: &&str| line.len());
+        data.sourcepos.end = (last, length.max(1)).into();
+    }
 }
 
 /// comrak writes `data-sourcepos` on inline elements too, with no option to stop it. Only blocks
@@ -574,6 +605,32 @@ mod tests {
         let html = html_of("---\n\nText\n");
         assert!(!html.contains("language-yaml"), "{html}");
         assert!(html.contains("<hr"), "{html}");
+    }
+
+    #[test]
+    fn an_unclosed_fence_ends_on_its_last_code_line() {
+        for (markdown, sourcepos) in [
+            // Its last line blank, the last of the file, which comrak ends it at column 0 of.
+            ("Text.\n\n```text\ncode\n\n", "3:1-5:1"),
+            // In a list item the list's end leaves it in, which comrak ends it on its fence line.
+            ("- Item\n\n  ```sh\n  npm install\n\nText.\n", "3:3-5:1"),
+            // Its last line not blank, which comrak ends it right on already.
+            ("```text\ncode\nmore", "1:1-3:4"),
+            // Windows line endings, which end a line as `\n` does.
+            ("Text.\n\n```text\ncode\r\n\r\n", "3:1-5:1"),
+        ] {
+            let html = html_of(markdown);
+            assert!(
+                html.contains(&format!(r#"<pre data-sourcepos="{sourcepos}">"#)),
+                "{markdown:?}: {html}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_closed_fence_keeps_its_line_numbers() {
+        let html = html_of("```text\ncode\n\n```\n");
+        assert!(html.contains(r#"<pre data-sourcepos="1:1-4:3">"#), "{html}");
     }
 
     #[test]

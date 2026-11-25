@@ -118,8 +118,9 @@ fn is_blank(line: &str) -> bool {
 const INDENTATION: [char; 2] = [' ', '\t'];
 
 /// The lines of `text`, without their line endings, as comrak splits them: at `\n`, `\r\n` and a
-/// lone `\r`. A line ending at the end of the text starts no line of its own.
-fn lines_of(text: &str) -> Vec<&str> {
+/// lone `\r`. A line ending at the end of the text starts no line of its own. Render counts an
+/// unclosed fence's code lines with it too, so both agree on where a line ends.
+pub(crate) fn lines_of(text: &str) -> Vec<&str> {
     let mut lines = Vec::new();
     let mut rest = text;
     while !rest.is_empty() {

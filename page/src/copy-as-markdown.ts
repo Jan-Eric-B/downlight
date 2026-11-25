@@ -24,7 +24,11 @@ import { DOCUMENT_VIEW_SELECTOR, selectionInView, showingInView } from "./view";
 /** Selects every block of the rendered document, each of which carries its lines. */
 const BLOCK_SELECTOR = "[data-sourcepos]";
 
-/** Selects what the page adds to the document view, whose text is none of the document's. */
+/**
+ * Selects what the page adds to the document view, whose text is none of the document's. Neither
+ * holds text yet, but a part the page adds with text of its own must be listed here, or a
+ * selection over it copies lines it doesn't come from.
+ */
 const OWN_PARTS_SELECTOR = ".zeroclipboard-container, a.anchor";
 
 /** No pieces: the whole file. */

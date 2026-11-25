@@ -2,6 +2,7 @@ import { clearMocks, mockWindows } from "@tauri-apps/api/mocks";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import code from "../../core/tests/fixtures/code.html?raw";
 import codeInText from "../../core/tests/fixtures/code-in-text.html?raw";
+import codeUnclosed from "../../core/tests/fixtures/code-unclosed.html?raw";
 import github from "../../core/tests/fixtures/github.html?raw";
 import readme from "../../core/tests/fixtures/readme.html?raw";
 import tables from "../../core/tests/fixtures/tables.html?raw";
@@ -664,6 +665,31 @@ describe("Ctrl+Shift+C into or out of a code block", () => {
     );
     pressCopyAsMarkdown();
     expect(piecesSent()).toEqual([lines(22, 25)]);
+  });
+
+  // In `code-unclosed.md`, a list item's text is on line 3, its unclosed fence on line 5, its
+  // code on lines 6 and 7 (blank), and the paragraph after the list, which ends the fence, on line
+  // 8; the paragraph before the last fence is on line 10, the fence on line 12, and its code on
+  // lines 13 and 14 (blank), the last of the file.
+
+  test("copies a list item's text through the code lines touched of the fence the list's end leaves unclosed", async () => {
+    await show(codeUnclosed);
+    select(
+      [elementWith("p", "Install it"), "Install"],
+      [elementWith("pre", "npm install"), "npm install"],
+    );
+    pressCopyAsMarkdown();
+    expect(piecesSent()).toEqual([lines(3, 6)]);
+  });
+
+  test("copies a paragraph through the code lines touched of an unclosed fence whose last line, the file's last, is blank", async () => {
+    await show(codeUnclosed);
+    select(
+      [elementWith("p", "at the end of the document"), "unclosed"],
+      [elementWith("pre", "never closed"), "never closed"],
+    );
+    pressCopyAsMarkdown();
+    expect(piecesSent()).toEqual([lines(10, 13)]);
   });
 });
 
