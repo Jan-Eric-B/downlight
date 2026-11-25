@@ -47,7 +47,7 @@ mod drop_target;
 mod global_memory;
 mod title_bar;
 
-pub use clipboard::clipboard_text;
+pub use clipboard::{clipboard_text, write_clipboard_text};
 pub use clock::local_time;
 pub use drop_target::{add_drop_target, with_drop_target};
 pub use title_bar::{add_maximize_button, place_maximize_button, show_window_menu};

@@ -41,6 +41,42 @@ import { createWaitNote } from "./wait-note";
 export const DOCUMENT_VIEW_SELECTOR = "article.markdown-body";
 
 /**
+ * The part of `range` inside `node`: its ends moved to `node`'s edges where it runs beyond them
+ * (an edge counts as inside), as a new range. Null when the two share nothing.
+ */
+export function rangeWithin(range: Range, node: Node): Range | null {
+  const end =
+    node instanceof CharacterData ? node.length : node.childNodes.length;
+  // `comparePoint` is 0 for a point inside the range, and below 0 for one before it.
+  if (range.comparePoint(node, 0) > 0 || range.comparePoint(node, end) < 0)
+    return null;
+  const within = range.cloneRange();
+  if (range.comparePoint(node, 0) === 0) within.setStart(node, 0);
+  if (range.comparePoint(node, end) === 0) within.setEnd(node, end);
+  return within.collapsed ? null : within;
+}
+
+/**
+ * The reader's selection as far as it lies in the document view (`rangeWithin` the view): a new
+ * range, which changing the selection doesn't change. A selection that runs out of the view, as
+ * Ctrl+A's does, is cut at the view's edges, so none of the page's elements beside the document
+ * are in it; those inside the view, such as the copy buttons, are. Null when nothing is selected,
+ * the selection is collapsed, or none of it is in the view.
+ */
+export function selectionInView(): Range | null {
+  const view = document.querySelector(DOCUMENT_VIEW_SELECTOR);
+  const selection = document.getSelection();
+  if (
+    !view ||
+    !selection ||
+    selection.rangeCount === 0 ||
+    selection.isCollapsed
+  )
+    return null;
+  return rangeWithin(selection.getRangeAt(0), view);
+}
+
+/**
  * Selects the element the document scrolls in, below the title bar, so the scroll bar starts below
  * the bar too (window design ticket 01). `scripts/measure.js` scrolls it by the same selector.
  */

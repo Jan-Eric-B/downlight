@@ -32,21 +32,32 @@ function copyButton(code: HTMLElement): HTMLButtonElement {
   showCopied(button, false);
   let copiedTimer: ReturnType<typeof setTimeout> | undefined;
   button.addEventListener("click", () => {
-    void navigator.clipboard.writeText(code.textContent).then(
-      () => {
-        showCopied(button, true);
-        // A copy made while the button still shows the last one starts the 2 s again.
-        clearTimeout(copiedTimer);
-        copiedTimer = setTimeout(() => {
-          showCopied(button, false);
-        }, COPIED_MS);
-      },
-      (error: unknown) => {
-        showNotice(`Can't copy the code: ${String(error)}`);
-      },
-    );
+    void copyCode(code.textContent).then((copied) => {
+      if (!copied) return;
+      showCopied(button, true);
+      // A copy made while the button still shows the last one starts the 2 s again.
+      clearTimeout(copiedTimer);
+      copiedTimer = setTimeout(() => {
+        showCopied(button, false);
+      }, COPIED_MS);
+    });
   });
   return button;
+}
+
+/**
+ * Writes code's `text` to the clipboard, and shows a Notice if it can't. Resolves to whether it
+ * did, for the copy button, which shows it copied, and for Copy as Markdown of one code block's
+ * selected text (copy-as-markdown ticket 02), which copies it as the button does.
+ */
+export function copyCode(text: string): Promise<boolean> {
+  return navigator.clipboard.writeText(text).then(
+    () => true,
+    (error: unknown) => {
+      showNotice(`Can't copy the code: ${String(error)}`);
+      return false;
+    },
+  );
 }
 
 function showCopied(button: HTMLButtonElement, copied: boolean): void {

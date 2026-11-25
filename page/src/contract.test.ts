@@ -43,6 +43,7 @@ import {
   goneBar,
   heading,
   keepOnTopSample,
+  keysSent,
   menuEntryOf,
   menuEntrySamples,
   messageSample,
@@ -776,17 +777,6 @@ test("the app's failure to open a folder gone since shows why, naming it in bold
       ?.textContent,
   ).toBe(file.name);
 });
-
-/**
- * The keys of `value` that reach the app. The IPC sends JSON, which leaves out a key whose value
- * is undefined, such as the shortcut of a command that has none.
- */
-function keysSent(value: object): string[] {
-  return Object.entries(value)
-    .filter(([, field]) => field !== undefined)
-    .map(([key]) => key)
-    .sort();
-}
 
 /** The kind of `value` and the keys it reaches the app with, such as `separator: kind`. */
 function shapeOf(value: { kind: string }): string {

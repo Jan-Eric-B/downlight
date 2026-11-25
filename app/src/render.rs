@@ -1,8 +1,10 @@
 //! Reading a document's file and rendering it on a blocking thread. The documents module starts
 //! these and hands what they give to the window's page; this module knows nothing of windows.
 
+use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use downlight_core::{Leave, RenderError, RenderedDocument};
 use tauri::async_runtime::JoinHandle;
@@ -14,8 +16,37 @@ use crate::platform;
 use crate::timing::Stages;
 use crate::watch::ReadStamp;
 
-/// The rendered document, with how long reading and rendering it took for the timing switch.
-pub type ReadAndRender = Result<(RenderedDocument, Stages), DocumentError>;
+/// The bytes of a document's file as one read gave them, shared by the render made from them and
+/// the document table, which keeps those of the render a window's page took for Copy as Markdown
+/// (copy-as-markdown ticket 01). A `Vec` behind the `Arc` rather than a slice, which would copy
+/// a large document's bytes once more.
+pub type FileBytes = Arc<Vec<u8>>;
+
+/// A document's file rendered: the rendered document, the bytes it was made from, and how long
+/// reading and rendering it took for the timing switch.
+pub struct Rendered {
+    pub document: RenderedDocument,
+    pub bytes: FileBytes,
+    pub stages: Stages,
+}
+
+impl fmt::Debug for Rendered {
+    /// By sizes: a document's bytes and HTML can be 100 MB each, which a failed test or a log line
+    /// must not print.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Rendered")
+            .field(
+                "document",
+                &format_args!("{} bytes of HTML", self.document.as_str().len()),
+            )
+            .field("bytes", &format_args!("{} bytes", self.bytes.len()))
+            .field("stages", &self.stages)
+            .finish()
+    }
+}
+
+/// The rendered document, or why the window can't show it.
+pub type ReadAndRender = Result<Rendered, DocumentError>;
 
 /// A document being read and rendered on a blocking thread, by [`start`]. Dropped before it is
 /// done, as when the window is given another document before its page took it, it is left
@@ -78,7 +109,11 @@ fn read_and_render(path: &Path, leave: &Leave) -> ReadAndRender {
     let rendered = downlight_core::render(&bytes, path, &image::origin(), Disk, leave);
     stages.lap("render");
     match rendered {
-        Ok(document) => Ok((document, stages)),
+        Ok(document) => Ok(Rendered {
+            document,
+            bytes: Arc::new(bytes),
+            stages,
+        }),
         // With its stages, so the timing switch tells how soon a left render ended.
         Err(RenderError::Left) => Err(DocumentError::Left {
             path: path.to_owned(),
@@ -205,10 +240,24 @@ mod tests {
     #[test]
     fn text_file_with_another_extension_renders_as_markdown() {
         let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
-        let Ok((document, _)) = read_and_render(&manifest, &Leave::new()) else {
+        let Ok(Rendered { document, .. }) = read_and_render(&manifest, &Leave::new()) else {
             panic!("a text file was refused");
         };
         assert!(document.as_str().contains("[package]"), "{document:?}");
+    }
+
+    #[test]
+    fn debug_of_a_rendered_document_shows_its_sizes_and_not_its_text() {
+        let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
+        let Ok(rendered) = read_and_render(&manifest, &Leave::new()) else {
+            panic!("a text file was refused");
+        };
+        let shown = format!("{rendered:?}");
+        assert!(
+            shown.contains(&format!("bytes: {} bytes", rendered.bytes.len())),
+            "{shown}"
+        );
+        assert!(!shown.contains("[package]"), "{shown}");
     }
 
     /// Reads `missing.md` in a folder of its own, which is there unless `folder_gone`.

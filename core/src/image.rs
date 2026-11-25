@@ -74,6 +74,8 @@ pub(crate) struct ImageSources<F> {
     folder: Option<Url>,
     /// Where the page loads local images from, such as `http://image.localhost`.
     origin: String,
+    /// `origin` as a URL, when it is one, for refusing a document's image that names it.
+    origin_url: Option<Url>,
     /// The caller's lookups.
     files: F,
 }
@@ -83,21 +85,40 @@ impl<F: FileSystem> ImageSources<F> {
         Self {
             folder: file_url::folder_of(document),
             origin: origin.to_owned(),
+            origin_url: Url::parse(origin).ok(),
             files,
         }
     }
 
     /// The URL the page loads the image at `src` from, or None when it must not load: remote
     /// `http(s)` and `data:` images load as they are, local ones through the image scheme, and
-    /// anything else, such as an image on a network share, not at all.
+    /// anything else, such as an image on a network share, not at all. A web image at the image
+    /// scheme's own origin doesn't load either: a document never has a reason to name it, and
+    /// would only aim the scheme at paths of its own choosing.
     pub(crate) fn source(&self, src: &str) -> Option<String> {
         match file_url::classify(src) {
             Target::Url(url) if matches!(url.scheme(), "http" | "https" | "data") => {
-                Some(src.to_owned())
+                (!self.is_image_origin(&url)).then(|| src.to_owned())
             }
             Target::File => self.local_source(src),
             Target::Url(_) | Target::Unusable => None,
         }
+    }
+
+    /// Whether `url` is at the image origin: the same scheme, host and port, compared as URLs
+    /// compare them, so the host's case doesn't matter, nor a default port written out, nor the
+    /// dot a fully qualified host ends with.
+    fn is_image_origin(&self, url: &Url) -> bool {
+        let Some(origin) = &self.origin_url else {
+            return false;
+        };
+        let host = |url: &Url| {
+            url.host_str()
+                .map(|host| host.trim_end_matches('.').to_owned())
+        };
+        url.scheme() == origin.scheme()
+            && host(url) == host(origin)
+            && url.port_or_known_default() == origin.port_or_known_default()
     }
 
     /// `srcset` with each image's URL as [`source`](Self::source) gives it, leaving out the images
@@ -390,6 +411,38 @@ mod tests {
             let html = html_of(&format!("![Badge]({src}) <img src=\"{src}\">\n"));
             let expected = format!(r#"src="{}""#, src.replace('&', "&amp;"));
             assert_eq!(html.matches(&expected).count(), 2, "{src}: {html}");
+        }
+    }
+
+    #[test]
+    fn images_named_at_the_image_origin_are_removed_while_other_web_images_load() {
+        // A document never has a reason to name the origin the app serves its local images from,
+        // and a path after it (`//host/share/x.png`) would aim the app's image scheme at a share.
+        for src in [
+            "http://image.localhost//host/share/x.png",
+            "http://image.localhost/C:/pics/logo.png",
+            "http://IMAGE.localhost/C:/pics/logo.png",
+            "http://image.localhost:80/C:/pics/logo.png",
+            "http://image.localhost./C:/pics/logo.png",
+        ] {
+            let markdown = html_of(&format!("![Logo]({src})\n"));
+            assert!(
+                markdown.contains(r#"<img alt="Logo">"#),
+                "{src}: {markdown}"
+            );
+            let raw = html_of(&format!(
+                "<picture><source srcset=\"{src} 2x\"><img alt=\"Logo\" src=\"{src}\"></picture>\n"
+            ));
+            assert!(!raw.contains("localhost"), "{src}: {raw}");
+        }
+        for src in [
+            "http://image.localhost.example.com/logo.png",
+            "http://example.com/image.localhost/logo.png",
+            "https://image.localhost/logo.png",
+            "http://image.localhost:8080/logo.png",
+        ] {
+            let html = html_of(&format!("![Logo]({src})\n"));
+            assert!(html.contains(&format!(r#"src="{src}""#)), "{src}: {html}");
         }
     }
 

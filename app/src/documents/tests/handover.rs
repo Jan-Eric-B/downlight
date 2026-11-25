@@ -183,12 +183,12 @@ fn request_by_hand_reads_the_file_again_as_a_reload_and_tells_the_page_nothing()
     let path = document("by-hand", "# First");
     let (documents, pages) = documents();
     let label = open_new(&documents, &path);
-    let page_shows = arrive(&documents, &label, None);
+    let page_shows = take(&documents, &label, None);
     // The window's watch reloads after every save on its own, a moment later, so the save's
     // reload is reported and placed first: the request by hand then has no render started for
     // it to take, and the page has been told all it will be.
     let reported = save_until_reported(&pages, &label, &path);
-    arrive(&documents, &label, Some(page_shows));
+    take(&documents, &label, Some(page_shows));
     let asked = after_a_render_could_start();
     let reloaded = handover(&documents, &label, Some(page_shows));
     let (shown, started) = html_and_start_of(reloaded.render);

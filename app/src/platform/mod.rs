@@ -12,7 +12,7 @@ pub use windows::{
     open_as_text_file, open_folder, open_url, place_maximize_button, process_start, program_name,
     reveal_file, set_backdrop, show_error, show_window_menu, text_file_program,
     text_file_program_name, when_webview_stops, with_backdrop, with_browser_arguments,
-    with_drop_target,
+    with_drop_target, write_clipboard_text,
 };
 
 /// Other systems name no text file program until their ports find theirs.
@@ -234,4 +234,14 @@ pub const fn local_time() -> crate::paste::LocalTime {
         minute: 0,
         second: 0,
     }
+}
+
+/// Other systems write their clipboards with their ports; Copy as Markdown says it isn't available
+/// yet.
+#[cfg(not(windows))]
+pub fn write_clipboard_text(
+    _window: &tauri::WebviewWindow,
+    _text: &str,
+) -> Result<(), crate::copy::ClipboardError> {
+    Err(crate::copy::ClipboardError::NotAvailable)
 }

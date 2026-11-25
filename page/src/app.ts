@@ -133,6 +133,20 @@ export type MenuEntry =
   | { kind: "separator" }
   | { kind: "copy" };
 
+/**
+ * A piece of the document's file that Copy as Markdown copies (`Piece` in `app/src/copy.rs`,
+ * copy-as-markdown tickets 01 to 03): a range of whole lines, the first and the last, 1-based as
+ * the rendered blocks' line numbers count them, or a span within one line. The lines of the blocks
+ * a selection runs over, a code block's fence lines and the code lines the selection touches, and
+ * a table's header, delimiter and touched rows are all ranges. A selection within one table cell
+ * is the cell's span: its line, and its first and last column as its `data-sourcepos` counts
+ * them (1-based, in bytes of the line, both included), which the app copies without the spaces
+ * around it.
+ */
+export type Piece =
+  | { piece: "lines"; first: number; last: number }
+  | { piece: "span"; line: number; first: number; last: number };
+
 /** The marks on the way to first paint, each in ms since the Unix epoch (`app/src/timing.rs`). */
 export type FirstPaintMarks = {
   navigationStart: number;
@@ -430,6 +444,13 @@ export type Commands = {
    * clipboard that holds no text, and the window stays as it was.
    */
   paste_clipboard: { args: undefined; answer: null };
+  /**
+   * Copy as Markdown (copy-as-markdown ticket 01): the Markdown of these pieces of the file the
+   * view's render, shown as this showing, was made from, or of the whole file for none, which the
+   * app puts on the clipboard itself, so a large copy never passes through the page. A showing the
+   * window has left copies nothing. Rejects with why, such as a clipboard another program holds.
+   */
+  copy_markdown: { args: { showing: number; pieces: Piece[] }; answer: null };
   /**
    * Back or Forward to another document in the window's history, which the window is then given
    * as it is any other (`ask-for-document`). Nowhere to go does nothing.

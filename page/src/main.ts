@@ -5,6 +5,7 @@ import "./title-bar.css";
 import "./settings-flyout.css";
 import { startAccent } from "./accent";
 import { startBackdrop } from "./backdrop";
+import { startCleanCopy } from "./clean-copy";
 import { startCommands } from "./commands";
 import { startTaggingDrags } from "./drags";
 import { startFind } from "./find";
@@ -32,6 +33,7 @@ startTitleBar();
 // After the title bar, whose gear it opens under.
 startSettingsFlyout();
 startCommands();
+startCleanCopy();
 startTaggingDrags();
 startLinks();
 startFind();

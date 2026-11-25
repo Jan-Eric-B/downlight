@@ -5,11 +5,22 @@ ID = folder/number under .scratch/<folder>/issues/<number>-*.md (v1 = downlight-
 Status: ready = ready-for-agent, triage = needs-triage (grill first), info = needs-info (investigate).
 Move lines to change the order. A new ticket gets a line here; a closed ticket's line is removed.
 
-paste-markdown/01 | Ctrl+V and the menu show the clipboard's text | built, hand checks left | only the measurement (DOWNLIGHT_TIMING's paste line on the 1 MB document) and the hand checks are missing
-paste-markdown/02 | A pasted file is deleted once no window can return to it | built, hand checks left | only the hand checks are missing (closing a paste's window, ending the process and the next start's sweep, first paint with pastes left)
-paste-markdown/03 | Downlight's own drop target takes file drops | built, hand checks left | only the hand checks are missing (a file from Explorer, a path of 260 characters or longer, several files, a shortcut, a binary file, a folder, onto the empty window and a document on its way, a text drag's no-drop cursor)
-paste-markdown/04 | Text dropped onto a window shows as a paste | built, hand checks left | only the measurement (DOWNLIGHT_TIMING's drop line on the 1 MB document) and the hand checks are missing (text from Edge, VS Code, Notepad, Word and Teams, a link and an image from Edge, a file from VS Code, whitespace, drags inside the window doing nothing, which confirms the dragstart tag, one from another Downlight window, the Find box, 20 MB and its Wait note, closing the window)
-wd/17 | A tall default window for reading (900 px wide, 90% of the work area high, centred) | ready | not blocked; app only (window placement); only before any window closed, a kept size still wins; grilled 2026-11-25 (narrow screens, the active window's screen, centred without one)
+copy-as-markdown/01 | Ctrl+Shift+C and the menu copy the Markdown of whole lines | built, hand checks left | only the measurement (DOWNLIGHT_TIMING's copy-markdown line, Ctrl+A on the 1 MB document) and the hand checks are missing; the first real test of the Win32 clipboard writer
+copy-as-markdown/02 | Copy as Markdown of part of a code block | built, hand checks left | only the hand checks are missing (within, into and out of a code block, into front matter)
+copy-as-markdown/03 | Copy as Markdown of part of a table | built, hand checks left | only the hand checks are missing (within a cell, a triple-clicked cell, across rows, from a paragraph into a table; across rows of a sorted table once tables/01 is built)
+copy-as-markdown/04 | Ctrl+C puts clean HTML beside its plain text | built, hand checks left | only the before-building Word check, the measurement (Ctrl+A, Ctrl+C on the 1 MB document) and the hand checks are missing; the plain text against the build before decides whether it needs to match Chromium's own (alt text, user-select: none)
+wd/10 | Counts (lines and words in the file name tooltip, selection bubble bottom right) | ready | not blocked; its bubble owns the bottom right corner
+outline/01 | Alt+Down and Alt+Up step through the headings | ready | blocked by ruler/01 (the list of headings); adds the view's scroll to a heading without a History step; adds the headings fixture unless ruler/01 did
+outline/02 | The Outline lists the headings and goes to one | ready | blocked by ruler/01; title bar button (first, own group), Ctrl+Shift+O, menu entry after Find; closes and is closed by the settings flyout
+outline/03 | Typing filters the Outline | ready | blocked by outline/02
+outline/04 | The Outline across reloads, other documents and the empty window | ready | blocked by outline/03
+outline/05 | The Outline in full screen, and its place in Esc's order | ready | blocked by outline/02; joins image-lightbox/01's one Esc list if that is done, else defers as the settings flyout does (whichever lands second adapts)
+outline/06 | Outline: large documents, measured | ready | blocked by outline/01, 03 and 04; does not wait for v1/39
+ruler/01 | Overview ruler: heading marks beside the scroll bar | ready | not blocked; builds the list of headings (h1 to h4) that outline/01 to 06 reuse
+ruler/02 | Overview ruler: the switch in the settings (flyout "View" group) | ready | blocked by ruler/01; creates the flyout's "View" group that reader-settings and remote-images may use
+ruler/03 | Overview ruler: Find's marks, and clicking them | ready | blocked by ruler/01; extends Find's interface (find-options and tables/01 must keep it working)
+ruler/04 | Overview ruler: clicking and hovering heading marks | ready | blocked by ruler/01
+ruler/05 | Overview ruler: large documents, measured | ready | blocked by ruler/03; may switch the ruler to a canvas; does not wait for v1/39
 image-lightbox/01 | One place owns Esc's order | ready | not blocked; prefactor, no visible change; touches the Esc listeners of the settings flyout, Find, Stop and full-screen/02
 image-lightbox/02 | A click on an image shows it in the lightbox | ready | blocked by image-lightbox/01; Esc after the flyout, before Find, Stop and full screen
 image-lightbox/03 | Step through the document's images | ready | blocked by image-lightbox/02
@@ -19,37 +30,20 @@ image-lightbox/06 | The image's name reveals or opens its file | ready | blocked
 image-lightbox/07 | A link to its own image opens the lightbox | ready | blocked by image-lightbox/02; rendering change (fixtures), avoid running it beside right-to-left/01 or another rendering change
 image-lightbox/08 | Alt+click, "Show image" and the keyboard open any image | ready | blocked by image-lightbox/02; adds a context-dependent entry to the right-click menu
 image-lightbox/09 | "Play again" for a local animated image | ready | blocked by image-lightbox/03; core reads GIF, WebP and APNG loop counts (maybe crates: cargo-deny, notices)
-copy-as-markdown/01 | Ctrl+Shift+C and the menu copy the Markdown of whole lines | ready | not blocked; adds Win32 clipboard writing; "shortcuts leave editable fields alone" is built (paste-markdown/01, `leavesEditableFields` in the commands table)
-copy-as-markdown/02 | Copy as Markdown of part of a code block | ready | blocked by copy-as-markdown/01
-copy-as-markdown/03 | Copy as Markdown of part of a table | ready | blocked by copy-as-markdown/01; copies rows in the file's order, so a sorted table (tables/01) needs no change
-copy-as-markdown/04 | Ctrl+C puts clean HTML beside its plain text | ready | not blocked; page only; the margin's line numbers (line-numbers/01) and a sort (tables/01) must keep working with it
-v1/38 | A large document's load can be left (Wait note, Stop) | built, hand checks left | only your hand check is missing; all boxes still unchecked; blocks v1/39
-wd/10 | Counts (lines and words in the file name tooltip, selection bubble bottom right) | ready | not blocked; its bubble owns the bottom right corner
-about/01 | About Downlight (version, GPL notices, third-party notices) | triage | not blocked; closes a GPL-3.0 gap (legal notices in the UI); may add a section to the settings flyout, as ruler/02 adds a "View" group
-ruler/01 | Overview ruler: heading marks beside the scroll bar | ready | not blocked; builds the list of headings (h1 to h4) that outline/01 to 06 reuse
-ruler/02 | Overview ruler: the switch in the settings (flyout "View" group) | ready | blocked by ruler/01; creates the flyout's "View" group that reader-settings and remote-images may use
-ruler/03 | Overview ruler: Find's marks, and clicking them | ready | blocked by ruler/01; extends Find's interface (find-options and tables/01 must keep it working)
-ruler/04 | Overview ruler: clicking and hovering heading marks | ready | blocked by ruler/01
-ruler/05 | Overview ruler: large documents, measured | ready | blocked by ruler/03; may switch the ruler to a canvas; does not wait for v1/39
 tables/01 | Sort a document's tables | triage, grilled | needs /to-spec and /to-tickets only; Find, the ruler, line numbers and Ctrl+C follow the shown order; Copy as Markdown follows the file (copy-as-markdown spec)
-outline/01 | Alt+Down and Alt+Up step through the headings | ready | blocked by ruler/01 (the list of headings); adds the view's scroll to a heading without a History step; adds the headings fixture unless ruler/01 did
-outline/02 | The Outline lists the headings and goes to one | ready | blocked by ruler/01; title bar button (first, own group), Ctrl+Shift+O, menu entry after Find; closes and is closed by the settings flyout
-outline/03 | Typing filters the Outline | ready | blocked by outline/02
-outline/04 | The Outline across reloads, other documents and the empty window | ready | blocked by outline/03
-outline/05 | The Outline in full screen, and its place in Esc's order | ready | blocked by outline/02; joins image-lightbox/01's one Esc list if that is done, else defers as the settings flyout does (whichever lands second adapts)
-outline/06 | Outline: large documents, measured | ready | blocked by outline/01, 03 and 04; does not wait for v1/39
 print/01 | Print, and PDF through the print dialog | ready | not blocked; page only unless window.print() fails (then ShowPrintUI in the Windows module); adds Ctrl+P and a menu entry after Paste
 export-html/01 | Export to HTML | ready | not blocked; independent of print/01 (shares only github-markdown-css); its menu entry goes after Print's, or after Paste if print/01 isn't built yet; first feature that writes the reader's own file; adds an app command (capability, contract samples)
 mermaid-and-math/01 | Mermaid diagrams and math | triage | not blocked; rendering change (fixtures, see right-to-left/01); needs a cap like the Highlight limit; print and export should show diagrams
+about/01 | About Downlight (version, GPL notices, third-party notices) | triage | not blocked; closes a GPL-3.0 gap (legal notices in the UI); may add a section to the settings flyout, as ruler/02 adds a "View" group
 find-options/01 | Find options (case, whole word, regex) | triage | not blocked; overlaps tables/02 (filter as a Find option); keep ruler/03's marks working
 reader-settings/01 | Reader settings (font, size, line height, wrap long code lines) | triage | not blocked; every change must keep the reading position
 tables/03 | A long table's header sticks to the top | triage | not blocked; must not count as the reading position; find bar and file-gone bar sit above it
-ruler/07 | Overview ruler: marks for task items | triage | blocked by ruler/01; changes as ticks change
-ruler/06 | Overview ruler: blocks shaded by kind (option B) | triage | blocked by ruler/05's measurement
 other-formats/03 | Code and plain text as highlighted text, not as Markdown | triage | not blocked; sets up the format choice cheaply for other-formats/01 and 02; widens the term Document; rendering change (see right-to-left/01); research in other-formats/research.md
 other-formats/01 | CSV and TSV as a table, SVG as an image | triage | not blocked; a CSV table wants tables/01's Sort; research in other-formats/research.md
 other-formats/02 | JSON and XML as collapsible trees | triage | blocked by other-formats/01 or /03 (the format choice, whichever builds it)
 other-formats/04 | Jupyter notebooks | triage | blocked by other-formats/02 (its JSON parsing with lines); outputs are untrusted HTML and images
+ruler/06 | Overview ruler: blocks shaded by kind (option B) | triage | blocked by ruler/05's measurement
+ruler/07 | Overview ruler: marks for task items | triage | blocked by ruler/01; changes as ticks change
 explorer-preview/01 | The Explorer preview pane | triage | not blocked; separate COM component, likely its own ADR
 converter/01 | Word, PDF and PowerPoint converter | triage | not blocked; separate optional component; the "document without a file" question has ADR 0006's answer from paste-markdown (a file Downlight writes)
 writing-ticks/01 | Writing ticks to the file, opt-in | triage | not blocked; contradicts the glossary ("reading only", a Tick is never written); its save triggers Downlight's own reload
@@ -66,6 +60,3 @@ wd/16 | Mica never shows as active | info | not blocked; blocks wd/15
 wd/15 | The backdrops against Windows' own | info | blocked by wd/16
 right-to-left/01 | Right-to-left text (dir="auto" on blocks, as GitHub) | triage, small | not blocked; changes every rendered fixture, so avoid running it beside another rendering change (mermaid-and-math, other-formats)
 tables/02 | Filter a table's rows | triage | blocked by tables/01; may become a Find option instead (find-options/01)
-
-Not tickets, to do:
-- Commit the new and changed tickets (since commit 6bc9c7c: 23 stubs, 5 tickets from the mdhero comparison, 4 tickets extended, this file; later other-formats/research.md, other-formats/03 and 04, other-formats/01 and 02 extended).

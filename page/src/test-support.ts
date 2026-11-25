@@ -3,6 +3,7 @@
 import { emit } from "@tauri-apps/api/event";
 import { clearMocks, mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import { vi } from "vitest";
+import copyMarkdownSamplesJson from "../../app/tests/fixtures/copy_markdown.json?raw";
 import dragTagSamples from "../../app/tests/fixtures/drag_tag.json?raw";
 import editorChoicesSamples from "../../app/tests/fixtures/editor_choices.json?raw";
 import followLinkSamples from "../../app/tests/fixtures/follow_link.json?raw";
@@ -35,12 +36,14 @@ import type {
   Messages,
   Notice,
   PageFlags,
+  Piece,
   Place,
   ReloadMarks,
   SettingChange,
   WaitNote,
 } from "./app";
 import { startSettings } from "./settings";
+import { lineRangeOf, type LineRange } from "./sourcepos";
 import { SCROLLER_SELECTOR, whenDocumentShown } from "./view";
 import { ZOOM_VARIABLE } from "./zoom";
 
@@ -283,6 +286,26 @@ export function settingChangeSamples(): SettingChange[] {
   return Object.values(
     JSON.parse(settingChangeSamplesJson) as object,
   ) as SettingChange[];
+}
+
+/**
+ * The keys of `value` that reach the app, in order. The IPC sends JSON, which leaves out a key
+ * whose value is undefined, such as the shortcut of a command that has none.
+ */
+export function keysSent(value: object): string[] {
+  return Object.entries(value)
+    .filter(([, field]) => field !== undefined)
+    .map(([key]) => key)
+    .sort();
+}
+
+/**
+ * Every sample of the pieces the app's `copy_markdown` takes, by name: a range of lines, a span
+ * within a line, and none for the whole file. All of them, so that a kind of piece the app adds
+ * reaches the page's tests without a name to ask for.
+ */
+export function copyMarkdownSamples(): Record<string, Piece[]> {
+  return JSON.parse(copyMarkdownSamplesJson) as Record<string, Piece[]>;
 }
 
 /** The timing reports the app takes, by the name of their sample. */
@@ -603,12 +626,9 @@ export function spyOnHeadingScrolls(): () => string[] {
 }
 
 /** The first and last line of the file that `element` comes from, by its `data-sourcepos`. */
-export function linesOf(element: Element): [number, number] | undefined {
-  const own = element.getAttribute("data-sourcepos");
-  if (own) {
-    const [start, end] = own.split("-").map((point) => Number.parseInt(point));
-    return [start ?? 0, end ?? 0];
-  }
+export function linesOf(element: Element): LineRange | undefined {
+  const own = lineRangeOf(element);
+  if (own) return own;
   // A wrapper, such as a code block's, sits where the block inside it does; inline text sits in
   // its block.
   const inside = element.querySelector("[data-sourcepos]");

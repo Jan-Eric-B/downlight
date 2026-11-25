@@ -116,7 +116,7 @@ fn two_pastes_in_the_same_second_get_two_files() {
     let (documents, _) = folder.documents();
     let window = open_empty(&documents);
     assert_eq!(paste_text(&documents, &window, "first"), Ok(()));
-    arrive(&documents, &window, None);
+    take(&documents, &window, None);
     assert_eq!(paste_text(&documents, &window, "second"), Ok(()));
     assert_eq!(
         folder.names(),
@@ -144,9 +144,9 @@ fn a_paste_joins_history_and_back_returns_to_the_document_before_it_where_it_was
     let folder = TestFolder::new("history");
     let (documents, _) = folder.documents();
     let window = open_new(&documents, &manifest());
-    let before = arrive(&documents, &window, None);
+    let before = take(&documents, &window, None);
     assert_eq!(paste_text(&documents, &window, "# Pasted"), Ok(()));
-    let pasted = arrive(&documents, &window, Some(before));
+    let pasted = take(&documents, &window, Some(before));
     assert_eq!(
         documents.step(&window, Step::Back).ok().flatten(),
         Some(Given::Changed(window.clone()))
@@ -163,7 +163,7 @@ fn a_paste_replaces_a_document_still_on_its_way() {
     let folder = TestFolder::new("on-its-way");
     let (documents, _) = folder.documents();
     let window = open_new(&documents, &manifest());
-    let before = arrive(&documents, &window, None);
+    let before = take(&documents, &window, None);
     give(
         &documents,
         DocumentAt::new(&app_file("build.rs")),
@@ -174,7 +174,7 @@ fn a_paste_replaces_a_document_still_on_its_way() {
     assert!(on_its_way.render.is_left());
     let file = folder.0.join("Pasted 2026-11-20 14.32.05.md");
     assert_eq!(documents.document_path(&window), Some(file));
-    arrive(&documents, &window, Some(before));
+    take(&documents, &window, Some(before));
     // The document on its way never arrived, so Back goes to the one in view before it.
     documents.step(&window, Step::Back).ok();
     assert_eq!(documents.document_path(&window), Some(manifest()));
@@ -264,7 +264,7 @@ fn a_paste_is_deleted_when_its_window_closes() {
     let (documents, _) = folder.documents();
     let window = open_empty(&documents);
     paste_into(&documents, &window);
-    arrive(&documents, &window, None);
+    take(&documents, &window, None);
     assert!(folder.has(&documents, FIRST));
     documents.forget(&window);
     assert!(!folder.has(&documents, FIRST));
@@ -275,11 +275,11 @@ fn a_paste_left_by_going_somewhere_new_after_back_is_deleted() {
     let folder = TestFolder::new("somewhere-new");
     let (documents, _) = folder.documents();
     let window = open_new(&documents, &manifest());
-    let before = arrive(&documents, &window, None);
+    let before = take(&documents, &window, None);
     paste_into(&documents, &window);
-    let pasted = arrive(&documents, &window, Some(before));
+    let pasted = take(&documents, &window, Some(before));
     documents.step(&window, Step::Back).ok();
-    let back = arrive(&documents, &window, Some(pasted));
+    let back = take(&documents, &window, Some(pasted));
     give(
         &documents,
         DocumentAt::new(&app_file("build.rs")),
@@ -287,7 +287,7 @@ fn a_paste_left_by_going_somewhere_new_after_back_is_deleted() {
     );
     // Until the new document arrives, Stop could return to where Forward goes to the paste.
     assert!(folder.has(&documents, FIRST));
-    arrive(&documents, &window, Some(back));
+    take(&documents, &window, Some(back));
     assert!(!folder.has(&documents, FIRST));
 }
 
@@ -296,11 +296,11 @@ fn a_paste_left_by_visiting_a_heading_after_back_is_deleted() {
     let folder = TestFolder::new("heading-after-back");
     let (documents, _) = folder.documents();
     let window = open_new(&documents, &manifest());
-    let before = arrive(&documents, &window, None);
+    let before = take(&documents, &window, None);
     paste_into(&documents, &window);
-    let pasted = arrive(&documents, &window, Some(before));
+    let pasted = take(&documents, &window, Some(before));
     documents.step(&window, Step::Back).ok();
-    let back = arrive(&documents, &window, Some(pasted));
+    let back = take(&documents, &window, Some(pasted));
     // Forward still goes to it.
     assert!(folder.has(&documents, FIRST));
     documents.forget_forward(&window, back);
@@ -312,7 +312,7 @@ fn a_paste_stopped_on_its_way_is_deleted() {
     let folder = TestFolder::new("stopped");
     let (documents, _) = folder.documents();
     let window = open_new(&documents, &manifest());
-    let before = arrive(&documents, &window, None);
+    let before = take(&documents, &window, None);
     paste_into(&documents, &window);
     assert!(folder.has(&documents, FIRST));
     assert!(documents.stop(&window, Some(before)));
@@ -324,7 +324,7 @@ fn a_paste_replaced_on_its_way_by_another_paste_is_deleted() {
     let folder = TestFolder::new("replaced-by-paste");
     let (documents, _) = folder.documents();
     let window = open_new(&documents, &manifest());
-    arrive(&documents, &window, None);
+    take(&documents, &window, None);
     paste_into(&documents, &window);
     assert!(folder.has(&documents, FIRST));
     paste_into(&documents, &window);
@@ -337,7 +337,7 @@ fn a_paste_replaced_on_its_way_by_another_document_is_deleted() {
     let folder = TestFolder::new("replaced-by-document");
     let (documents, _) = folder.documents();
     let window = open_new(&documents, &manifest());
-    arrive(&documents, &window, None);
+    take(&documents, &window, None);
     paste_into(&documents, &window);
     assert!(folder.has(&documents, FIRST));
     give(
@@ -353,7 +353,7 @@ fn a_paste_its_window_could_not_change_to_is_deleted() {
     let folder = TestFolder::new("not-taken");
     let (documents, recorder) = folder.documents();
     let window = open_new(&documents, &manifest());
-    arrive(&documents, &window, None);
+    take(&documents, &window, None);
     recorder.fail_sends_to(&window);
     assert!(paste_text(&documents, &window, "# Pasted").is_err());
     assert_eq!(documents.document_path(&window), Some(manifest()));
@@ -375,14 +375,14 @@ fn a_paste_stays_while_its_window_holds_it_in_history() {
     let folder = TestFolder::new("in-history");
     let (documents, _) = folder.documents();
     let window = open_new(&documents, &manifest());
-    let before = arrive(&documents, &window, None);
+    let before = take(&documents, &window, None);
     paste_into(&documents, &window);
-    let pasted = arrive(&documents, &window, Some(before));
+    let pasted = take(&documents, &window, Some(before));
     documents.step(&window, Step::Back).ok();
-    let back = arrive(&documents, &window, Some(pasted));
+    let back = take(&documents, &window, Some(pasted));
     assert!(folder.has(&documents, FIRST));
     documents.step(&window, Step::Forward).ok();
-    arrive(&documents, &window, Some(back));
+    take(&documents, &window, Some(back));
     assert_eq!(documents.document_path(&window), Some(folder.file(FIRST)));
     assert!(folder.has(&documents, FIRST));
 }
@@ -392,15 +392,15 @@ fn a_paste_stays_while_another_window_shows_it_or_holds_it_in_history_and_goes_w
     let folder = TestFolder::new("other-window");
     let (documents, _) = folder.documents();
     let first = open_new(&documents, &manifest());
-    let before = arrive(&documents, &first, None);
+    let before = take(&documents, &first, None);
     paste_into(&documents, &first);
-    let pasted = arrive(&documents, &first, Some(before));
+    let pasted = take(&documents, &first, Some(before));
     give(
         &documents,
         DocumentAt::new(&app_file("build.rs")),
         Target::Window(&first),
     );
-    arrive(&documents, &first, Some(pasted));
+    take(&documents, &first, Some(pasted));
     // Opened again by another path to the same file, as Ctrl+O or a drop may name it.
     let again = folder
         .0
@@ -408,7 +408,7 @@ fn a_paste_stays_while_another_window_shows_it_or_holds_it_in_history_and_goes_w
         .join(folder.0.file_name().unwrap_or_default())
         .join(FIRST);
     let second = open_new(&documents, &again);
-    let shown = arrive(&documents, &second, None);
+    let shown = take(&documents, &second, None);
     documents.forget(&first);
     assert!(folder.has(&documents, FIRST), "the second window shows it");
     give(
@@ -416,7 +416,7 @@ fn a_paste_stays_while_another_window_shows_it_or_holds_it_in_history_and_goes_w
         DocumentAt::new(&manifest()),
         Target::Window(&second),
     );
-    arrive(&documents, &second, Some(shown));
+    take(&documents, &second, Some(shown));
     assert!(
         folder.has(&documents, FIRST),
         "the second window holds it in history"
@@ -435,9 +435,9 @@ fn a_paste_given_to_a_window_as_its_last_window_closes_is_never_deleted_from_und
     let (documents, _) = folder.documents();
     let first = open_empty(&documents);
     paste_into(&documents, &first);
-    arrive(&documents, &first, None);
+    take(&documents, &first, None);
     let second = open_new(&documents, &manifest());
-    arrive(&documents, &second, None);
+    take(&documents, &second, None);
     let (given, taken) = std::sync::mpsc::channel();
     let (other, window, file) = (shared(&documents), second.clone(), folder.file(FIRST));
     documents.before_next_delete(move || {
@@ -462,14 +462,14 @@ fn a_paste_already_gone_is_no_error() {
     let (documents, _) = folder.documents();
     let first = open_empty(&documents);
     paste_into(&documents, &first);
-    arrive(&documents, &first, None);
+    take(&documents, &first, None);
     std::fs::remove_file(folder.file(FIRST)).ok();
     documents.forget(&first);
     assert!(!folder.has(&documents, FIRST));
     // Pastes are still deleted after it.
     let second = open_empty(&documents);
     paste_into(&documents, &second);
-    arrive(&documents, &second, None);
+    take(&documents, &second, None);
     assert!(folder.has(&documents, FIRST));
     documents.forget(&second);
     assert!(!folder.has(&documents, FIRST));
@@ -481,7 +481,7 @@ fn a_document_outside_the_pasted_folder_is_never_deleted() {
     let (documents, _) = folder.documents();
     let outside = document("outside-the-pasted-folder", "# Kept");
     let window = open_new(&documents, &outside);
-    arrive(&documents, &window, None);
+    take(&documents, &window, None);
     documents.forget(&window);
     documents.finish_deleting_pastes();
     assert!(outside.exists());
@@ -563,7 +563,7 @@ fn two_drops_in_the_same_second_get_two_files() {
     let (documents, _) = folder.documents();
     let window = open_empty(&documents);
     drop_text(&documents, &window, "first");
-    arrive(&documents, &window, None);
+    take(&documents, &window, None);
     drop_text(&documents, &window, "second");
     assert_eq!(
         folder.names(),
@@ -580,10 +580,10 @@ fn dropped_text_replaces_the_shown_document_and_back_returns_to_it() {
     let folder = TestFolder::new("dropped-history");
     let (documents, _) = folder.documents();
     let window = open_new(&documents, &manifest());
-    let before = arrive(&documents, &window, None);
+    let before = take(&documents, &window, None);
     drop_text(&documents, &window, "# Dropped");
     assert_eq!(documents.document_path(&window), Some(folder.file(DROPPED)));
-    let dropped = arrive(&documents, &window, Some(before));
+    let dropped = take(&documents, &window, Some(before));
     documents.step(&window, Step::Back).ok();
     assert_eq!(documents.document_path(&window), Some(manifest()));
     let returned = handover(&documents, &window, Some(dropped));
@@ -596,7 +596,7 @@ fn dropped_text_replaces_a_document_still_on_its_way() {
     let folder = TestFolder::new("dropped-on-its-way");
     let (documents, _) = folder.documents();
     let window = open_new(&documents, &manifest());
-    let before = arrive(&documents, &window, None);
+    let before = take(&documents, &window, None);
     give(
         &documents,
         DocumentAt::new(&app_file("build.rs")),
@@ -606,7 +606,7 @@ fn dropped_text_replaces_a_document_still_on_its_way() {
     drop_text(&documents, &window, "# Dropped");
     assert!(on_its_way.render.is_left());
     assert_eq!(documents.document_path(&window), Some(folder.file(DROPPED)));
-    arrive(&documents, &window, Some(before));
+    take(&documents, &window, Some(before));
     // The document on its way never arrived, so Back goes to the one in view before it.
     documents.step(&window, Step::Back).ok();
     assert_eq!(documents.document_path(&window), Some(manifest()));
@@ -651,7 +651,7 @@ fn dropped_text_is_deleted_when_its_window_closes() {
     let (documents, _) = folder.documents();
     let window = open_empty(&documents);
     drop_text(&documents, &window, "# Dropped");
-    arrive(&documents, &window, None);
+    take(&documents, &window, None);
     assert!(folder.has(&documents, DROPPED));
     documents.forget(&window);
     assert!(!folder.has(&documents, DROPPED));

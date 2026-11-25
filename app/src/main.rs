@@ -7,6 +7,7 @@
 mod command_line;
 #[cfg(test)]
 mod contract;
+mod copy;
 mod disk;
 mod documents;
 mod edit;
@@ -77,6 +78,7 @@ fn main() -> ExitCode {
             links::follow_link,
             open::open_document,
             paste::paste_clipboard,
+            copy::copy_markdown,
             menu::show_document_menu,
             window::close_window,
             window::show_window,

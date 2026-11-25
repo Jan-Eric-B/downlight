@@ -10,7 +10,7 @@ use crate::render::DocumentError;
 /// manifest's showing.
 fn window_showing_the_manifest(documents: &Documents) -> (String, Showing) {
     let label = open_new(documents, &manifest());
-    let showing = arrive(documents, &label, None);
+    let showing = take(documents, &label, None);
     (label, showing)
 }
 
@@ -96,7 +96,7 @@ fn document_joins_history_once_the_page_says_it_arrived() {
     documents.arrived(&label, third.showing);
     documents.step(&label, Step::Back).unwrap();
     assert_eq!(documents.document_path(&label), Some(app_file("build.rs")));
-    arrive(&documents, &label, Some(third.showing));
+    take(&documents, &label, Some(third.showing));
     documents.step(&label, Step::Back).unwrap();
     assert_eq!(documents.document_path(&label), Some(manifest()));
 }
@@ -410,7 +410,7 @@ fn link_from_another_window_to_a_heading_in_the_document_in_view_during_a_load_s
     let (label, first) = window_showing_the_manifest(&documents);
     let _loading = start_loading(&documents, &label, Some(first), &app_file("build.rs"));
     let other = open_new(&documents, &app_file("tauri.conf.json"));
-    arrive(&documents, &other, None);
+    take(&documents, &other, None);
     let told = pages.sent().len();
     let at_install = DocumentAt {
         path: &manifest(),
@@ -443,13 +443,13 @@ fn link_from_another_window_to_a_heading_in_the_document_in_view_during_a_load_s
 fn back_in_another_window_to_the_document_in_view_during_a_load_stops_it() {
     let (documents, pages) = documents();
     let other = open_new(&documents, &manifest());
-    let before = arrive(&documents, &other, None);
+    let before = take(&documents, &other, None);
     give(
         &documents,
         DocumentAt::new(&app_file("build.rs")),
         Target::Window(&other),
     );
-    arrive(&documents, &other, Some(before));
+    take(&documents, &other, Some(before));
     let (label, first) = window_showing_the_manifest(&documents);
     let _loading = start_loading(
         &documents,

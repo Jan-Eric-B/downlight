@@ -1,5 +1,7 @@
 import { askApp, listenToApp, type MenuEntry } from "./app";
+import { canCopyAsMarkdown, copyAsMarkdown } from "./copy-as-markdown";
 import { edit } from "./edit";
+import { isEditable } from "./editable";
 import { findNext, findPrevious, isFindOpen, openFind } from "./find";
 import { isFullScreen, switchFullScreen } from "./full-screen";
 import { isFullWidth, switchFullWidth } from "./full-width";
@@ -142,6 +144,17 @@ const commands = {
       showingWhy(askApp("paste_clipboard"));
     },
   },
+  // The app writes the clipboard itself, so a large copy never passes through the page
+  // (copy-as-markdown spec); only a selection within one code block, whose Markdown is the text
+  // selected, the page writes, as the copy buttons do. Its shortcut is left to a field, which
+  // keeps its keys.
+  copyAsMarkdown: {
+    label: "Copy as Markdown",
+    shortcuts: [{ ctrl: true, shift: true, key: "c" }],
+    leavesEditableFields: true,
+    available: canCopyAsMarkdown,
+    run: copyAsMarkdown,
+  },
   // Without a document the app has nothing to open; Ctrl+E still asks it, which says so.
   edit: {
     label: "Edit",
@@ -267,6 +280,9 @@ const menu: MenuLine[] = [
   "fullScreen",
   "separator",
   "copy",
+  // Directly after the system's Copy, which copies the text the reader sees (copy-as-markdown
+  // spec).
+  "copyAsMarkdown",
   // Last (window design spec); Choose editor... is in its Edit with now.
   "separator",
   "settings",
@@ -406,25 +422,6 @@ function pressesKey(event: KeyboardEvent, key: string): boolean {
 /** Whether the key pressed types one letter of a script other than Latin, such as Cyrillic. */
 function typesANonLatinLetter(event: KeyboardEvent): boolean {
   return /^\p{L}$/u.test(event.key) && !/^\p{Script=Latin}$/u.test(event.key);
-}
-
-/** The kinds of `input` the reader types text into; the others, such as a radio button, take none. */
-const TEXT_INPUT_TYPES = new Set([
-  "text",
-  "search",
-  "url",
-  "tel",
-  "email",
-  "password",
-  "number",
-]);
-
-/** Whether `target`, where a key was pressed, is a field the reader types text into. */
-function isEditable(target: EventTarget | null): boolean {
-  if (target instanceof HTMLTextAreaElement) return true;
-  if (target instanceof HTMLInputElement)
-    return TEXT_INPUT_TYPES.has(target.type);
-  return target instanceof HTMLElement && target.isContentEditable;
 }
 
 function isLetter(key: string): boolean {

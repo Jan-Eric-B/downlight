@@ -10,6 +10,7 @@
 //! several of them use.
 
 use std::path::PathBuf;
+use std::sync::Weak;
 use std::time::{Duration, SystemTime};
 
 use tauri::async_runtime::block_on;
@@ -17,10 +18,12 @@ use tauri::async_runtime::block_on;
 use super::handover::{Handover, Place};
 use super::recorder::{Recorder, Sent, ToWindow, recorded, recorded_pasting, recorded_with};
 use super::*;
+use crate::render::ReadAndRender;
 use crate::settings::PageSettings;
 use crate::watch::{Change, Report};
 
 mod arrival;
+mod copy;
 mod give;
 mod handover;
 mod history;
@@ -123,12 +126,48 @@ fn handover(documents: &Documents, window: &str, page_shows: Option<Showing>) ->
     handover
 }
 
-/// `window`'s page asks for its document while its view shows `page_shows`, and places it, which
-/// it says (ticket 38): the showing it then shows.
-fn arrive(documents: &Documents, window: &str, page_shows: Option<Showing>) -> Showing {
-    let showing = handover(documents, window, page_shows).showing;
+/// `window`'s page asks for its document while its view shows `page_shows`, gets the answer once
+/// its render is done, as `render_document` gets it, and places it, which it says: the showing it
+/// then shows.
+fn take(documents: &Documents, window: &str, page_shows: Option<Showing>) -> Showing {
+    let showing = answered(documents, window, page_shows);
     documents.arrived(window, showing);
     showing
+}
+
+/// `window`'s page asks for its document while its view shows `page_shows`, and gets the answer
+/// once its render is done, as `render_document` gets it, but hasn't placed it yet: the showing
+/// the answer is for.
+fn answered(documents: &Documents, window: &str, page_shows: Option<Showing>) -> Showing {
+    answered_with_bytes(documents, window, page_shows).0
+}
+
+/// As [`answered`], with a weak handle on the bytes of the file its render was made from (empty
+/// for an answer that says why the document can't be shown), for a test to tell whether the
+/// table kept them.
+fn answered_with_bytes(
+    documents: &Documents,
+    window: &str,
+    page_shows: Option<Showing>,
+) -> (Showing, Weak<Vec<u8>>) {
+    let Handover {
+        render,
+        request,
+        showing,
+        ..
+    } = handover(documents, window, page_shows);
+    // Rendered or not, the page gets an answer, which `take` places either way.
+    let answer = block_on(documents.rendered(window, render, request, showing));
+    (showing, weak_bytes(&answer))
+}
+
+/// A weak handle on the bytes of the file the render in `answer` was made from, empty for an
+/// answer that says why the document can't be shown.
+fn weak_bytes(answer: &Result<ReadAndRender, tauri::Error>) -> Weak<Vec<u8>> {
+    match answer {
+        Ok(Ok(rendered)) => Arc::downgrade(&rendered.bytes),
+        Ok(Err(_)) | Err(_) => Weak::new(),
+    }
 }
 
 /// The HTML `window`'s page gets when it asks for its document.
@@ -150,7 +189,10 @@ fn html_of(render: RenderTask) -> String {
 )]
 fn html_and_start_of(render: RenderTask) -> (String, SystemTime) {
     match block_on(render.finished()) {
-        Ok(Ok((document, stages))) => (document.as_str().to_owned(), stages.started()),
+        Ok(Ok(rendered)) => (
+            rendered.document.as_str().to_owned(),
+            rendered.stages.started(),
+        ),
         Ok(Err(error)) => panic!("expected a rendered document, got {}", Notice::from(error)),
         Err(error) => panic!("the read and render stopped: {error}"),
     }

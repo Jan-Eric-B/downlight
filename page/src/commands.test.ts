@@ -497,20 +497,20 @@ describe("the right-click menu", () => {
     return menuEntryOf(entries, id)?.enabled;
   }
 
-  test("replaces the webview's menu with Back, Forward, Reload, Find, Edit, Open, Paste, Zoom in, Zoom out, Reset zoom, Full width, Keep on top, Full screen, Copy and Settings", async () => {
+  test("replaces the webview's menu with Back, Forward, Reload, Find, Edit, Open, Paste, Zoom in, Zoom out, Reset zoom, Full width, Keep on top, Full screen, Copy, Copy as Markdown and Settings", async () => {
     // A window without a document.
     app.render_document = () => null;
     await startDocumentView(0);
     const event = rightClick();
     expect(event.defaultPrevented).toBe(true);
     // With nowhere to go back or forward to, Back and Forward are unavailable, and without a
-    // document, Edit (window design ticket 05).
+    // document, Edit (window design ticket 05) and Copy as Markdown (copy-as-markdown ticket 01).
     const command = (id: string, label: string, shortcut?: string) => ({
       kind: "command",
       id,
       label,
       shortcut,
-      enabled: !["back", "forward", "edit"].includes(id),
+      enabled: !["back", "forward", "edit", "copyAsMarkdown"].includes(id),
     });
     expect(entries).toEqual([
       command("back", "Back", "Alt+Left"),
@@ -543,6 +543,8 @@ describe("the right-click menu", () => {
       },
       { kind: "separator" },
       { kind: "copy" },
+      // Directly after Copy, naming its shortcut (copy-as-markdown spec).
+      command("copyAsMarkdown", "Copy as Markdown", "Ctrl+Shift+C"),
       // Last, as in the spec (window design ticket 08).
       { kind: "separator" },
       command("settings", "Settings", "Ctrl+,"),
@@ -554,6 +556,40 @@ describe("the right-click menu", () => {
       answerAsTheApp(args, () => Promise.resolve(readme));
     await startDocumentView(0);
     expect(enabledInMenu("edit")).toBe(true);
+  });
+
+  test("offers Copy as Markdown once the window shows a document", async () => {
+    app.render_document = (args) =>
+      answerAsTheApp(args, () => Promise.resolve(readme));
+    await startDocumentView(0);
+    expect(enabledInMenu("copyAsMarkdown")).toBe(true);
+  });
+
+  // A first document still on its way leaves the view without a render, as the empty window has.
+  test("offers no Copy as Markdown while the first document is on its way", async () => {
+    app.render_document = () => new Promise(() => undefined);
+    void startDocumentView(0);
+    await settle();
+    expect(enabledInMenu("copyAsMarkdown")).toBe(false);
+  });
+
+  test("runs Copy as Markdown chosen in the menu", async () => {
+    app.render_document = (args) =>
+      answerAsTheApp(args, () => Promise.resolve(readme));
+    await startDocumentView(0);
+    await tell("menu-command", "copyAsMarkdown");
+    expect(askedOfTheApp()).toContain("copy_markdown");
+  });
+
+  // As Ctrl+Shift+C is left to a field, which keeps its keys.
+  test("offers no Copy as Markdown while a text box has the focus", async () => {
+    app.render_document = (args) =>
+      answerAsTheApp(args, () => Promise.resolve(readme));
+    await startDocumentView(0);
+    const field = document.createElement("input");
+    document.body.append(field);
+    field.focus();
+    expect(enabledInMenu("copyAsMarkdown")).toBe(false);
   });
 
   test("runs the command the reader chose", async () => {

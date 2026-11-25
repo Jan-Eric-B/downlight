@@ -22,7 +22,8 @@ impl Documents {
     /// and with it the held document's watch, and a reload is no longer unplaced. What goes
     /// includes the documents Forward went to, when the arrival went somewhere new after Back,
     /// and each pasted file among them that no window holds goes too. A page whose view shows a
-    /// showing the window has left since changes nothing.
+    /// showing the window has left since changes nothing of that. Either way Copy as Markdown
+    /// copies from the bytes of the render placed now, which the page's view shows.
     pub fn arrived(&self, window: &str, showing: Showing) {
         // Dropped after the lock, since dropping a watch stops it.
         let left = {
@@ -30,6 +31,8 @@ impl Documents {
             let Some(record) = table.windows.get_mut(window) else {
                 return;
             };
+            // Whatever the window shows now, the page's view shows this answer.
+            record.shown_bytes.placed(showing);
             let Some(shown) = record
                 .now
                 .shown
@@ -65,6 +68,7 @@ impl Documents {
                 return false;
             }
             let left = record.leave_the_arriving();
+            record.shown_bytes.stopped();
             let missed = record.now.shown.as_mut().and_then(|shown| {
                 let missed = shown.missed.take()?;
                 if missed != Change::Gone {

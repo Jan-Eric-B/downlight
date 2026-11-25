@@ -1,3 +1,5 @@
+import { sourcePosition } from "./sourcepos";
+
 /**
  * The reading position, and every scroll that has to land where it aims. The page gives the
  * document's blocks `content-visibility: auto` (ADR 0003), so a block the reader hasn't seen yet
@@ -109,10 +111,7 @@ const FOOTNOTES_SELECTOR = "section[data-footnotes]";
 
 /** The line of the file where `block` starts, from the core's `data-sourcepos`. */
 function startLine(block: Element): number | undefined {
-  const position = block.getAttribute("data-sourcepos");
-  if (position === null) return undefined;
-  const line = Number.parseInt(position);
-  return Number.isNaN(line) ? undefined : line;
+  return sourcePosition(block)?.start.line;
 }
 
 /**

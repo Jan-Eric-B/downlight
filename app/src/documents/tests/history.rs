@@ -9,13 +9,13 @@ use crate::documents::history::{Step, StepError, Steps};
 /// of the two.
 fn window_that_moved_on(documents: &Documents) -> (String, Showing, Showing) {
     let label = open_new(documents, &manifest());
-    let first = arrive(documents, &label, None);
+    let first = take(documents, &label, None);
     give(
         documents,
         DocumentAt::new(&app_file("build.rs")),
         Target::Window(&label),
     );
-    let second = arrive(documents, &label, Some(first));
+    let second = take(documents, &label, Some(first));
     (label, first, second)
 }
 
@@ -59,7 +59,7 @@ fn forward_after_back_gives_the_window_the_document_it_left_as_its_showing() {
     let (documents, _) = documents();
     let (label, first, second) = window_that_moved_on(&documents);
     step(&documents, &label, Step::Back);
-    arrive(&documents, &label, Some(second));
+    take(&documents, &label, Some(second));
     assert_eq!(
         step(&documents, &label, Step::Forward),
         Some(Given::Changed(label.clone()))
@@ -99,13 +99,13 @@ fn a_document_given_after_back_leaves_nothing_to_go_forward_to() {
     let (documents, _) = documents();
     let (label, first, second) = window_that_moved_on(&documents);
     step(&documents, &label, Step::Back);
-    arrive(&documents, &label, Some(second));
+    take(&documents, &label, Some(second));
     give(
         &documents,
         DocumentAt::new(&app_file("src").join("main.rs")),
         Target::Window(&label),
     );
-    arrive(&documents, &label, Some(first));
+    take(&documents, &label, Some(first));
     assert_eq!(step(&documents, &label, Step::Forward), None);
     assert_eq!(
         step(&documents, &label, Step::Back),
@@ -123,13 +123,13 @@ fn every_document_given_is_one_more_step_back() {
         DocumentAt::new(&app_file("src").join("main.rs")),
         Target::Window(&label),
     );
-    let third = arrive(&documents, &label, Some(second));
+    let third = take(&documents, &label, Some(second));
     step(&documents, &label, Step::Back);
     assert_eq!(documents.document_path(&label), Some(app_file("build.rs")));
-    arrive(&documents, &label, Some(third));
+    take(&documents, &label, Some(third));
     step(&documents, &label, Step::Back);
     assert_eq!(documents.document_path(&label), Some(manifest()));
-    arrive(&documents, &label, Some(second));
+    take(&documents, &label, Some(second));
     assert_eq!(step(&documents, &label, Step::Back), None);
 }
 
@@ -247,7 +247,7 @@ fn a_link_from_the_document_a_step_left_does_nothing() {
     let (documents, _) = documents();
     let (label, first, second) = window_that_moved_on(&documents);
     step(&documents, &label, Step::Back);
-    arrive(&documents, &label, Some(second));
+    take(&documents, &label, Some(second));
     assert_eq!(documents.document_path_shown_as(&label, second), None);
     assert_eq!(
         documents.document_path_shown_as(&label, first),
@@ -273,13 +273,13 @@ fn a_document_stepped_back_to_is_read_anew_and_reloads_on_a_save() {
     let path = document("step-watched", "# Before");
     let (documents, recorder) = documents();
     let label = open_new(&documents, &path);
-    let first = arrive(&documents, &label, None);
+    let first = take(&documents, &label, None);
     give(
         &documents,
         DocumentAt::new(&manifest()),
         Target::Window(&label),
     );
-    let second = arrive(&documents, &label, Some(first));
+    let second = take(&documents, &label, Some(first));
     std::fs::write(&path, "# After").unwrap();
     step(&documents, &label, Step::Back);
     let shown = html_of(handover(&documents, &label, Some(second)).render);
@@ -301,7 +301,7 @@ fn a_heading_visited_after_back_leaves_nothing_to_go_forward_to() {
     let (documents, _) = documents();
     let (label, first, second) = window_that_moved_on(&documents);
     step(&documents, &label, Step::Back);
-    arrive(&documents, &label, Some(second));
+    take(&documents, &label, Some(second));
     documents.forget_forward(&label, first);
     assert_eq!(step(&documents, &label, Step::Forward), None);
     assert_eq!(documents.document_path(&label), Some(manifest()));
@@ -314,7 +314,7 @@ fn a_heading_visited_in_a_showing_the_window_has_left_keeps_its_history() {
     let (documents, _) = documents();
     let (label, _, second) = window_that_moved_on(&documents);
     step(&documents, &label, Step::Back);
-    arrive(&documents, &label, Some(second));
+    take(&documents, &label, Some(second));
     documents.forget_forward(&label, second);
     assert_eq!(
         step(&documents, &label, Step::Forward),

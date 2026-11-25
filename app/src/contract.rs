@@ -1,10 +1,10 @@
 //! The contract samples (ticket 27): a sample of each answer and message the app sends a page, of
 //! the failures that name a missing file (window design ticket 11), and of each argument the page
-//! sends the app that is more than a number, string or flag (the menu entries, the timing reports
-//! and the changes of the settings), of the flags a window tells its page in the page's URL, and
-//! of the tag the page puts on its drags (paste-markdown ticket 04), committed as JSON in
-//! `tests/fixtures`. The page's tests read the same files through the
-//! types in `page/src/app.ts`: they drive each answer and message through the page, check the
+//! sends the app that is more than a number, string or flag (the menu entries, the timing reports,
+//! the changes of the settings and the pieces Copy as Markdown copies), of the flags a window
+//! tells its page in the page's URL, and of the tag the page puts on its drags (paste-markdown
+//! ticket 04), committed as JSON in `tests/fixtures`. The page's tests read the same files
+//! through the types in `page/src/app.ts`: they drive each answer and message through the page, check the
 //! arguments the page sends against their samples, and read the flags from the sampled URLs, so a
 //! change to a shape on one side fails a test on the other. After an intended change to a shape,
 //! `npm run fixtures` writes the samples again; review the diff.
@@ -22,7 +22,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::{
-    documents, edit, full_screen, keep_on_top, links, menu, message, notice, open, settings,
+    copy, documents, edit, full_screen, keep_on_top, links, menu, message, notice, open, settings,
     timing, title_bar, window,
 };
 
@@ -38,9 +38,9 @@ const HOW_TO_UPDATE: &str =
 /// `wait_note` for a document slow to arrive and `stop_document` for Stop), the
 /// failure of `open_named_folder` for a folder gone since, the messages, the arguments of
 /// `show_document_menu`, the timing reports, `place_maximize_button` and `change_setting`, the
-/// flags a window tells its page in the page's URL, and the type of the tag the page puts on a
-/// drag that starts in it, which the drop target reads.
-const SAMPLE_FILES: [(&str, Samples); 15] = [
+/// flags a window tells its page in the page's URL, the type of the tag the page puts on a drag
+/// that starts in it, which the drop target reads, and the pieces `copy_markdown` takes.
+const SAMPLE_FILES: [(&str, Samples); 16] = [
     ("render_document.json", documents::contract_samples),
     ("editor_choices.json", edit::contract_samples),
     ("wait_note.json", documents::wait_note_samples),
@@ -56,6 +56,7 @@ const SAMPLE_FILES: [(&str, Samples); 15] = [
     ("page_url.json", window::contract_samples),
     ("setting_changes.json", settings::change::contract_samples),
     ("drag_tag.json", open::contract_samples),
+    ("copy_markdown.json", copy::contract_samples),
 ];
 
 fn sample_file(name: &str) -> PathBuf {

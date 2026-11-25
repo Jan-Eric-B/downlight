@@ -11,6 +11,7 @@ use downlight_core::RenderedDocument;
 use tauri::{State, WebviewWindow};
 
 use super::history::Steps;
+use super::shown_bytes::Request;
 use super::{Arrival, Documents, Showing};
 use crate::notice::{Notice, file_name_shown};
 use crate::render::{self, DocumentError, RenderTask};
@@ -20,6 +21,9 @@ use crate::timing::Timing;
 pub(super) struct Handover {
     /// The document's read and render.
     pub(super) render: RenderTask,
+    /// Which of the page's requests this answers, for keeping its render's bytes
+    /// ([`Documents::rendered`]).
+    pub(super) request: Request,
     /// This time the window was given the document, for the page to send with its next request.
     pub(super) showing: Showing,
     /// The document's file, for the title bar.
@@ -95,7 +99,12 @@ impl Documents {
         let mut table = self.lock();
         let record = table.windows.get_mut(window)?;
         let steps = record.now.history.steps();
-        let shown = record.now.shown.as_mut()?;
+        let Some(shown) = record.now.shown.as_mut() else {
+            // The page shows the empty window next, which has nothing to copy.
+            record.shown_bytes.none_shown();
+            return None;
+        };
+        let request = record.shown_bytes.requested();
         shown.page_asked = true;
         let place = if page_shows == Some(shown.showing) {
             Place::Reload
@@ -118,6 +127,7 @@ impl Documents {
         }
         Some(Handover {
             render,
+            request,
             showing: shown.showing,
             file: DocumentFile::of(&shown.path),
             place,
@@ -142,12 +152,20 @@ impl Documents {
     }
 
     /// What `window`'s page asking for its document and placing it does, for the tests of other
-    /// modules, which have no webview to call [`render_document`]: hands the document over, says
-    /// it arrived (ticket 38), and gives the showing the page then sends with a link (None while
-    /// the window shows no document).
+    /// modules, which have no webview to call [`render_document`]: hands the document over, waits
+    /// for its answer as `render_document` does, says it arrived (ticket 38), and gives the
+    /// showing the page then sends with a link (None while the window shows no document).
     #[cfg(test)]
     pub fn page_asks(&self, window: &str) -> Option<Showing> {
-        let showing = self.handover(window, None)?.showing;
+        let Handover {
+            render,
+            request,
+            showing,
+            ..
+        } = self.handover(window, None)?;
+        // Rendered or not, the page gets an answer, which it places either way.
+        let _answer =
+            tauri::async_runtime::block_on(self.rendered(window, render, request, showing));
         self.arrived(window, showing);
         Some(showing)
     }
@@ -170,13 +188,25 @@ pub async fn render_document(
     documents: State<'_, Documents>,
     timing: State<'_, Timing>,
 ) -> Result<Option<DocumentToShow>, ()> {
-    let Some(handover) = documents.handover(window.label(), showing) else {
+    let Some(Handover {
+        render,
+        request,
+        showing,
+        file,
+        place,
+        notice,
+        steps,
+    }) = documents.handover(window.label(), showing)
+    else {
         return Ok(None);
     };
-    let content = match handover.render.finished().await {
-        Ok(Ok((document, stages))) => {
-            timing.report(window.label(), handover.place.reported_as(), &stages);
-            Content::Document(document)
+    let content = match documents
+        .rendered(window.label(), render, request, showing)
+        .await
+    {
+        Ok(Ok(rendered)) => {
+            timing.report(window.label(), place.reported_as(), &rendered.stages);
+            Content::Document(rendered.document)
         }
         Ok(Err(error)) => {
             if let DocumentError::Left { stages, .. } = &error {
@@ -187,12 +217,12 @@ pub async fn render_document(
         Err(source) => Content::Error(DocumentError::ReadAndRenderStopped { source }.into()),
     };
     Ok(Some(DocumentToShow {
-        showing: handover.showing,
-        file: handover.file,
-        place: handover.place,
+        showing,
+        file,
+        place,
         content,
-        notice: handover.notice,
-        steps: handover.steps,
+        notice,
+        steps,
     }))
 }
 

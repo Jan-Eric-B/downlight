@@ -18,6 +18,8 @@
 //!   emptying the pasted folder at startup (paste-markdown ticket 02).
 //! - [`settings`]: changing the reader's settings, since they shape every new window and reach
 //!   every page when they change ([`Documents::change_settings`], window design ticket 12).
+//! - [`shown_bytes`]: keeping the bytes of the file the render a window's page shows was made
+//!   from, which Copy as Markdown copies (copy-as-markdown ticket 01).
 //!
 //! It also keeps the window the reader was last in, which a new window opens beside, at a size and
 //! place [`place`] works out (ticket 16).
@@ -48,6 +50,7 @@ mod place;
 pub mod recorder;
 mod settings;
 mod show;
+mod shown_bytes;
 mod watching;
 
 #[cfg(test)]
@@ -56,6 +59,7 @@ use history::History;
 use pasted_files::Pastes;
 pub use place::{Area, Point, WindowPlace, WindowSize};
 pub use show::{NewWindow, ShowError, WindowError, Windows};
+use shown_bytes::ShownBytes;
 
 /// Which window shows which document, by window label. The app's managed state.
 pub struct Documents {
@@ -127,6 +131,10 @@ struct WindowRecord {
     /// page says the document arrived ([`Documents::arrived`]), so a document joins the history
     /// only then.
     before_arrival: Option<WindowState>,
+    /// The bytes of the file the render its page's view shows was made from, which Copy as
+    /// Markdown copies, and those of the render on its way to the page. Kept apart from the shown
+    /// document, as they follow what the page placed rather than what the window was given.
+    shown_bytes: ShownBytes,
 }
 
 /// A window's document, None while it shows none, and its history: what the window is now, or
@@ -189,6 +197,7 @@ impl WindowRecord {
         let Self {
             now,
             before_arrival,
+            ..
         } = self;
         now.document_mut(key)
             .or_else(|| before_arrival.as_mut()?.document_mut(key))
