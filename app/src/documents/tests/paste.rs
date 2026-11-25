@@ -426,6 +426,37 @@ fn a_paste_stays_while_another_window_shows_it_or_holds_it_in_history_and_goes_w
 }
 
 #[test]
+fn a_paste_given_to_a_window_as_its_last_window_closes_is_never_deleted_from_under_it() {
+    // From the review of ticket 02: the deleting thread checked under the table's lock that no
+    // window held the file, and deleted it after the lock, so a window given the file in between,
+    // by Open, a link or a drop, lost it. The other window is given the file just before it is
+    // deleted; that ends then if nothing holds it up.
+    let folder = TestFolder::new("given-as-deleted");
+    let (documents, _) = folder.documents();
+    let first = open_empty(&documents);
+    paste_into(&documents, &first);
+    arrive(&documents, &first, None);
+    let second = open_new(&documents, &manifest());
+    arrive(&documents, &second, None);
+    let (given, taken) = std::sync::mpsc::channel();
+    let (other, window, file) = (shared(&documents), second.clone(), folder.file(FIRST));
+    documents.before_next_delete(move || {
+        meanwhile(other, move |documents| {
+            let _ = documents.give(DocumentAt::new(&file), Target::Window(&window));
+            // The test may have stopped waiting already.
+            let _ = given.send(file.exists());
+        });
+    });
+    documents.forget(&first);
+    let taken_while_there = taken.recv_timeout(HELD_UP_END_WAIT) == Ok(true);
+    assert_eq!(documents.document_path(&second), Some(folder.file(FIRST)));
+    assert!(
+        !taken_while_there || folder.has(&documents, FIRST),
+        "the window was given the file while it was there, and it was deleted from under it"
+    );
+}
+
+#[test]
 fn a_paste_already_gone_is_no_error() {
     let folder = TestFolder::new("already-gone");
     let (documents, _) = folder.documents();

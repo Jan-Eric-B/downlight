@@ -2,7 +2,8 @@
 //! is deleted once no window shows it, has it on its way or holds it in its history. The table
 //! decides: each change that lets go of documents hands them to [`Documents::let_go`], after the
 //! table's lock, and a thread of its own deletes those that are pasted files no window holds any
-//! more, off the main thread, which closes windows.
+//! more, off the main thread, which closes windows. It checks and deletes each under the table's
+//! lock, so that a window given the file meanwhile keeps it.
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Sender};
@@ -17,13 +18,37 @@ use crate::platform;
 pub(super) struct Pastes {
     folder: PastedFolder,
     deleting: OnceLock<Sender<Job>>,
+    /// What runs the next time a pasted file is deleted, just before it is
+    /// ([`Documents::before_next_delete`]).
+    #[cfg(test)]
+    before_next_delete: std::sync::Mutex<Option<BeforeDelete>>,
 }
+
+/// What another thread does just before a pasted file is deleted.
+#[cfg(test)]
+type BeforeDelete = Box<dyn FnOnce() + Send>;
 
 impl Pastes {
     pub(super) const fn new(folder: PastedFolder) -> Self {
         Self {
             folder,
             deleting: OnceLock::new(),
+            #[cfg(test)]
+            before_next_delete: std::sync::Mutex::new(None),
+        }
+    }
+
+    /// Runs what [`Documents::before_next_delete`] was given, if it was.
+    #[cfg(test)]
+    fn before_delete(&self) {
+        // Taken out of its lock before it runs, since what it does may delete a file too.
+        let meanwhile = self
+            .before_next_delete
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        if let Some(meanwhile) = meanwhile {
+            meanwhile();
         }
     }
 }
@@ -157,6 +182,21 @@ impl Documents {
         self.deleting(Job::Sweep { started });
     }
 
+    /// The next time a pasted file is deleted, `meanwhile` runs first on the deleting thread, as
+    /// what another thread does just then. So a test puts a window's request for the file at the
+    /// moment of its choosing, as [`Recorder::before_next_title`] puts a show into another.
+    ///
+    /// [`Recorder::before_next_title`]: super::recorder::Recorder::before_next_title
+    #[cfg(test)]
+    pub(super) fn before_next_delete(&self, meanwhile: impl FnOnce() + Send + 'static) {
+        *self
+            .inner
+            .pastes
+            .before_next_delete
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Box::new(meanwhile));
+    }
+
     /// The table let go of `left`, which is dropped here: the caller has released the table's
     /// lock, since dropping a watch stops it. Each pasted file it held that no window holds any
     /// more is deleted, off the calling thread. Dropping and letting go in one call, so that no
@@ -251,22 +291,23 @@ fn delete_unheld(inner: &Weak<Inner>, let_go: Vec<LetGo>) {
         .into_iter()
         .filter(|document| document.key.parent() == Some(folder.as_path()))
         .collect();
-    if pasted.is_empty() {
-        return;
-    }
-    let unheld: Vec<PathBuf> = {
+    for document in pasted {
+        // Checked and deleted under one hold of the table's lock, which every claim of a document
+        // takes, so that no window can be given the file between the two and lose it (ticket
+        // 02's review). One file at a time, so that the main thread, which takes the lock as a
+        // window closes, waits for at most one delete of a file in the temporary folder, a
+        // fraction of a millisecond, even during a sweep of many.
         let table = documents.lock();
-        pasted
-            .into_iter()
-            .filter(|document| !table.holds(&document.key))
-            .map(|document| document.path)
-            .collect()
-    };
-    for file in unheld {
+        if table.holds(&document.key) {
+            continue;
+        }
+        #[cfg(test)]
+        documents.inner.pastes.before_delete();
         // A file already gone is as good as deleted. Any other failure, such as a program that
         // holds the file open, leaves it for the next startup's sweep: the reader can't act on
         // it, so nobody is told.
-        let _ = std::fs::remove_file(file);
+        let _ = std::fs::remove_file(document.path);
+        drop(table);
     }
 }
 
