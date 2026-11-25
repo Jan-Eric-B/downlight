@@ -5,18 +5,11 @@ ID = folder/number under .scratch/<folder>/issues/<number>-*.md (v1 = downlight-
 Status: ready = ready-for-agent, triage = needs-triage (grill first), info = needs-info (investigate).
 Move lines to change the order. A new ticket gets a line here; a closed ticket's line is removed.
 
-- Update defautl window size: Currently I think the widht is more than the height. For text this does not make sense. Find a good default window size
-
-full-screen/01 | F11 and the menu switch full screen | built, hand checks left | only the hand check is missing
-full-screen/02 | Esc leaves full screen, last | built, hand checks left | only the hand check is missing; blocked by full-screen/01; Esc after the flyout, Find and Stop, and image-lightbox/02 before it; image-lightbox/01 moves its Esc into one ordered list
-full-screen/03 | The title bar hides in full screen | built, hand checks left | only the hand check is missing; blocked by full-screen/01
-full-screen/04 | The title bar slides in at the top edge | built, hand checks left | only the hand check is missing; blocked by full-screen/03
-full-screen/05 | The bar's buttons in full screen | built, hand checks left | only the hand check is missing; blocked by full-screen/01 (tests) and full-screen/04 (hand check); slideshow/01 reuses full screen
-full-screen/06 | A repeated Notice shows once (F11 spam stacks the full screen Notice) | built, hand checks left | only the hand check is missing (F11 quickly a few times); changes every Notice, not only full screen's
 paste-markdown/01 | Ctrl+V and the menu show the clipboard's text | built, hand checks left | only the measurement (DOWNLIGHT_TIMING's paste line on the 1 MB document) and the hand checks are missing
 paste-markdown/02 | A pasted file is deleted once no window can return to it | built, hand checks left | only the hand checks are missing (closing a paste's window, ending the process and the next start's sweep, first paint with pastes left)
 paste-markdown/03 | Downlight's own drop target takes file drops | built, hand checks left | only the hand checks are missing (a file from Explorer, a path of 260 characters or longer, several files, a shortcut, a binary file, a folder, onto the empty window and a document on its way, a text drag's no-drop cursor)
 paste-markdown/04 | Text dropped onto a window shows as a paste | built, hand checks left | only the measurement (DOWNLIGHT_TIMING's drop line on the 1 MB document) and the hand checks are missing (text from Edge, VS Code, Notepad, Word and Teams, a link and an image from Edge, a file from VS Code, whitespace, drags inside the window doing nothing, which confirms the dragstart tag, one from another Downlight window, the Find box, 20 MB and its Wait note, closing the window)
+wd/17 | A tall default window for reading (900 px wide, 90% of the work area high, centred) | ready | not blocked; app only (window placement); only before any window closed, a kept size still wins; grilled 2026-11-25 (narrow screens, the active window's screen, centred without one)
 image-lightbox/01 | One place owns Esc's order | ready | not blocked; prefactor, no visible change; touches the Esc listeners of the settings flyout, Find, Stop and full-screen/02
 image-lightbox/02 | A click on an image shows it in the lightbox | ready | blocked by image-lightbox/01; Esc after the flyout, before Find, Stop and full screen
 image-lightbox/03 | Step through the document's images | ready | blocked by image-lightbox/02
@@ -32,7 +25,6 @@ copy-as-markdown/03 | Copy as Markdown of part of a table | ready | blocked by c
 copy-as-markdown/04 | Ctrl+C puts clean HTML beside its plain text | ready | not blocked; page only; the margin's line numbers (line-numbers/01) and a sort (tables/01) must keep working with it
 v1/38 | A large document's load can be left (Wait note, Stop) | built, hand checks left | only your hand check is missing; all boxes still unchecked; blocks v1/39
 wd/10 | Counts (lines and words in the file name tooltip, selection bubble bottom right) | ready | not blocked; its bubble owns the bottom right corner
-wd/17 | A tall default window for reading (900 px wide, 90% of the work area high) | ready | not blocked; app only (window placement); only the first window before any closed, a kept size still wins
 about/01 | About Downlight (version, GPL notices, third-party notices) | triage | not blocked; closes a GPL-3.0 gap (legal notices in the UI); may add a section to the settings flyout, as ruler/02 adds a "View" group
 ruler/01 | Overview ruler: heading marks beside the scroll bar | ready | not blocked; builds the list of headings (h1 to h4) that outline/01 to 06 reuse
 ruler/02 | Overview ruler: the switch in the settings (flyout "View" group) | ready | blocked by ruler/01; creates the flyout's "View" group that reader-settings and remote-images may use
@@ -46,8 +38,8 @@ outline/03 | Typing filters the Outline | ready | blocked by outline/02
 outline/04 | The Outline across reloads, other documents and the empty window | ready | blocked by outline/03
 outline/05 | The Outline in full screen, and its place in Esc's order | ready | blocked by outline/02; joins image-lightbox/01's one Esc list if that is done, else defers as the settings flyout does (whichever lands second adapts)
 outline/06 | Outline: large documents, measured | ready | blocked by outline/01, 03 and 04; does not wait for v1/39
-print/01 | Printing and PDF | triage | not blocked; shares "laid out for others" styles with export-html/01; check ADR 0003's skipped blocks print at full size
-export-html/01 | Export to HTML | triage | not blocked; first feature that writes a file ("reading only"); share styles with print/01
+print/01 | Print, and PDF through the print dialog | ready | not blocked; page only unless window.print() fails (then ShowPrintUI in the Windows module); adds Ctrl+P and a menu entry after Paste
+export-html/01 | Export to HTML | ready | not blocked; independent of print/01 (shares only github-markdown-css); its menu entry goes after Print's, or after Paste if print/01 isn't built yet; first feature that writes the reader's own file; adds an app command (capability, contract samples)
 mermaid-and-math/01 | Mermaid diagrams and math | triage | not blocked; rendering change (fixtures, see right-to-left/01); needs a cap like the Highlight limit; print and export should show diagrams
 find-options/01 | Find options (case, whole word, regex) | triage | not blocked; overlaps tables/02 (filter as a Find option); keep ruler/03's marks working
 reader-settings/01 | Reader settings (font, size, line height, wrap long code lines) | triage | not blocked; every change must keep the reading position

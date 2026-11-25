@@ -80,7 +80,8 @@ fn to<T>(window: &str, what: T) -> (String, T) {
 }
 
 /// What a window opened with `title` is recorded as, with the default settings, at the default
-/// size, and placed by the system, as when no window has closed and none is active.
+/// size, and placed by the system, as when no window has closed, none is active and the system
+/// names no main screen to shape and centre it for.
 fn opened(title: &str) -> ToWindow {
     ToWindow::Opened(NewWindow {
         title: title.to_owned(),

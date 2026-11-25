@@ -100,6 +100,11 @@ struct WindowTable {
     /// The window the reader was last in, which a new window opens beside (ticket 16), while it
     /// is open.
     active: Option<String>,
+    /// The window opened last and the place it was given, until the reader is in a window again
+    /// or it is forgotten: the next new window opens beside it rather than the active window, so
+    /// windows opened together, as a launch opens one for each document before the reader is in
+    /// any, cascade instead of opening on top of each other (window design ticket 17's review).
+    opened_last: Option<(String, WindowPlace)>,
     /// The windows whose pages haven't asked for their document yet, by label, with whether the
     /// settings changed meanwhile. Such a page may not hear a `settings` message yet, so it is
     /// sent the settings when it first asks ([`Documents::page_hears_settings`]); it asks only
@@ -482,6 +487,7 @@ impl Documents {
             watch.recheck();
         }
         table.active = Some(window.to_owned());
+        table.opened_last = None;
     }
 
     /// `window` is closing: its size is kept in the settings, for the next new window to open at
@@ -650,6 +656,13 @@ impl Documents {
             let mut table = self.lock();
             if table.active.as_deref() == Some(window) {
                 table.active = None;
+            }
+            if table
+                .opened_last
+                .as_ref()
+                .is_some_and(|(opened, _)| opened == window)
+            {
+                table.opened_last = None;
             }
             table.not_hearing.remove(window);
             table.windows.remove(window)

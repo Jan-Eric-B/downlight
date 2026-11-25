@@ -1,20 +1,39 @@
 # 01: Export to HTML
 
-**What to build:** The reader can save the shown document as one standalone HTML file that looks as Downlight shows it, to send to someone or publish, with no Downlight needed to open it.
+**What to build:** The reader can **Export** the shown document: save it as one standalone HTML file for someone else to open in a browser, in GitHub's look, light or dark as their system is, with no Downlight and no other file needed. It is for what a PDF from Print can't do: the file reflows on a phone, follows dark mode, and keeps working links, anchors and collapsible sections.
 
-Spec: none yet. Grill it first (`/grill-with-docs`).
+- **How it starts:** "Export to HTML..." in the right-click menu, right after Print (after Paste while print/01 isn't built). No shortcut (Ctrl+S and Ctrl+Shift+S stay free for a later "save a copy of the Markdown"), no title bar button. It can't run in the empty window, nor while only a **Wait note** is in view.
+- **The dialog:** a save dialog (rfd, as Open uses) filtered to HTML files, starting in the document's folder, or Documents for a **Paste**, and suggesting the file's name with `.html` (`a.md` gives `a.html`). Windows' dialog asks before overwriting a file. The app refuses to write over the shown document's own file (a document can be any text file, so `notes.html` shown as Markdown would suggest itself) and says so in a **Notice**.
+- **What it writes:** the render in view, even when the file changed and its **Reload** hasn't arrived. **Ticks** (the file's and the reader's), a **Sort** and the `<details>` the reader opened are as shown; the `<details>` stay collapsible. Nothing Downlight adds on screen goes in: copy buttons (and later the margin's line numbers) are removed; Find's matches are CSS Highlights, so they aren't in the DOM. No script at all; heading anchors and footnotes work as plain `#` links.
+- **Look:** github-markdown-css's main stylesheet inlined, which follows `prefers-color-scheme` in GitHub's light and dark colors (blue links, GitHub's checkboxes, no **Accent color**); code highlighting comes with it (ADR 0004's `pl-*` classes). None of Downlight's own styles (`document.css`, `accent.css`): no backdrop, zoom or **Full width**. GitHub's reading width, centered (github-markdown-css's suggested wrapper), and ADR 0003's `content-visibility: auto` on the top-level blocks, so a large file stays quick in the recipient's browser.
+- **Head:** `<meta charset="utf-8">`, a viewport meta for phones, the file's name as `<title>`, and the stylesheet led by a CSS comment with github-markdown-css's MIT notice (copyright line and permission text; its file has none of its own). No "exported from Downlight" credit, no generator meta.
+- **Images:** a **Local image** is embedded as a `data:` URL with its media type, in `src` and `srcset`, with no size cap. A remote image keeps its `https://` address, so the recipient's browser fetches it. An image whose file is gone or unreadable, and one on a **Network share**, keeps its `<img>` and `alt` but no `src`, so the browser shows the alt text; Export still succeeds, with no Notice per image.
+- **Links:** every **Link target** stays as the document wrote it: a relative link like `docs/guide.md` works when the file is saved beside the document's folder, as GitHub treats relative links. Never turned into `file:` URLs, which would hand the reader's paths to whoever gets the file.
+- **Who does what:** the page clones the view's rendered document, strips Downlight's additions, wraps it in the head and stylesheet, and passes the HTML with its showing to a new app command (typed in `page/src/app.ts`). The app shows the dialog, then on a background task replaces each image-scheme URL with a `data:` URL, reading the files through the core's `local_image` (which checks network shares again), and writes the file. File reading stays in the app, and the page never builds base64 strings. The new command needs its capability in `app/capabilities/` (then `cargo clean -p tauri --release` before a release build) and its contract sample.
+- **Feedback and large documents:** a Notice once the file is written ("Exported **a.html**"), and one for any failure (a folder it can't write to, a full disk). No size cap and no wait note: every document exports, however large. Measured and recorded; a follow-up (a progress note, say) is a ticket of its own if the numbers are bad.
+- **Not shared with print/01:** the two share only github-markdown-css. Paper wants light only, wrapped code and real tables; the browser file wants both themes and GitHub's scrolling code and tables, and it leaves out Downlight's additions by stripping the clone, not with CSS.
+
+Rejected: Downlight's own look (accent color, backdrop, title bar: meaningless in another browser); always light, as Print (a browser file has no reason to be); images copied into a folder beside the file (two things to send); relative links as `file:` URLs (leaks the reader's paths) or as plain text (drops links that work beside the source); copy buttons or any script (a file without script is safer to send and publish); the core rendering the export from the file (it would have to redo Ticks and Sort, which only the page knows); the page embedding the images (file reading belongs to the app, and large base64 strings in the page); a shortcut.
+
+Spec: none; grilled on 2026-11-25 instead (`/grill-with-docs`). The glossary has its **Export** entry. No ADR: none of it is hard to reverse. ADR 0006's "never the reader's own" files is about pastes; Export is the first feature that writes a file the reader chose.
 
 **Blocked by:** None (can start immediately)
 
-**Status:** needs-triage
+**Status:** ready-for-agent
 
-- [ ] Grill it before planning. Open questions:
-  - Standalone how: styles inlined (GitHub's stylesheet and the highlighting), **Local images** embedded as data or copied beside it, remote images left as links?
-  - Light, dark or both (following the viewer's system with `prefers-color-scheme`)? Downlight's **Accent color** or GitHub's?
-  - What is left out: the title bar, Find, copy buttons, the **Overview ruler**; **Ticks** and a **Sort** as shown or as in the file?
-  - It writes a file, a first for Downlight ("reading only"): a save dialog, and the glossary's opening line may need a word on it.
-  - How it starts (a right-click entry, Ctrl+Shift+S), and how it relates to printing and PDF (`.scratch/print/issues/01-print-and-pdf.md`), which shares the "laid out for others" styles.
+- [ ] Page tests (written first, Vitest): the menu entry runs Export, at its place in the menu, and not in the empty window or over a wait note.
+- [ ] Page tests (written first): the HTML built from a view keeps ticks, a sort and opened `<details>` as shown; has no copy buttons and no `<script>`; has the head (charset, viewport, the file's name as title, the MIT comment, the inlined stylesheet), the reading-width wrapper and the `content-visibility` rule.
+- [ ] An app command that takes the HTML and the showing, shows the save dialog (HTML filter, the document's folder or Documents for a paste, the file's name with `.html`), refuses the shown document's own file, embeds the images and writes the file on a background task; its capability and contract sample.
+- [ ] App tests (`cargo test`): a local image becomes a `data:` URL with its media type, in `src` and in `srcset`; a missing image loses its `src`; a network share image doesn't load; writing over the shown document's own file is refused; the file is written.
+- [ ] Notices for a written file and for each failure.
+- [ ] Measured with the timing switch on the 1 MB and 100 MB documents (`npm run documents -- large`): the page's long tasks when Export runs, and the time until the file is written; recorded under Results here.
+- [ ] Hand check in the release build: the save dialog; the file opened in Edge and Firefox in light and dark mode, from a document with code, a wide table, local and remote images, ticked and unticked items (from the file and the reader), a sorted table and a closed `<details>`, exported in the dark theme with Mica, a non-amber accent color, zoom and Full width, with Find's matches showing.
+- [ ] `npm run check` passes.
 
 ## Comments
 
 **2026-11-20, from the repo owner.** Picked from the mdhero comparison (`.scratch/mdhero-comparison/features.md`, "Export to HTML", planned in mdhero).
+
+**2026-11-25.** print/01 was grilled and is ready: it puts the paper styles (GitHub's light colors, nothing of Downlight's on screen, wrapped code, real tables) in a stylesheet of their own, apart from the page breaks and margin boxes, for this ticket to reuse. Its answers to the shared questions: always light, GitHub's colors rather than the accent color, ticks and a sort as shown, every `<details>` opened. This ticket may still answer them differently for a file meant to be opened in a browser.
+
+**2026-11-25.** Grilled with the repo owner; decisions above. It answered the shared questions differently: both themes, `<details>` as shown, and no stylesheet shared with print/01 (print/01 updated to match).

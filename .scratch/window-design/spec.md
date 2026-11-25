@@ -6,9 +6,13 @@ Status: ready-for-agent
 
 Downlight works, but it looks like a placeholder: a blue stand-in icon, Windows' plain title bar with "README.md - docs - Downlight" in it, and every command hidden behind the keyboard or the right-click menu. WinDown, the viewer Downlight replaces, looks like a Windows 11 app: its logo and the file name in a slim title bar, the commands I use most as small buttons beside minimize, maximize and close, and a settings flyout for theme, accent color and backdrop. I want Downlight to look and feel like that, in its own amber colors, without losing what the native title bar gives (snap layouts above all).
 
+And until I have closed a window once, a new window opens at 800 x 600, wider than it is tall: for a page of prose that reads down, it shows little of the document and more width than a line needs.
+
 ## Solution
 
 The page draws the window's whole **title bar** (ADR 0005): the amber logo, the document's file name, the zoom level when it isn't 100%, and buttons for Open and Edit, Full width and Keep on top, and Settings, set apart by thin separators, followed by minimize, maximize and close. The Windows module brings back what the native title bar did, snap layouts included. A new amber icon replaces the placeholder everywhere. An amber **accent color** marks what Downlight adds to a document: links, the selection, Find's matches, ticks and switched-on buttons. A settings flyout under the gear lets the reader choose the theme, the **backdrop**, the accent color (amber or Windows' own) and the editor.
+
+Before any window has closed, a new window opens tall and narrow, shaped for reading: 900 px wide and 90% of its screen's work area high, centred on the main screen when no window is open (ticket 17). Once a window has closed, new windows open at its size, as v1 ticket 16 made them.
 
 This reverses parts of the [v1 spec](../downlight-v1/spec.md): story 71's native title bar, "no settings window and no toolbar", "a theme override and an accent color" under Out, and full width and Keep on top under v1.x. It ships in v1, before the release check (v1 ticket 18).
 
@@ -58,6 +62,22 @@ This reverses parts of the [v1 spec](../downlight-v1/spec.md): story 71's native
 ### Counts
 
 30. As a reader, I want the document's lines and words in the file name's tooltip, and my selection's words and characters in a small bubble while I select, so that I can see how long a document or a passage is without a status bar taking space. (Ticket 10.)
+
+### Default window size
+
+31. As a reader opening Downlight for the first time, I want a window taller than it is wide, so that I see more of a document's prose at once.
+32. As a reader, I want the first window's text column about 100 characters wide, so that prose reads comfortably and most code blocks and tables still fit without scrolling sideways.
+33. As a reader who wants GitHub's full reading width, I want to get it by widening the window or with **Full width**, so that the narrower default costs me nothing.
+34. As a reader, I want a margin above and below the first window, so that it doesn't look maximized and its edges stay easy to grab.
+35. As a reader on a narrow screen (a portrait screen at a high scale, a small tablet), I want a margin at the sides too, so that the window doesn't touch both edges of the screen.
+36. As a reader on a short laptop screen, I want the window to fit the screen, even where that makes it wider than tall, so that no part of it is off the screen.
+37. As a reader with a portrait or very tall screen, I want the window as tall as the screen allows, with no fixed cap, so that the screen I chose for reading is used.
+38. As a reader who launches Downlight many times a day, I want the first window centred on the main screen each time, so that its bottom edge never reaches under the taskbar.
+39. As a reader with two monitors, I want a second window, opened beside the first before any has closed, sized for the screen it opens on, so that a window on a short screen still has its margin.
+40. As a reader who sized a window once, I want every new window to open at that size after it closed, so that the default never overrides my choice.
+41. As a reader with a kept size, I want new windows placed as before (beside the active window, or where Windows places them), so that the new default changes nothing for me.
+42. As a reader, I want the same default whether the window opens from the file manager, the command line, Open, a drop or Paste, and for the empty window, so that every way in looks the same.
+43. As a reader who opens a file from the file manager, I want **First paint** no slower with the taller window, so that Downlight stays fast to start.
 
 ## Implementation Decisions
 
@@ -133,6 +153,28 @@ This reverses parts of the [v1 spec](../downlight-v1/spec.md): story 71's native
 - Lines are the file's, as line numbers are; words and characters are of the text the reader sees, split by UAX #29. Not counted: the document's characters, a reading time, the reading position's line, the encoding.
 - The core counts the document while it renders, so the counts cost the page nothing and a 100 MB document holds nothing up; the page counts only the selection (`Intl.Segmenter`). Ticket 10 has the details.
 
+### Default window size
+
+- **Only before any window has closed.** The size kept in the settings (the last window that closed, v1 ticket 16) still wins over the default, and the smallest size (320 x 240) and the cascade down and to the right of the active window stay as they are.
+- **The default comes from a work area:** width 900 logical px, at most 90% of the work area's width; height 90% of the work area's height, at least 600 px, with no upper limit. The result is then fitted to the work area as every new window is, so the 600 px floor never puts a window past a short screen's edge.
+- **Whose work area:** the screen the window opens on. With an active window at a place and size of its own, that is the active window's screen, which the placement already knows from the active window's place; without one, the main screen's. An active window that is minimized, maximized or in full screen has no place of its own (the `Windows` port reports none for it, v1 ticket 16) and counts as none: the window is shaped for the main screen and centred on it, as with no active window. The placement already takes both, so its inputs don't change: the kept size, the active window's place and the main screen's work area.
+- **Placed by Downlight without an active window.** A window at the default size with no active window gets a place: centred in the main screen's work area, in that screen's logical pixels, which the window opens at. Left to the system (no position, which tao turns into `CW_USEDEFAULT`), Windows moves each new window down by about a title bar, and fitting only shrinks a window, so a window 90% of the screen high would reach under the taskbar after a few launches. A window at a kept size without an active window is still placed by the system, as today, so a reader's own habit is left alone.
+- **No new port and no change outside the placement:** the `Windows` port already reports the active window's place with its work area and the main screen's work area, and a new window already carries an optional place.
+- Rejected: a fixed portrait size (900 x 1100), which doesn't fit most laptops; about 1000 px wide (GitHub's reading width with the scroll bar), which gives lines of about 115 characters; a cap on the height, which stunts a portrait screen's window; keeping the system's place and moving the window up once it is made, which needs its place afterwards and could flicker; a size per document, which is a different feature.
+- How the default comes out, with Windows 11's 48 px taskbar:
+
+  | Screen | Scale | Work area (logical) | Default window |
+  | --- | --- | --- | --- |
+  | 5120 x 2160 (40" ultrawide) | 100% / 125% / 150% | 5120 x 2112 / 4096 x 1680 / 3413 x 1392 | 900 x 1901 / 900 x 1512 / 900 x 1253 |
+  | 1440 x 2560 portrait | 100% | 1440 x 2512 | 900 x 2261 |
+  | 3840 x 2160 | 150% / 200% | 2560 x 1392 / 1920 x 1032 | 900 x 1253 / 900 x 929 |
+  | 2560 x 1440 | 100% / 125% | 2560 x 1392 / 2048 x 1104 | 900 x 1253 / 900 x 994 |
+  | 1920 x 1080 | 100% / 125% / 150% | 1920 x 1032 / 1536 x 816 / 1280 x 672 | 900 x 929 / 900 x 734 / 900 x 605 |
+  | 1366 x 768 | 125% | 1093 x 566 | 900 x 566 |
+  | 1080 x 1920 portrait | 150% | 720 x 1232 | 648 x 1109 |
+
+  Ticket 17 has the longer table.
+
 ### Modules
 
 - **Page:** a title bar module (logo, file name, zoom level, buttons, window buttons), a settings flyout module, and the accent scale as CSS variables. They talk to the app only through `page/src/app.ts`, as every page module does.
@@ -146,6 +188,7 @@ This reverses parts of the [v1 spec](../downlight-v1/spec.md): story 71's native
 - **App** (`cargo test`): the settings store keeps theme, backdrop, accent color and full width across a restart, and loads defaults when they're missing. The hit test is a pure function from a point and the maximize button's rectangle to the hit test answer, and is tested as one.
 - **Counts:** the core's tests count lines and words through `render`; the page's tests check the tooltip and the selection bubble; the rendered document's new shape gets its contract sample.
 - **Accent scale:** a page test reads the icon's SVG and fails on any color that isn't a shade of the scale.
+- **Default window size** (`cargo test`, beside v1 ticket 16's placement tests): through the documents module's public way of opening a window, with the recording fake of the `Windows` port giving the work areas, check the size and place each new window gets: 900 wide and 90% of a work area high with no kept size; 90% of the width on a work area narrower than 1000 px; at least 600 px on one shorter than 667 px, fitted to it; the size from the active window's screen when it is on another monitor; centred on the main screen's work area without an active window; a kept size placed by the system and winning over the default. The tests check only what a window is opened with, never how the placement works it out.
 - **By hand**, per ticket: light, dark and high contrast; Windows 10's solid path; snap layouts, dragging, double-click, the top border and Alt+Space; the icon at 16, 24, 32 and 48 px.
 
 ## Out of Scope
@@ -155,9 +198,12 @@ This reverses parts of the [v1 spec](../downlight-v1/spec.md): story 71's native
 - A logo that follows the accent color.
 - New empty windows from the logo.
 - A status bar: the counts (ticket 10) take its place.
+- A size or place remembered per document, and a default size the reader sets in the settings: a window's own size, kept when it closes, already does that.
+- Changing where a window with a kept size opens without an active window, and the cascade beside the active window.
 
 ## Further Notes
 
 - Reference: WinDown's title bar and settings flyout (screenshots of 2026-11-13). Downlight takes the layout, not WinDown's code.
 - The amber scale and the icon came with that conversation (`downlight-1h-amber.svg`). The icon's embedded C2PA metadata is removed when it is committed.
 - New glossary terms: Title bar, Accent color, Backdrop, Theme, Full width, Keep on top, Settings, and Counts (from ticket 10's grilling).
+- The default window size was asked for by the repo owner on 2026-11-23 and grilled on 2026-11-25, checked against the owner's own monitors (a 40" 5120 x 2160 ultrawide at 125%, a 1440 x 2560 portrait screen). It adds no glossary term: **Active window** already says a new window opens at the size of the last window that closed. Ticket 17 is its one ticket, so it needs no `/to-tickets`; its hand checks add a **First paint** check with no kept size, which `npm run measure` doesn't catch because it uses the kept size.

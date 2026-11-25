@@ -16,6 +16,14 @@ _Avoid_: Import, New document, Scratch
 Copying the document's Markdown instead of the text the reader sees: the file's lines of the blocks the selection touches, of a code block or a table only the part selected, or the whole file when nothing is selected. It copies the file as the shown render was made from it, so a **Sort** or a **Tick** never changes what it copies.
 _Avoid_: Copy source, Copy raw
 
+**Print**:
+Putting the shown document on paper, or into a PDF, through the print dialog: laid out for paper in GitHub's light colors, without what Downlight adds on screen, its collapsed sections opened, and its **Ticks** and **Sort** as shown.
+_Avoid_: Export, Save as PDF
+
+**Export**:
+Saving the shown document as one HTML file for someone else to open in a browser, in GitHub's look, light or dark as their system is: its **Local images** inside it, its **Ticks**, **Sort** and opened sections as shown, without what Downlight adds on screen and without script. It writes a new file, never the document's own.
+_Avoid_: Save as, Publish, Save a copy
+
 **Binary file**:
 A file that isn't text: a zero byte comes in its first 8000 bytes, as Git tells it, and it starts with no byte order mark. Downlight refuses to show one, however it arrives, and says that it opens text files.
 _Avoid_: Non-text file, non-Markdown file

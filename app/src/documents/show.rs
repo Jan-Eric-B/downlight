@@ -40,9 +40,10 @@ pub trait Windows: Send + Sync + 'static {
     /// or full screen, which isn't at a place and size of its own.
     fn place_of(&self, window: &str) -> Option<WindowPlace>;
 
-    /// The work area of the main monitor, in its logical pixels: where the system places a new
-    /// window when there is no active window to open beside (ticket 16's review). None when the
-    /// system names no main monitor.
+    /// The work area of the main monitor, in its logical pixels: where a new window opens when
+    /// there is no active window to open beside (ticket 16's review), and what one at the default
+    /// size is shaped for and centred on (window design ticket 17). None when the system names no
+    /// main monitor.
     fn primary_work_area(&self) -> Option<Area>;
 
     /// Gives `window` the reader's theme and backdrop (window design ticket 08). A window that
@@ -77,9 +78,10 @@ pub struct NewWindow {
     pub look: WindowLook,
     /// The size of the last window that closed, or the default size until one has.
     pub size: WindowSize,
-    /// Where its top left corner goes, in the logical pixels of the active window's monitor:
-    /// down and to the right of the active window, on that monitor's screen. None when there is
-    /// no active window to open beside, and the system places it.
+    /// Where its top left corner goes, in the logical pixels of the monitor it opens on: down and
+    /// to the right of the window it opens beside, on that window's screen, or centred on the
+    /// main screen at the default size. None when the system places it: at a kept size with no
+    /// window to open beside.
     pub at: Option<Point>,
 }
 
@@ -213,12 +215,20 @@ impl Documents {
 
     /// Opens the window `window` just recorded, titled after `document` (None for a window that
     /// shows none), at the settings' zoom and the size of the last window that closed, beside the
-    /// active window (ticket 16), or forgets it if it can't open, so that its document opens anew.
+    /// window opened last until the reader is in a window again, else beside the active window
+    /// (ticket 16), or forgets it if it can't open, so that its document opens anew.
     pub(super) fn open(&self, window: &str, document: Option<&Path>) -> Result<(), WindowError> {
         let settings = self.settings();
-        let active = self.lock().active.clone();
-        let active = active.and_then(|active| self.inner.windows.place_of(&active));
-        let (size, at) = place::size_and_place(settings.window_size, active.as_ref(), || {
+        let (opened_last, active) = {
+            let table = self.lock();
+            (table.opened_last.clone(), table.active.clone())
+        };
+        // The window opened last is newer than the reader's last move to a window, which drops
+        // it, and isn't shown or in front yet, so the active window's place says nothing of it.
+        let beside = opened_last
+            .map(|(_, place)| place)
+            .or_else(|| active.and_then(|active| self.inner.windows.place_of(&active)));
+        let (size, place) = place::size_and_place(settings.window_size, beside.as_ref(), || {
             self.inner.windows.primary_work_area()
         });
         let new_window = NewWindow {
@@ -226,12 +236,24 @@ impl Documents {
             settings: self.page_settings(&settings),
             look: settings.window_look(),
             size,
-            at,
+            at: place.map(|place| place.at),
         };
-        self.inner
-            .windows
-            .open(window, &new_window)
-            .inspect_err(|_| self.forget(window))
+        if let Err(error) = self.inner.windows.open(window, &new_window) {
+            // Forgotten before it is the window opened last, so the next new window still opens
+            // beside the one before it.
+            self.forget(window);
+            return Err(error);
+        }
+        let mut table = self.lock();
+        // One the system placed has no known place to open beside. It had no window to open
+        // beside either, so the system places the next one too, and cascades its own. One
+        // forgotten meanwhile, as it closed, leaves none.
+        if let Some(place) = place
+            && table.windows.contains_key(window)
+        {
+            table.opened_last = Some((window.to_owned(), place));
+        }
+        Ok(())
     }
 
     /// Titles `window` after the document it was just given by `claim`, and tells its page to ask
