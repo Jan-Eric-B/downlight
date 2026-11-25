@@ -131,6 +131,11 @@ struct WindowRecord {
     /// page says the document arrived ([`Documents::arrived`]), so a document joins the history
     /// only then.
     before_arrival: Option<WindowState>,
+    /// The showing of the answer its page placed last ([`Documents::arrived`]), which its view
+    /// shows: None before the first, and once it shows the empty window. It can be a document the
+    /// window moved on from before it arrived, as when a drop comes while the page lays out a
+    /// large one, so Stop checks the page's showing against this one rather than the one held.
+    placed: Option<Showing>,
     /// The bytes of the file the render its page's view shows was made from, which Copy as
     /// Markdown copies, and those of the render on its way to the page. Kept apart from the shown
     /// document, as they follow what the page placed rather than what the window was given.

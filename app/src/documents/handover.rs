@@ -101,6 +101,7 @@ impl Documents {
         let steps = record.now.history.steps();
         let Some(shown) = record.now.shown.as_mut() else {
             // The page shows the empty window next, which has nothing to copy.
+            record.placed = None;
             record.shown_bytes.none_shown();
             return None;
         };

@@ -7,7 +7,7 @@
 
 use tauri::{State, WebviewWindow};
 
-use super::{Documents, Showing};
+use super::{Arrival, Documents, Showing};
 use crate::message::Message;
 use crate::timing::Timing;
 use crate::watch::Change;
@@ -32,6 +32,7 @@ impl Documents {
                 return;
             };
             // Whatever the window shows now, the page's view shows this answer.
+            record.placed = Some(showing);
             record.shown_bytes.placed(showing);
             let Some(shown) = record
                 .now
@@ -52,40 +53,54 @@ impl Documents {
     /// given the document, retitled after it, and the document on its way is dropped, which
     /// leaves its render, and deletes its file if that is a pasted file no window holds. A change
     /// to the document put back while it was held reloads it, or tells the page it is gone.
+    ///
+    /// The page's view can show another document than the one held: one the window moved on from
+    /// before the page placed it, as when a drop comes while the page lays out a large document.
+    /// The page then asks for the one put back, which it returns to as Back returns to a document.
+    ///
     /// Changes nothing, and gives false, once the document has arrived, or when the page's last
-    /// answer is another showing than the one held.
+    /// answer is another showing than the one it placed last.
     pub fn stop(&self, window: &str, page_shows: Option<Showing>) -> Stopped {
-        let (left, missed) = {
+        let (left, message) = {
             let mut table = self.lock();
             let Some(record) = table.windows.get_mut(window) else {
                 return false;
             };
-            let held_shows = record
-                .before_arrival
-                .as_ref()
-                .map(|held| held.shown.as_ref().map(|shown| shown.showing));
-            if held_shows != Some(page_shows) {
+            let Some(held) = &record.before_arrival else {
+                return false;
+            };
+            if page_shows != record.placed {
                 return false;
             }
+            let in_view = held.shown.as_ref().map(|shown| shown.showing) == page_shows;
             let left = record.leave_the_arriving();
             record.shown_bytes.stopped();
-            let missed = record.now.shown.as_mut().and_then(|shown| {
-                let missed = shown.missed.take()?;
-                if missed != Change::Gone {
-                    shown.start_reload();
+            let put_back = record.now.shown.as_mut();
+            let message = if in_view {
+                put_back.and_then(|shown| {
+                    let missed = shown.missed.take()?;
+                    if missed != Change::Gone {
+                        shown.start_reload();
+                    }
+                    Some(match missed {
+                        Change::Gone => Message::Gone(shown.showing),
+                        Change::Changed | Change::Back => Message::AskForDocument,
+                    })
+                })
+            } else {
+                // The page reads the document put back anew, so a change it missed is no matter.
+                if let Some(shown) = put_back {
+                    shown.missed = None;
+                    shown.arrival = Arrival::Stepped;
                 }
-                Some((shown.showing, missed))
-            });
-            (left, missed)
+                Some(Message::AskForDocument)
+            };
+            (left, message)
         };
         self.let_go(left);
         // The window keeps what it was put back to: a title or a message that can't reach it is
         // nobody's to tell, as the window is closing.
         let _ = self.retitle(window);
-        let message = missed.map(|(showing, missed)| match missed {
-            Change::Gone => Message::Gone(showing),
-            Change::Changed | Change::Back => Message::AskForDocument,
-        });
         if let Some(message) = message {
             let _ = self.send(window, message);
         }

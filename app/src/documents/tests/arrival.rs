@@ -332,6 +332,49 @@ fn failed_reload_its_page_told_of_is_not_reloaded_after_stop() {
 }
 
 #[test]
+fn stop_after_the_page_placed_a_document_the_window_had_moved_on_from_puts_back_the_one_before() {
+    // The page lays out a large document, which takes it a while, when a drop gives the window
+    // another: the window moves on from the document before, as the one laid out hasn't arrived.
+    // The page then places the one it laid out, asks for the dropped one, and the reader stops
+    // that (copy-as-markdown review).
+    let (documents, pages) = documents();
+    let (label, first) = window_showing_the_manifest(&documents);
+    give(
+        &documents,
+        DocumentAt::new(&app_file("build.rs")),
+        Target::Window(&label),
+    );
+    let laid_out = answered(&documents, &label, Some(first));
+    give(
+        &documents,
+        DocumentAt::new(&app_file("tauri.conf.json")),
+        Target::Window(&label),
+    );
+    documents.arrived(&label, laid_out);
+    let (_, dropped) = answered_with_bytes(&documents, &label, Some(laid_out));
+    let told = pages.sent().len();
+    assert!(
+        documents.stop(&label, Some(laid_out)),
+        "the stop was refused"
+    );
+    assert_eq!(documents.document_path(&label), Some(manifest()));
+    // The page's view shows the document laid out, not the one put back, so it asks again.
+    assert_eq!(pages.sent()[told..], [to(&label, Message::AskForDocument)]);
+    // At the reading position the page's view left it at, as Back returns to it.
+    let again = handover(&documents, &label, Some(laid_out));
+    assert_eq!((again.showing, again.place), (first, Place::Return));
+    assert!(
+        dropped.upgrade().is_none(),
+        "the stopped document's bytes were kept"
+    );
+    assert_eq!(
+        documents.step(&label, Step::Back).ok().flatten(),
+        None,
+        "a document that never arrived joined the history"
+    );
+}
+
+#[test]
 fn stop_tells_whether_it_stopped() {
     let (documents, _) = documents();
     let (label, first) = window_showing_the_manifest(&documents);
