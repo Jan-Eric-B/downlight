@@ -18,8 +18,8 @@
 //!   emptying the pasted folder at startup (paste-markdown ticket 02).
 //! - [`settings`]: changing the reader's settings, since they shape every new window and reach
 //!   every page when they change ([`Documents::change_settings`], window design ticket 12).
-//! - [`shown_bytes`]: keeping the bytes of the file the render a window's page shows was made
-//!   from, which Copy as Markdown copies (copy-as-markdown ticket 01).
+//! - [`shown_bytes`]: what a window's page's view shows, and the bytes of the file its render
+//!   was made from, which Copy as Markdown copies (copy-as-markdown ticket 01).
 //!
 //! It also keeps the window the reader was last in, which a new window opens beside, at a size and
 //! place [`place`] works out (ticket 16).
@@ -30,8 +30,6 @@ use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-
-use downlight_core::Leave;
 
 use crate::message::{Message, Pages};
 use crate::notice::Notice;
@@ -59,7 +57,7 @@ use history::History;
 use pasted_files::Pastes;
 pub use place::{Area, Point, WindowPlace, WindowSize};
 pub use show::{NewWindow, ShowError, WindowError, Windows};
-use shown_bytes::ShownBytes;
+use shown_bytes::{Handed, View};
 
 /// Which window shows which document, by window label. The app's managed state.
 pub struct Documents {
@@ -99,6 +97,9 @@ struct WindowTable {
     /// How many times a window has been given a document or taken a step, for each to get its own
     /// claim number ([`ShownDocument::claim`]).
     claims_issued: u64,
+    /// How many times a page has asked for its document, for each request to get its own number
+    /// ([`shown_bytes::Request`]).
+    requests_issued: u64,
     /// Every open window, with the document it shows now and its history.
     windows: HashMap<String, WindowRecord>,
     /// The window the reader was last in, which a new window opens beside (ticket 16), while it
@@ -131,15 +132,13 @@ struct WindowRecord {
     /// page says the document arrived ([`Documents::arrived`]), so a document joins the history
     /// only then.
     before_arrival: Option<WindowState>,
-    /// The showing of the answer its page placed last ([`Documents::arrived`]), which its view
-    /// shows: None before the first, and once it shows the empty window. It can be a document the
-    /// window moved on from before it arrived, as when a drop comes while the page lays out a
-    /// large one, so Stop checks the page's showing against this one rather than the one held.
-    placed: Option<Showing>,
-    /// The bytes of the file the render its page's view shows was made from, which Copy as
-    /// Markdown copies, and those of the render on its way to the page. Kept apart from the shown
-    /// document, as they follow what the page placed rather than what the window was given.
-    shown_bytes: ShownBytes,
+    /// What its page's view shows: the answer it placed last ([`Documents::arrived`]) and the bytes
+    /// Copy as Markdown copies; None before the first, and once it shows the empty window. Kept
+    /// apart from the shown document, as it follows what the page placed rather than what the
+    /// window was given. It can be a document the window moved on from before it arrived, as when
+    /// a drop comes while the page lays out a large one, so Stop checks the page's showing against
+    /// this one rather than the one held.
+    view: Option<View>,
 }
 
 /// A window's document, None while it shows none, and its history: what the window is now, or
@@ -291,24 +290,16 @@ struct ShownDocument {
     /// succession, the page's latest request still gets the heading; never with a reload, which
     /// keeps the reading position.
     arrival: Arrival,
-    /// What leaves the render last handed to the page, which a later request for the document,
-    /// or the window leaving it, leaves (ticket 38): the page waits for the latest one only.
-    rendering: Option<Leave>,
+    /// The render last handed to the page, and its bytes once it is done until the page places
+    /// it. A later request for the document, or the window leaving it, leaves it (ticket 38): the
+    /// page waits for the latest one only. The render ahead leaves itself when it is dropped.
+    rendering: Option<Handed>,
     /// Whether the watch started a reload that the page hasn't placed yet
     /// ([`Documents::arrived`]).
     reload_unplaced: bool,
     /// The last change to the document's file while it was held behind a document on its way
     /// ([`WindowRecord::before_arrival`]), which Stop then acts on.
     missed: Option<Change>,
-}
-
-impl Drop for ShownDocument {
-    fn drop(&mut self) {
-        // The render ahead leaves itself when it is dropped.
-        if let Some(rendering) = &self.rendering {
-            rendering.leave();
-        }
-    }
 }
 
 /// How a window came to show its document.

@@ -11,7 +11,7 @@ use downlight_core::RenderedDocument;
 use tauri::{State, WebviewWindow};
 
 use super::history::Steps;
-use super::shown_bytes::Request;
+use super::shown_bytes::{Handed, Request};
 use super::{Arrival, Documents, Showing};
 use crate::notice::{Notice, file_name_shown};
 use crate::render::{self, DocumentError, RenderTask};
@@ -97,15 +97,14 @@ impl Documents {
     pub(super) fn handover(&self, window: &str, page_shows: Option<Showing>) -> Option<Handover> {
         self.page_hears_settings(window);
         let mut table = self.lock();
+        let request = table.next_request();
         let record = table.windows.get_mut(window)?;
         let steps = record.now.history.steps();
         let Some(shown) = record.now.shown.as_mut() else {
             // The page shows the empty window next, which has nothing to copy.
-            record.placed = None;
-            record.shown_bytes.none_shown();
+            record.shows_none();
             return None;
         };
-        let request = record.shown_bytes.requested();
         shown.page_asked = true;
         let place = if page_shows == Some(shown.showing) {
             Place::Reload
@@ -122,10 +121,8 @@ impl Documents {
             .take()
             .unwrap_or_else(|| render::start(&shown.path).0);
         // The page waits only for its latest request's render, as after a save or F5 during a
-        // load, so the one before is left (ticket 38).
-        if let Some(before) = shown.rendering.replace(render.leaver()) {
-            before.leave();
-        }
+        // load, so the one before is left (ticket 38) as it is dropped, its bytes with it.
+        shown.rendering = Some(Handed::new(render.leaver(), request));
         Some(Handover {
             render,
             request,

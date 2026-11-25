@@ -32,8 +32,7 @@ impl Documents {
                 return;
             };
             // Whatever the window shows now, the page's view shows this answer.
-            record.placed = Some(showing);
-            record.shown_bytes.placed(showing);
+            record.placed(showing);
             let Some(shown) = record
                 .now
                 .shown
@@ -69,12 +68,12 @@ impl Documents {
             let Some(held) = &record.before_arrival else {
                 return false;
             };
-            if page_shows != record.placed {
+            if page_shows != record.placed_showing() {
                 return false;
             }
             let in_view = held.shown.as_ref().map(|shown| shown.showing) == page_shows;
+            // The document on its way goes, and with it its render and its bytes.
             let left = record.leave_the_arriving();
-            record.shown_bytes.stopped();
             let put_back = record.now.shown.as_mut();
             let message = if in_view {
                 put_back.and_then(|shown| {

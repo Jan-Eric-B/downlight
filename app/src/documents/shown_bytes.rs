@@ -5,92 +5,101 @@
 //! render rather than copied.
 //!
 //! The page takes a render in two steps: its request's answer comes ([`Documents::rendered`]),
-//! and it places the answer ([`Documents::arrived`]). The bytes of the latest request's render
-//! wait for the page to place it, since until then its view still shows the render before, and
-//! the reader may stop the document on its way.
+//! and it places the answer ([`Documents::arrived`]). Until then its view still shows the render
+//! before, so an answer's bytes wait on the render handed over ([`Handed`]), on the document it is
+//! for, and go with it when the window leaves that document, as Stop and going elsewhere do. The
+//! window keeps what its page placed last as its [`View`].
 
-use super::{Documents, Showing};
+use downlight_core::Leave;
+
+use super::{Documents, Showing, WindowRecord, WindowTable};
 use crate::render::{FileBytes, ReadAndRender, RenderTask};
 
-/// One of a window's page's requests for its document, numbered for that window, so that only
-/// the latest one's bytes are kept: the page places only its latest request's answer (ticket 38).
-///
-/// A number beside the render's own leaver (`ShownDocument::rendering`), which already leaves
-/// the render of a request that a later one overtakes, or that Stop drops: leaving ends a render
-/// only until the core has started sanitizing it, which then runs to its end, and Stop leaves it
-/// after the table's lock is released. So a render can finish after the table has moved on, and
-/// whether its bytes still belong to the page's latest request is settled here, under the lock.
+/// One of the pages' requests for their documents, numbered for the whole table, so that only the
+/// answer to the request a document's render was last handed over for keeps its bytes: the page
+/// places only its latest request's answer (ticket 38). Leaving a render ends it only until the
+/// core has started sanitizing it, which then runs to its end, so a render can finish after a
+/// later request overtook it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct Request(u64);
 
-/// The bytes a window's renders were made from, each with the showing its render is for.
-#[derive(Default)]
-pub(super) struct ShownBytes {
-    /// Those of the render the page placed last, which its view shows, if it shows one.
-    placed: Option<RenderedFrom>,
-    /// Those of the latest request's render, which the page hasn't placed yet.
-    answered: Option<RenderedFrom>,
-    /// How many requests the page made, so that each gets a number of its own.
-    requests: u64,
-    /// The latest request, until the document it asked for is stopped or none is shown: no
-    /// render's bytes are kept for any other.
-    latest: Option<Request>,
-}
-
-/// The bytes a render for `showing` was made from.
-struct RenderedFrom {
-    showing: Showing,
-    bytes: FileBytes,
-}
-
-impl ShownBytes {
-    /// The page asks for its document again: the request before is overtaken, so its render's
-    /// bytes are never placed.
-    pub(super) fn requested(&mut self) -> Request {
-        self.answered = None;
-        self.requests += 1;
-        let request = Request(self.requests);
-        self.latest = Some(request);
-        request
+impl WindowTable {
+    /// A request of its own for a page that asks for its document.
+    pub(super) fn next_request(&mut self) -> Request {
+        self.requests_issued += 1;
+        Request(self.requests_issued)
     }
+}
 
-    /// The page placed the answer for `showing`: the bytes of its render if it had one, and else,
-    /// for an answer that says why the document can't be shown, none, unless the answer was for
-    /// a reload, whose page keeps its last render.
-    pub(super) fn placed(&mut self, showing: Showing) {
-        if let Some(answered) = self
-            .answered
-            .take_if(|answered| answered.showing == showing)
-        {
-            self.placed = Some(answered);
-        } else if self
-            .placed
-            .as_ref()
-            .is_some_and(|placed| placed.showing != showing)
-        {
-            self.placed = None;
+/// The render last handed to a document's page ([`Documents::handover`]), for the page's `request`,
+/// and the bytes it was made from once it is done, until the page places its answer. Dropped, as
+/// when a later request replaces it or the window leaves the document, it leaves the render: the
+/// page waits for the latest one only.
+pub(super) struct Handed {
+    leave: Leave,
+    request: Request,
+    bytes: Option<FileBytes>,
+}
+
+impl Handed {
+    pub(super) const fn new(leave: Leave, request: Request) -> Self {
+        Self {
+            leave,
+            request,
+            bytes: None,
         }
     }
+}
 
-    /// The reader stopped the document on its way, whose answer the page then never places: its
-    /// render may still finish, and finds its request retired.
-    pub(super) fn stopped(&mut self) {
-        self.answered = None;
-        self.latest = None;
+impl Drop for Handed {
+    fn drop(&mut self) {
+        self.leave.leave();
+    }
+}
+
+/// What a window's page's view shows: the showing of the answer it placed last, and the bytes of
+/// the file its render was made from, None for an answer that says why the document can't be
+/// shown.
+pub(super) struct View {
+    showing: Showing,
+    bytes: Option<FileBytes>,
+}
+
+impl WindowRecord {
+    /// The page placed the answer for `showing`: the render it was handed for the window's
+    /// document, if the window still shows that one, and else an answer without bytes, such as one
+    /// that says why the document can't be shown, unless it was for a reload, whose page keeps its
+    /// last render.
+    pub(super) fn placed(&mut self, showing: Showing) {
+        let bytes = self
+            .now
+            .shown
+            .as_mut()
+            .filter(|shown| shown.showing == showing)
+            .and_then(|shown| shown.rendering.as_mut()?.bytes.take());
+        self.view = match (bytes, self.view.take()) {
+            (None, Some(kept)) if kept.showing == showing => Some(kept),
+            (bytes, _) => Some(View { showing, bytes }),
+        };
     }
 
-    /// The window shows no document, so its page shows the empty window next.
-    pub(super) fn none_shown(&mut self) {
-        self.placed = None;
-        self.answered = None;
-        self.latest = None;
+    /// The page shows the empty window next.
+    pub(super) fn shows_none(&mut self) {
+        self.view = None;
+    }
+
+    /// The showing of the answer the page placed last, which its view shows; None before the
+    /// first, and once it shows the empty window.
+    pub(super) fn placed_showing(&self) -> Option<Showing> {
+        self.view.as_ref().map(|view| view.showing)
     }
 }
 
 impl Documents {
     /// What the render handed over to `window`'s page for its `request` gave, once done. Its
-    /// bytes are kept for the render's `showing` while the request is the page's latest, until
-    /// the page says whether it placed it ([`Documents::arrived`]).
+    /// bytes are kept on the render handed over, while the window's document is still the one
+    /// shown as `showing` and its render was last handed over for this request, until the page
+    /// places the answer ([`Documents::arrived`]).
     pub(super) async fn rendered(
         &self,
         window: &str,
@@ -101,13 +110,15 @@ impl Documents {
         let finished = render.finished().await;
         if let Ok(Ok(rendered)) = &finished {
             let mut table = self.lock();
-            if let Some(record) = table.windows.get_mut(window)
-                && record.shown_bytes.latest == Some(request)
+            if let Some(handed) = table
+                .windows
+                .get_mut(window)
+                .and_then(|record| record.now.shown.as_mut())
+                .filter(|shown| shown.showing == showing)
+                .and_then(|shown| shown.rendering.as_mut())
+                .filter(|handed| handed.request == request)
             {
-                record.shown_bytes.answered = Some(RenderedFrom {
-                    showing,
-                    bytes: rendered.bytes.clone(),
-                });
+                handed.bytes = Some(rendered.bytes.clone());
             }
         }
         finished
@@ -117,7 +128,7 @@ impl Documents {
     /// `showing`; None once it shows another, or none, or the window closed.
     pub fn bytes_shown_as(&self, window: &str, showing: Showing) -> Option<FileBytes> {
         let table = self.lock();
-        let placed = table.windows.get(window)?.shown_bytes.placed.as_ref()?;
-        (placed.showing == showing).then(|| placed.bytes.clone())
+        let view = table.windows.get(window)?.view.as_ref()?;
+        (view.showing == showing).then(|| view.bytes.clone())?
     }
 }
