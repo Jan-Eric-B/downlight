@@ -21,7 +21,7 @@ use crate::documents::{
 use crate::notice::Notice;
 use crate::settings::{AccentScale, PageSettings, Theme, WindowLook};
 use crate::timing::Timing;
-use crate::{command_line, platform, title_bar};
+use crate::{command_line, open, platform, title_bar};
 
 /// What a launch couldn't show. Its message names the document, so the reader can tell which of
 /// a launch's documents failed.
@@ -287,8 +287,8 @@ const LONGEST_HIDDEN: Duration = Duration::from_secs(5);
 /// shows WebView2's white or an empty frame while the webview starts (ticket 04). The one place
 /// that decides what every new window starts with: the page and its flags and first settings, its
 /// size and place, theme and backdrop as `new_window` says, its frame, the navigation guard, the
-/// webview's browser arguments, closing it when its webview stops, the key setup, the maximize
-/// button and the 5 s fallback.
+/// webview's browser arguments, closing it when its webview stops, the key setup, the drop target,
+/// the maximize button and the 5 s fallback.
 fn open_window(app: &AppHandle, label: &str, new_window: &NewWindow) -> tauri::Result<()> {
     let timing = app.state::<Timing>();
     timing.window_opening(label);
@@ -321,6 +321,7 @@ fn open_window(app: &AppHandle, label: &str, new_window: &NewWindow) -> tauri::R
         .on_navigation(move |url| is_the_page(url, &page))
         .on_new_window(|_, _| NewWindowResponse::Deny);
     let builder = platform::with_backdrop(builder, new_window.look.backdrop);
+    let builder = platform::with_drop_target(builder);
     // A window whose webview fails to start never shows: Tauri drops the native window it made
     // for it, and only a built window is recorded with Tauri, so it keeps no process alive
     // (ticket 37).
@@ -328,6 +329,7 @@ fn open_window(app: &AppHandle, label: &str, new_window: &NewWindow) -> tauri::R
     let stopped = window.clone();
     platform::when_webview_stops(&window, move |why| close_stopped(stopped, why));
     platform::leave_keys_to_the_page(&window);
+    open::take_drops(&window);
     if flags.title_bar {
         title_bar::add_maximize_button(&window);
     }

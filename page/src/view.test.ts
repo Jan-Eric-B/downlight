@@ -58,7 +58,7 @@ test("a window without a document offers to open one", async () => {
   expect(empty?.hidden).toBe(false);
   expect(empty?.querySelector("button")?.textContent).toBe("Open file");
   expect(empty?.querySelector("p")?.textContent).toBe(
-    "or drop a file here, or paste Markdown (Ctrl+V)",
+    "or drop a file or text here, or paste Markdown (Ctrl+V)",
   );
 
   empty?.querySelector("button")?.click();

@@ -271,7 +271,7 @@ Since 2026-11-20 every item below has a ticket of its own, linked from it, and t
 **v1.x**, the next releases:
 
 - full width, Keep on top, full screen (full width and Keep on top moved into v1 with [Window design](../window-design/spec.md); edit at the reading line moved into v1 with ticket 35); full screen: [ticket](../full-screen/issues/01-full-screen.md);
-- pasting or dropping Markdown text: [spec](../paste-markdown/spec.md), with dropping text [split off](../paste-markdown/issues/03-drop-text-dragged-from-another-program.md);
+- pasting or dropping Markdown text: [spec](../paste-markdown/spec.md), with dropping text in tickets [03](../paste-markdown/issues/03-downlight-s-own-drop-target-takes-file-drops.md) and [04](../paste-markdown/issues/04-text-dropped-onto-a-window-shows-as-a-paste.md);
 - Copy as Markdown, and as rich text: [ticket](../copy-as-markdown/issues/01-copy-as-markdown.md);
 - Outline, a flyout of the headings, with heading jump keys (a docked table of contents sidebar was dropped in its grilling, 2026-11-20): [spec](../outline/spec.md);
 - printing and PDF through the webview's print dialog: [ticket](../print/issues/01-print-and-pdf.md);

@@ -2,19 +2,21 @@
 //! window's "Open file") and dropping a file. Either shows the document in that window, or brings
 //! the window that already shows it to the front. A text file is a document whatever its
 //! extension, and a binary file is refused before the window is given it, so the window keeps the
-//! document it shows (ticket 34).
+//! document it shows (ticket 34). Text dropped onto a window is handed to Paste (`paste.rs`).
 
 use std::fs::File;
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
 use downlight_core::{MARKDOWN_EXTENSIONS, TEXT_CHECK_LENGTH, is_text};
-use tauri::{DragDropEvent, Manager as _, WebviewWindow, WindowEvent};
+use tauri::{AppHandle, DragDropEvent, Manager as _, WebviewWindow, WindowEvent};
 
 use crate::documents::{DocumentAt, Documents, ShowError, Target};
 use crate::message::Message;
 use crate::notice::{NamedFile, Notice};
 use crate::render::not_text;
+use crate::timing::{Stages, Timing};
+use crate::{paste, platform};
 
 /// Shows the open dialog, filtered to Markdown files with a choice of all files, and shows the
 /// chosen document in the calling window. Choosing nothing changes nothing.
@@ -50,19 +52,80 @@ fn show_chosen(documents: &Documents, window: &str, document: PathBuf) -> Result
     give(documents, window, document)
 }
 
-/// Shows the first text file dropped onto a window in that window. A drop without one, or a
-/// document that can't be shown, gives the page a message to show instead.
+/// What a drop onto a window brings, as Downlight's own drop target reads it (ADR 0007).
+#[cfg_attr(
+    not(windows),
+    allow(
+        dead_code,
+        reason = "other systems' drops come through Tauri's native drop, which gives paths alone"
+    )
+)]
+#[derive(Debug)]
+pub enum Dropped {
+    /// The paths of the files dropped: a drag with any is a file drop.
+    Files(Vec<PathBuf>),
+    /// The text of a drag with no paths, dragged from another program (paste-markdown ticket 04).
+    Text(String),
+}
+
+/// The `dataTransfer` type the page tags each drag that starts in it with, its window's label the
+/// tag's data, so that a window refuses a drag from itself (paste-markdown ticket 04): dropping a
+/// selection, a link or an image back onto its own page would show it as a new document.
+/// Lowercase, as the webview lowercases a type the page sets.
+#[cfg_attr(
+    not(windows),
+    allow(dead_code, reason = "only Windows' own drop target reads the tag")
+)]
+pub const DRAG_TAG: &str = "application/x-downlight-window";
+
+/// The sample of [`DRAG_TAG`] for the page's tests, which check that a drag starting in the page
+/// carries it (`app/src/contract.rs`).
+#[cfg(test)]
+pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
+    Ok(serde_json::json!({ "type": DRAG_TAG }))
+}
+
+/// Shows what is dropped onto `window` in that window, as it comes through Downlight's own drop
+/// target on Windows (ADR 0007): the first text file of a file drop, or the text of a text drop as
+/// a paste. A drop without a text file, or a document that can't be shown, gives the page a
+/// message to show instead.
+pub fn take_drops(window: &WebviewWindow) {
+    let app = window.app_handle().clone();
+    let label = window.label().to_owned();
+    platform::add_drop_target(window, move |dropped| {
+        show_dropped_off_the_main_thread(app.clone(), label.clone(), dropped);
+    });
+}
+
+/// Shows the first text file dropped onto a window in that window, as it comes through Tauri's
+/// native drop, which is on only on other systems (`platform::with_drop_target`).
 pub fn show_when_dropped(window: &tauri::Window, event: &WindowEvent) {
     let WindowEvent::DragDrop(DragDropEvent::Drop { paths, .. }) = event else {
         return;
     };
-    let app = window.app_handle().clone();
-    let label = window.label().to_owned();
-    let paths = paths.clone();
-    // Picking the dropped document and finding the window that shows it read the file system, so
-    // they stay off the main thread, where window events arrive.
+    show_dropped_off_the_main_thread(
+        window.app_handle().clone(),
+        window.label().to_owned(),
+        Dropped::Files(paths.clone()),
+    );
+}
+
+/// Shows what is dropped onto `window` off the main thread, where drops arrive: picking the
+/// dropped document and finding the window that shows it read the file system, and writing a
+/// large text drop takes a while (paste-markdown ticket 04).
+fn show_dropped_off_the_main_thread(app: AppHandle, window: String, dropped: Dropped) {
     tauri::async_runtime::spawn_blocking(move || {
-        show_dropped(&app.state::<Documents>(), &label, &paths);
+        let documents = app.state::<Documents>();
+        match dropped {
+            Dropped::Files(paths) => show_dropped(&documents, &window, &paths),
+            Dropped::Text(text) => {
+                let mut stages = Stages::start();
+                paste::show_dropped_text(&documents, &window, &text, platform::local_time());
+                stages.lap("show");
+                // As for a paste, the time grows with the text (CODING_STANDARDS.md).
+                app.state::<Timing>().report(&window, "drop", &stages);
+            }
+        }
     });
 }
 

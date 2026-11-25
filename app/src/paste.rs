@@ -3,8 +3,11 @@
 //! Open and a drop give it one (ADR 0006), so History, the Wait note, Stop, watching, Reload, Edit
 //! and the title bar need nothing of their own for a paste.
 //!
-//! Reading the clipboard is the per-OS module's (`platform::clipboard_text`); this module owns
-//! the pasted folder and what is written to it.
+//! Text dragged from another program and dropped onto a window is shown the same way, in a file
+//! named `Dropped ...` (paste-markdown ticket 04).
+//!
+//! Reading the clipboard and the drag is the per-OS module's (`platform::clipboard_text`,
+//! `platform::add_drop_target`); this module owns the pasted folder and what is written to it.
 
 use std::fs::OpenOptions;
 use std::io::{self, Write as _};
@@ -14,6 +17,7 @@ use downlight_core::is_text;
 use tauri::{Manager as _, State, WebviewWindow};
 
 use crate::documents::{DocumentAt, Documents, ShowError, Target};
+use crate::message::Message;
 use crate::notice::{NamedFile, Notice};
 use crate::platform;
 use crate::timing::{Stages, Timing};
@@ -70,7 +74,7 @@ pub enum Clipboard {
     NotAvailable,
 }
 
-/// A moment in local time, to the second, which names a pasted file.
+/// A moment in local time, to the second, which names a pasted or dropped file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LocalTime {
     pub year: u16,
@@ -108,11 +112,12 @@ impl PastedFolder {
         &self.folder
     }
 
-    /// Writes `text` to a new file named by `at`, created with the folder if it isn't there yet,
-    /// and gives its path. A name already taken, as by an earlier paste in the same second, gets
-    /// ` (2)`, ` (3)` and so on before its extension; the file is created only if it doesn't exist
-    /// yet, so that no paste ever overwrites another, even one another Downlight process wrote.
-    fn write(&self, text: &str, at: LocalTime) -> Result<PathBuf, PasteError> {
+    /// Writes `text`, which `came` as it did, to a new file named by `at`, created with the folder
+    /// if it isn't there yet, and gives its path. A name already taken, as by an earlier paste in
+    /// the same second, gets ` (2)`, ` (3)` and so on before its extension; the file is created
+    /// only if it doesn't exist yet, so that no paste ever overwrites another, even one another
+    /// Downlight process wrote.
+    fn write(&self, text: &str, came: Came, at: LocalTime) -> Result<PathBuf, PasteError> {
         let LocalTime {
             year,
             month,
@@ -121,8 +126,11 @@ impl PastedFolder {
             minute,
             second,
         } = at;
-        let stem =
-            format!("Pasted {year:04}-{month:02}-{day:02} {hour:02}.{minute:02}.{second:02}");
+        let how = match came {
+            Came::Pasted => "Pasted",
+            Came::Dropped => "Dropped",
+        };
+        let stem = format!("{how} {year:04}-{month:02}-{day:02} {hour:02}.{minute:02}.{second:02}");
         std::fs::create_dir_all(&self.folder).map_err(|source| PasteError::Write {
             file: self.folder.clone(),
             source,
@@ -170,6 +178,43 @@ pub fn paste(
         Clipboard::Busy => return Err(PasteError::Busy),
         Clipboard::NotAvailable => return Err(PasteError::NotAvailable),
     };
+    show(documents, window, &text, Came::Pasted, at)
+}
+
+/// Shows `text`, dropped onto `window` from another program (paste-markdown ticket 04), as Paste
+/// shows the clipboard's: written to a new file in the pasted folder named by `at`, which the
+/// window is then given. Paste's refusals and notices hold, but for text with nothing to show,
+/// whose drag the drop target already refused with the no-drop cursor, so letting go of it does
+/// nothing.
+pub fn show_dropped_text(documents: &Documents, window: &str, text: &str, at: LocalTime) {
+    match show(documents, window, text, Came::Dropped, at) {
+        Ok(()) | Err(PasteError::NoText) => {}
+        // The notice is the only way to tell the reader about the drop, so a notice that can't be
+        // sent leaves nobody to tell.
+        Err(failure) => {
+            let _ = documents.send(window, Message::Notice(failure.into()));
+        }
+    }
+}
+
+/// How the text of a paste came, which names its file.
+#[derive(Debug, Clone, Copy)]
+enum Came {
+    /// From the clipboard, by Ctrl+V or the menu.
+    Pasted,
+    /// Dragged from another program and dropped onto the window.
+    Dropped,
+}
+
+/// Shows `text`, which `came` as it did, in `window`: written to a new file in the pasted folder
+/// named by `at`, which the window is then given as Open gives it a file.
+fn show(
+    documents: &Documents,
+    window: &str,
+    text: &str,
+    came: Came,
+    at: LocalTime,
+) -> Result<(), PasteError> {
     // Only spaces or empty lines would show an empty document (user story 18).
     if text.trim().is_empty() {
         return Err(PasteError::NoText);
@@ -178,7 +223,7 @@ pub fn paste(
     if !is_text(text.as_bytes()) {
         return Err(PasteError::NotText);
     }
-    let document = documents.pasted_folder().write(&text, at)?;
+    let document = documents.pasted_folder().write(text, came, at)?;
     documents
         .give(DocumentAt::new(&document), Target::Window(window))
         .map(|_| ())

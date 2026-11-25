@@ -10,7 +10,9 @@ Much of the Markdown I want to read never lives in a file: an answer copied from
 
 **Paste**: Ctrl+V, or "Paste" in the right-click menu, shows the plain text on the clipboard rendered in the window, as Open shows a file. Win+V's clipboard history works as well, since it pastes with Ctrl+V. Downlight writes the text to a file of its own in a temporary folder, `%TEMP%\Downlight\Pasted\`, named by the time of the paste (`Pasted 2026-11-20 14.32.05.md`), and the window shows that file like any other document: it joins History, Find, ticks and sorting work, the title bar names the file and reveals it in Explorer, and Edit opens it in the editor, where saving reloads it. The file is temporary: it is deleted once no open window can return to it, and the folder is emptied when Downlight starts. A reader who wants to keep a paste reveals it and saves a copy. A clipboard with no text shows a Notice and changes nothing. The empty window's hint names Paste beside dropping a file.
 
-The decision that a paste is a file Downlight writes, rather than text with no file, is [ADR 0006](../../docs/adr/0006-a-paste-is-a-file-downlight-writes.md).
+Text dragged from another program (a browser, an editor, a chat) and dropped onto a window is shown the same way, in a file named `Dropped 2026-11-20 14.32.05.md` in the same folder. A drag that carries files opens its file as today, so text counts only when a drag has no files. A drag that started in the same window, or that has no text but whitespace, gets the no-drop cursor. A drop is always a copy, so the program the text came from keeps it.
+
+The decision that a paste is a file Downlight writes, rather than text with no file, is [ADR 0006](../../docs/adr/0006-a-paste-is-a-file-downlight-writes.md). The decision that Downlight takes drops with its own drop target, rather than Tauri's native drop or HTML5 drops in the page, is [ADR 0007](../../docs/adr/0007-downlight-takes-drops-with-its-own-drop-target.md).
 
 ## User Stories
 
@@ -57,6 +59,19 @@ The decision that a paste is a file Downlight writes, rather than text with no f
 41. As a reader on another system, I want Paste to say it isn't available there yet, so that I know it's not broken.
 42. As a reader, I want a pasted file's text written as UTF-8 so that any script I copied shows as I copied it.
 43. As a reader, I want pasted text that would count as a binary file to be refused with the same message a binary file gets, so that the rule is the same however text arrives.
+44. As a reader, I want to drag text from another program onto a Downlight window and see it rendered, so that I can read a selection without copying it first.
+45. As a reader, I want a text drop to replace the shown document and join History, as a dropped file does, so that Back returns to what I was reading.
+46. As a reader, I want a text drop's file named by the time I dropped it and saying it was dropped (`Dropped ...`), so that its name tells me how and when it came.
+47. As a reader, I want a dropped text's file deleted under the same rules as a paste's, so that dragged text doesn't stay on disk either.
+48. As a reader, I want a drag that carries files to open its file as it does today, even when it carries text too, so that dropping a file never shows its name or URL instead.
+49. As a reader, I want a link dragged from a browser to show its URL as text, as pasting a copied link does, so that a drop never guesses at what I meant.
+50. As a reader, I want a drag of only whitespace, or of nothing Downlight can show, to get the no-drop cursor, so that I know before I let go that nothing will happen.
+51. As a reader, I want dragging a selection, a link or an image inside a window and letting go there to do nothing, so that a slip of the mouse never replaces my document.
+52. As a reader, I want text dragged from one Downlight window to another to show in the other, as text from any program does.
+53. As a reader, I want text I drag from my editor to stay in my editor, so that dropping it into Downlight never cuts it out of my file.
+54. As a reader, I want a large text drop shown with the Wait note, as a large paste is.
+55. As a reader, I want the empty window's hint to say I can drop text, so that a new window tells me text drops exist.
+56. As a reader on another system, I want file drops to keep working as they do today, though text drops wait for the port.
 
 ## Implementation Decisions
 
@@ -73,6 +88,20 @@ The decision that a paste is a file Downlight writes, rather than text with no f
 - **Contract.** The command's answer is the existing nothing-or-Notice shape that Open's has, so no new sample is needed; the page's command types gain `paste_clipboard`, called only from the page's app module. The menu entry is an existing shape.
 - **No change to the core.** Render, link resolution and the text check are used as they are.
 
+### Text drops
+
+Grilled with the repo owner on 2026-11-25, from ticket 03.
+
+- **Downlight's own drop target** (ADR 0007). On Windows, Tauri's native drop is off for every window (`dragDropEnabled: false`), and the Windows module registers an `IDropTarget` of its own on the webview's child windows, as wry 0.57's `DragDropController` does (revoke WebView2's target, register ours). It is built with the `windows` crate's `implement` support, already in the tree through webview2-com, so no new dependency. The `unsafe` code stays in the Windows module. The page handles no drops.
+- **Files first.** A drag's file paths are read as wry reads them: `CF_HDROP`, then the shell item array when `CF_HDROP` fails (Explorer can't build it for a path of 260 characters or longer). A drag with any path is a file drop and goes to today's logic (`open::show_when_dropped`'s choice of the first text file, its shortcut and binary Notices), so file drops behave exactly as before. Only a drag with no paths is a text drop, read as `CF_UNICODETEXT`, up to its first NUL and never past its size, as the clipboard's text is read.
+- **The cursor decides at DragEnter.** The drop target reads the drag when it enters: one with paths, or with text that isn't only whitespace, gets the copy cursor; any other (whitespace only, an image with no text, nothing usable, a drag from the same window) gets the no-drop cursor, and letting go does nothing and shows no Notice. The effect is always `DROPEFFECT_COPY`, never a move, so an editor never cuts the dragged text; a source that allows no copy gets the no-drop cursor, as OLE requires the target to pick one of the effects the source allows. There is no highlight over the window, as file drags have none today.
+- **Drags from the same window are refused.** The page's `dragstart` tags each drag that starts in it with its window's label (a custom `dataTransfer` type); the drop target reads the tag from the drag's data and refuses a drag tagged with its own window. A drag from another Downlight window is taken like any program's. That Chromium carries a custom type through to the OLE data object is checked first when this is built; if it doesn't, the page tells the app when its drags start and end instead.
+- **The same path as Paste.** The drop target copies the text out during `Drop`, while the drag's data is valid, and hands it to a background task, which has the paste module write it and gives the window the file with the document table's `give`, as `paste_clipboard` does. The paste module takes how the text came (pasted or dropped) to name the file: `Dropped YYYY-MM-DD HH.MM.SS.md`, with the same `(2)` rule, in the same pasted folder, so deleting it once no window can return to it and the startup sweep need no change. Its refusals and Notices are Paste's: a failed write names the file and the error, and binary text gets "Downlight opens text files." (which text read up to its first NUL never is).
+- **The whole window takes a drop.** The drop target covers the whole webview, so a drop over the Find box or a settings field shows the text as a document; today no text field takes a drop either.
+- **The empty window's hint** reads "or drop a file or text here, or paste Markdown (Ctrl+V)".
+- **Other systems** keep Tauri's native drop: file drops as today, and a text drag gets the no-drop cursor.
+- **A drag from a program running as administrator** never reaches Downlight (Windows blocks drags into a less privileged window); nothing is built for it.
+
 ## Testing Decisions
 
 - A good test drives a public interface as a caller does and checks what the caller or the reader can observe: what a window is given and told, which files exist in the pasted folder, what the page asks the app and the Notice it shows. It never checks a module's internals. Test names state the behavior, such as `a_paste_left_by_going_somewhere_new_after_back_is_deleted`.
@@ -80,11 +109,13 @@ The decision that a paste is a file Downlight writes, rather than text with no f
 - **The page (Vitest with happy-dom, the tests' fake app `fakeTheApp`).** Ctrl+V and the menu entry ask the app to paste; a held Ctrl+V asks once; Ctrl+V with the focus in the Find box or another editable field asks nothing and leaves the key to the field; the menu lists Paste after Open with Ctrl+V; the app's Notice on a failed paste is shown; the empty window's hint names Paste. Prior art: `commands.test.ts` (shortcuts, the menu, repeats), `find.test.ts` (the Find box's keys), `view.test.ts` (the empty state).
 - **No unit test for reading the clipboard.** It is Win32 in the per-OS module and talks to the real clipboard, so it is checked by hand, as revealing a file is.
 - **Measurement.** Writing the file grows with the paste's size, so pasting the 1 MB test document is measured with the timing switch when it is built, and reported in the ticket's Results.
+- **Text drops.** The documents tests give the paste module text as dropped and check: the window is given a new `Dropped ...` file in the pasted folder holding the text; it replaces the shown document and the one on its way and joins History; whitespace-only text leaves the window and the folder as they were; it is deleted as a paste is. The page's tests check that a drag starting in the page carries its window's tag. The drop target itself is Win32 against real drags, so it is checked by hand, as reading the clipboard is, and dropping the 1 MB test document's text is measured with the timing switch.
 - **Hand checks in the release build:** Ctrl+V and the menu entry with Markdown copied from a browser, Teams and an editor; Win+V's clipboard history; a clipboard holding an image, copied files, and nothing; a clipboard held by another program; a 20 MB paste and its Wait note; Ctrl+V in the Find box; the title bar's reveal; Edit and a save reloading; closing the window deletes the file; a crash (ending the process) leaves files that the next start sweeps.
 
 ## Out of Scope
 
-- Dropping text dragged from another program: its own ticket. Tauri's native drop gives only file paths, and taking dragged text likely means rebuilding file drops in the page.
+- Dropping text into the Find box or another text field: the drop target covers the whole window.
+- Pasting or dropping anything but plain text: a drag's HTML or image data.
 - Reading from stdin or `--text` on the command line, which stay out as in the v1 spec.
 - Pasting anything but plain text: HTML, images, or files copied in Explorer (which a drop or Open shows).
 - Unescaping text that looks like a JSON string (mdhero's "LLM mode"), or any other guess that changes the pasted text.
@@ -96,5 +127,5 @@ The decision that a paste is a file Downlight writes, rather than text with no f
 
 ## Further Notes
 
-- From the v1 spec's Out of Scope (v1.x), first a stub ticket (now replaced by this spec's tickets), grilled with the repo owner on 2026-11-20.
+- From the v1 spec's Out of Scope (v1.x), first a stub ticket (now replaced by this spec's tickets), grilled with the repo owner on 2026-11-20. Text drops were split off then and grilled on 2026-11-25 (tickets 03 and 04).
 - The converter (`.scratch/converter/`) asks the same question of a document without a file; ADR 0006's answer, a file Downlight writes, may serve it too.

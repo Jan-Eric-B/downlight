@@ -9,7 +9,7 @@ The file a window shows, rendered as Markdown: a Markdown file, or any other tex
 _Avoid_: Page, note
 
 **Paste**:
-Showing the text on the clipboard as a document: Downlight writes it to a file of its own, which the window then shows like any other. The file is temporary: it is gone once no open window can return to it, so a reader who wants to keep it saves a copy.
+Showing the text on the clipboard as a document: Downlight writes it to a file of its own, which the window then shows like any other. The file is temporary: it is gone once no open window can return to it, so a reader who wants to keep it saves a copy. Text dragged from another program and dropped onto a window is shown the same way.
 _Avoid_: Import, New document, Scratch
 
 **Copy as Markdown**:

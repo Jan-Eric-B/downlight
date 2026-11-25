@@ -6,12 +6,13 @@ mod windows;
 
 #[cfg(windows)]
 pub use windows::{
-    accent_scale, add_maximize_button, ask, clipboard_text, custom_scheme_origin,
+    accent_scale, add_drop_target, add_maximize_button, ask, clipboard_text, custom_scheme_origin,
     draws_own_title_bar, fold_case, follow_accent, has_backdrop, is_missing,
     leave_keys_to_the_page, let_take_foreground, local_time, menu_item_text, notepad,
     open_as_text_file, open_folder, open_url, place_maximize_button, process_start, program_name,
     reveal_file, set_backdrop, show_error, show_window_menu, text_file_program,
     text_file_program_name, when_webview_stops, with_backdrop, with_browser_arguments,
+    with_drop_target,
 };
 
 /// Other systems name no text file program until their ports find theirs.
@@ -195,6 +196,24 @@ pub fn fold_case(path: std::path::PathBuf) -> std::path::PathBuf {
 #[cfg(not(windows))]
 pub fn custom_scheme_origin(scheme: &str) -> String {
     format!("{scheme}://localhost")
+}
+
+/// Other systems keep Tauri's native drop until their ports (ADR 0007): file drops only, which
+/// `open::show_when_dropped` takes.
+#[cfg(not(windows))]
+pub fn with_drop_target<'a, R: tauri::Runtime, M: tauri::Manager<R>>(
+    builder: tauri::WebviewWindowBuilder<'a, R, M>,
+) -> tauri::WebviewWindowBuilder<'a, R, M> {
+    builder
+}
+
+/// Other systems' drops come through Tauri's native drop, as `with_drop_target` leaves it: files
+/// only, and a text drag gets the no-drop cursor.
+#[cfg(not(windows))]
+pub fn add_drop_target(
+    _window: &tauri::WebviewWindow,
+    _dropped: impl Fn(crate::open::Dropped) + Send + 'static,
+) {
 }
 
 /// Other systems read their clipboards with their ports; Paste says it isn't available yet.

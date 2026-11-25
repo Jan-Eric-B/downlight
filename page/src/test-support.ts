@@ -3,6 +3,7 @@
 import { emit } from "@tauri-apps/api/event";
 import { clearMocks, mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import { vi } from "vitest";
+import dragTagSamples from "../../app/tests/fixtures/drag_tag.json?raw";
 import editorChoicesSamples from "../../app/tests/fixtures/editor_choices.json?raw";
 import followLinkSamples from "../../app/tests/fixtures/follow_link.json?raw";
 import fullScreenSamples from "../../app/tests/fixtures/full_screen.json?raw";
@@ -188,6 +189,11 @@ function sampleIn(json: string, name: string): unknown {
     throw new Error(`The app writes no contract sample named ${name}.`);
   }
   return samples[name];
+}
+
+/** The `dataTransfer` type the app's drop target reads a drag's tag from. */
+export function dragTagSample(): string {
+  return sampleIn(dragTagSamples, "type") as string;
 }
 
 /** A sample of the app's answers to `render_document`, by name. */

@@ -1,12 +1,13 @@
-//! Paste (paste-markdown tickets 01 and 02, ADR 0006): the clipboard's text written to a file in
-//! the pasted folder, which the window is then given as Open and a drop give it, and deleted once
-//! no window can return to it. Each test hands the paste module the clipboard's answer and gives
-//! the documents module a pasted folder of its own, so no test reads the real clipboard or writes
-//! to or deletes from the real pasted folder.
+//! Paste (paste-markdown tickets 01, 02 and 04, ADR 0006): the clipboard's text, or text dropped
+//! onto a window, written to a file in the pasted folder, which the window is then given as Open
+//! and a file drop give it, and deleted once no window can return to it. Each test hands the paste
+//! module the clipboard's answer or the dropped text and gives the documents module a pasted
+//! folder of its own, so no test reads the real clipboard or a real drag, or writes to or deletes
+//! from the real pasted folder.
 
 use super::*;
 use crate::documents::history::Step;
-use crate::paste::{Clipboard, LocalTime, PastedFolder, paste};
+use crate::paste::{Clipboard, LocalTime, PastedFolder, paste, show_dropped_text};
 
 /// A pasted folder of the test's own, which is gone once the test ends. Not created: the paste
 /// module creates it when the first paste needs it.
@@ -500,4 +501,127 @@ fn the_startup_sweep_keeps_a_file_written_since_the_process_started() {
     documents.sweep_pastes();
     assert!(!folder.has(&documents, FIRST));
     assert_eq!(folder.names(), [SECOND]);
+}
+
+/// The file the first text dropped at [`AT`] is written to.
+const DROPPED: &str = "Dropped 2026-11-20 14.32.05.md";
+
+/// Drops `text` onto `window` at [`AT`], as the drop target hands it on.
+fn drop_text(documents: &Documents, window: &str, text: &str) {
+    show_dropped_text(documents, window, text, AT);
+}
+
+#[test]
+fn text_dropped_onto_the_empty_window_shows_a_new_dropped_file_holding_the_text() {
+    let folder = TestFolder::new("dropped-empty-window");
+    let (documents, recorder) = folder.documents();
+    let window = open_empty(&documents);
+    let text = "# Dragged from a browser\n\nGrüße, 灯\n";
+    drop_text(&documents, &window, text);
+    let file = folder.file(DROPPED);
+    assert_eq!(documents.document_path(&window), Some(file.clone()));
+    // UTF-8 without a byte order mark.
+    assert_eq!(std::fs::read(&file).ok(), Some(text.as_bytes().to_vec()));
+    assert_eq!(recorder.sent(), [to(&window, Message::AskForDocument)]);
+    assert!(rendered_html(&documents, &window).contains("Dragged from a browser"));
+}
+
+#[test]
+fn two_drops_in_the_same_second_get_two_files() {
+    let folder = TestFolder::new("dropped-same-second");
+    let (documents, _) = folder.documents();
+    let window = open_empty(&documents);
+    drop_text(&documents, &window, "first");
+    arrive(&documents, &window, None);
+    drop_text(&documents, &window, "second");
+    assert_eq!(
+        folder.names(),
+        ["Dropped 2026-11-20 14.32.05 (2).md", DROPPED]
+    );
+    assert_eq!(
+        documents.document_path(&window),
+        Some(folder.file("Dropped 2026-11-20 14.32.05 (2).md"))
+    );
+}
+
+#[test]
+fn dropped_text_replaces_the_shown_document_and_back_returns_to_it() {
+    let folder = TestFolder::new("dropped-history");
+    let (documents, _) = folder.documents();
+    let window = open_new(&documents, &manifest());
+    let before = arrive(&documents, &window, None);
+    drop_text(&documents, &window, "# Dropped");
+    assert_eq!(documents.document_path(&window), Some(folder.file(DROPPED)));
+    let dropped = arrive(&documents, &window, Some(before));
+    documents.step(&window, Step::Back).ok();
+    assert_eq!(documents.document_path(&window), Some(manifest()));
+    let returned = handover(&documents, &window, Some(dropped));
+    assert_eq!(returned.place, Place::Return);
+    assert_eq!(returned.showing, before);
+}
+
+#[test]
+fn dropped_text_replaces_a_document_still_on_its_way() {
+    let folder = TestFolder::new("dropped-on-its-way");
+    let (documents, _) = folder.documents();
+    let window = open_new(&documents, &manifest());
+    let before = arrive(&documents, &window, None);
+    give(
+        &documents,
+        DocumentAt::new(&app_file("build.rs")),
+        Target::Window(&window),
+    );
+    let on_its_way = handover(&documents, &window, Some(before));
+    drop_text(&documents, &window, "# Dropped");
+    assert!(on_its_way.render.is_left());
+    assert_eq!(documents.document_path(&window), Some(folder.file(DROPPED)));
+    arrive(&documents, &window, Some(before));
+    // The document on its way never arrived, so Back goes to the one in view before it.
+    documents.step(&window, Step::Back).ok();
+    assert_eq!(documents.document_path(&window), Some(manifest()));
+}
+
+#[test]
+fn dropped_whitespace_leaves_the_window_and_the_folder_as_they_were_and_says_nothing() {
+    for (name, text) in [("empty", ""), ("whitespace", " \r\n\t\n  ")] {
+        let folder = TestFolder::new(&format!("dropped-nothing-{name}"));
+        let (documents, recorder) = folder.documents();
+        let window = open_new(&documents, &manifest());
+        drop_text(&documents, &window, text);
+        assert_eq!(documents.document_path(&window), Some(manifest()), "{name}");
+        assert_eq!(recorder.sent(), [], "{name}");
+        assert!(!folder.0.exists(), "{name}");
+    }
+}
+
+#[test]
+fn dropped_text_that_cannot_be_written_tells_the_window_naming_the_file() {
+    // A file where the pasted folder should be, so the folder can't be made.
+    let folder = TestFolder::new("dropped-unwritable");
+    std::fs::write(&folder.0, "in the way").ok();
+    let (documents, recorder) = folder.documents();
+    let window = open_new(&documents, &manifest());
+    drop_text(&documents, &window, "# Dropped");
+    std::fs::remove_file(&folder.0).ok();
+    let sent = recorder.sent();
+    let [(to_window, Message::Notice(Notice::NamingFile { before, file, .. }))] = sent.as_slice()
+    else {
+        panic!("expected one notice naming the file, got {sent:?}");
+    };
+    assert_eq!(to_window, &window);
+    assert_eq!(before, "Can't write ");
+    assert_eq!(file, &crate::notice::NamedFile::at(&folder.0));
+    assert_eq!(documents.document_path(&window), Some(manifest()));
+}
+
+#[test]
+fn dropped_text_is_deleted_when_its_window_closes() {
+    let folder = TestFolder::new("dropped-window-closes");
+    let (documents, _) = folder.documents();
+    let window = open_empty(&documents);
+    drop_text(&documents, &window, "# Dropped");
+    arrive(&documents, &window, None);
+    assert!(folder.has(&documents, DROPPED));
+    documents.forget(&window);
+    assert!(!folder.has(&documents, DROPPED));
 }

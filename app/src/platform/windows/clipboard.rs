@@ -3,16 +3,15 @@
 //! again, also on an early return or a panic: a clipboard left open blocks every other program's
 //! copy and paste until this thread ends.
 
-use std::ffi::c_void;
 use std::marker::PhantomData;
 use std::time::Duration;
 
-use windows_sys::Win32::Foundation::{HANDLE, SYSTEMTIME};
+use windows_sys::Win32::Foundation::SYSTEMTIME;
 use windows_sys::Win32::System::DataExchange::{CloseClipboard, GetClipboardData, OpenClipboard};
-use windows_sys::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
 use windows_sys::Win32::System::Ole::CF_UNICODETEXT;
 use windows_sys::Win32::System::SystemInformation::GetLocalTime;
 
+use super::global_memory::LockedGlobal;
 use crate::paste::{Clipboard, LocalTime};
 
 /// How many times Paste tries to open the clipboard while another program has it open, and how
@@ -64,13 +63,10 @@ impl OpenedClipboard {
         if data.is_null() {
             return None;
         }
-        let locked = LockedGlobal::lock(self, data)?;
-        let text = locked
-            .units()
-            .split(|&unit| unit == 0)
-            .next()
-            .unwrap_or_default();
-        Some(String::from_utf16_lossy(text))
+        // SAFETY: a CF_UNICODETEXT handle is a global memory object, which stays the clipboard's
+        // while it is open, and the guard borrows `self`, which closes it.
+        let locked = unsafe { LockedGlobal::lock(self, data) }?;
+        Some(String::from_utf16_lossy(locked.text()))
     }
 }
 
@@ -79,48 +75,6 @@ impl Drop for OpenedClipboard {
         // SAFETY: matches the successful OpenClipboard that made `self`, on the same thread,
         // since `self` isn't `Send`; no handle from the clipboard outlives the borrow of `self`.
         unsafe { CloseClipboard() };
-    }
-}
-
-/// A clipboard handle's global memory, locked until this is dropped.
-struct LockedGlobal<'clipboard> {
-    data: HANDLE,
-    start: *mut c_void,
-    /// The memory is the clipboard's, valid only while the clipboard stays open.
-    clipboard: PhantomData<&'clipboard OpenedClipboard>,
-}
-
-impl<'clipboard> LockedGlobal<'clipboard> {
-    /// Locks `data`, a handle from the open `_clipboard`, or None when its memory can't be
-    /// locked.
-    fn lock(_clipboard: &'clipboard OpenedClipboard, data: HANDLE) -> Option<Self> {
-        // SAFETY: a CF_UNICODETEXT handle is a global memory object; a null pointer means the
-        // memory couldn't be locked.
-        let start = unsafe { GlobalLock(data) };
-        (!start.is_null()).then_some(Self {
-            data,
-            start,
-            clipboard: PhantomData,
-        })
-    }
-
-    /// The memory as UTF-16 units, no further than the object's size: the text comes from
-    /// another program, so it may lack the NUL that should end it.
-    fn units(&self) -> &[u16] {
-        // SAFETY: as for GlobalLock; a failure gives 0, which reads as no text.
-        let size = unsafe { GlobalSize(self.data) };
-        // SAFETY: `start` points to the `size` bytes of the locked object, which stays locked
-        // while the slice borrows `self`. Global memory is 8-byte aligned, so UTF-16 units read
-        // from it are aligned.
-        unsafe { std::slice::from_raw_parts(self.start.cast::<u16>(), size / 2) }
-    }
-}
-
-impl Drop for LockedGlobal<'_> {
-    fn drop(&mut self) {
-        // SAFETY: matches the successful GlobalLock that made `self`; no slice from `units`
-        // outlives the borrow of `self`.
-        unsafe { GlobalUnlock(self.data) };
     }
 }
 

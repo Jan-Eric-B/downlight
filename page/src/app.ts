@@ -204,6 +204,22 @@ export function pageFlags(): PageFlags {
 }
 
 /**
+ * The label of the window the page is in, as the app named it when it opened the window. It
+ * holds for the page's life.
+ */
+export function windowLabel(): string {
+  return getCurrentWebviewWindow().label;
+}
+
+/**
+ * The `dataTransfer` type the page tags each drag that starts in it with, its window's label the
+ * tag's data (`DRAG_TAG` in `app/src/open.rs`): the app's drop target refuses a drag tagged with
+ * its own window, so dropping a selection, a link or an image back onto the page does nothing
+ * (paste-markdown ticket 04).
+ */
+export const DRAG_TAG = "application/x-downlight-window";
+
+/**
  * Every Theme the reader can pick (`Theme` in `app/src/settings/look.rs`, window design ticket
  * 08), in the order the settings flyout offers them.
  */
