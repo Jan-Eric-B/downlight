@@ -119,12 +119,12 @@ impl HoldsDocuments for super::WindowState {
 }
 
 /// A document the table let go of, owned for the deleting thread.
-struct LetGo {
+struct ReleasedDocument {
     key: PathBuf,
     path: PathBuf,
 }
 
-impl From<HeldDocument<'_>> for LetGo {
+impl From<HeldDocument<'_>> for ReleasedDocument {
     fn from(held: HeldDocument<'_>) -> Self {
         Self {
             key: held.key.to_owned(),
@@ -136,7 +136,7 @@ impl From<HeldDocument<'_>> for LetGo {
 /// What the deleting thread does, in the order it is asked.
 enum Job {
     /// Deletes each of these that is a pasted file no window holds.
-    Delete(Vec<LetGo>),
+    Delete(Vec<ReleasedDocument>),
     /// Deletes every file in the pasted folder last modified before `started` that no window
     /// holds.
     Sweep { started: SystemTime },
@@ -202,7 +202,7 @@ impl Documents {
     /// more is deleted, off the calling thread. Dropping and letting go in one call, so that no
     /// change can do the one and forget the other.
     pub(super) fn let_go(&self, left: impl HoldsDocuments) {
-        let let_go: Vec<LetGo> = left.held().map(LetGo::from).collect();
+        let let_go: Vec<ReleasedDocument> = left.held().map(ReleasedDocument::from).collect();
         if !let_go.is_empty() {
             self.deleting(Job::Delete(let_go));
         }
@@ -252,7 +252,7 @@ fn sweep(inner: &Weak<Inner>, started: SystemTime) {
     };
     let files = files
         .into_iter()
-        .map(|path| LetGo {
+        .map(|path| ReleasedDocument {
             key: document_key(&path),
             path,
         })
@@ -280,14 +280,14 @@ fn files_modified_before(folder: &Path, started: SystemTime) -> Vec<PathBuf> {
 /// Deletes each of `let_go` that is a pasted file no window of `inner`'s table holds. A pasted
 /// file is one in the pasted folder, compared as the table compares documents, so that a pasted
 /// file named by another path, as through a short name or a link, still counts.
-fn delete_unheld(inner: &Weak<Inner>, let_go: Vec<LetGo>) {
+fn delete_unheld(inner: &Weak<Inner>, let_go: Vec<ReleasedDocument>) {
     let Some(inner) = inner.upgrade() else {
         return;
     };
     let documents = Documents { inner };
     // Once per job rather than per file, since it resolves the folder on the file system.
     let folder = document_key(documents.pasted_folder().path());
-    let pasted: Vec<LetGo> = let_go
+    let pasted: Vec<ReleasedDocument> = let_go
         .into_iter()
         .filter(|document| document.key.parent() == Some(folder.as_path()))
         .collect();

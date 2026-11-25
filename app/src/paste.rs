@@ -48,7 +48,7 @@ pub async fn paste_clipboard(
         (pasted, stages)
     })
     .await
-    .map_err(|source| PasteError::Stopped { source })?;
+    .map_err(|source| PasteError::TaskFailed { source })?;
     // The time a paste takes grows with its text, so the timing switch reports it
     // (CODING_STANDARDS.md); a refused one too, whose read may have waited on a busy clipboard.
     timing.report(window.label(), "paste", &stages);
@@ -112,12 +112,12 @@ impl PastedFolder {
         &self.folder
     }
 
-    /// Writes `text`, which `came` as it did, to a new file named by `at`, created with the folder
+    /// Writes `text`, which came from `origin`, to a new file named by `at`, created with the folder
     /// if it isn't there yet, and gives its path. A name already taken, as by an earlier paste in
     /// the same second, gets ` (2)`, ` (3)` and so on before its extension; the file is created
     /// only if it doesn't exist yet, so that no paste ever overwrites another, even one another
     /// Downlight process wrote.
-    fn write(&self, text: &str, came: Came, at: LocalTime) -> Result<PathBuf, PasteError> {
+    fn write(&self, text: &str, origin: PasteOrigin, at: LocalTime) -> Result<PathBuf, PasteError> {
         let LocalTime {
             year,
             month,
@@ -126,9 +126,9 @@ impl PastedFolder {
             minute,
             second,
         } = at;
-        let how = match came {
-            Came::Pasted => "Pasted",
-            Came::Dropped => "Dropped",
+        let how = match origin {
+            PasteOrigin::Pasted => "Pasted",
+            PasteOrigin::Dropped => "Dropped",
         };
         let stem = format!("{how} {year:04}-{month:02}-{day:02} {hour:02}.{minute:02}.{second:02}");
         std::fs::create_dir_all(&self.folder).map_err(|source| PasteError::Write {
@@ -178,7 +178,7 @@ pub fn paste(
         Clipboard::Busy => return Err(PasteError::Busy),
         Clipboard::NotAvailable => return Err(PasteError::NotAvailable),
     };
-    show(documents, window, &text, Came::Pasted, at)
+    show(documents, window, &text, PasteOrigin::Pasted, at)
 }
 
 /// Shows `text`, dropped onto `window` from another program (paste-markdown ticket 04), as Paste
@@ -187,7 +187,7 @@ pub fn paste(
 /// whose drag the drop target already refused with the no-drop cursor, so letting go of it does
 /// nothing.
 pub fn show_dropped_text(documents: &Documents, window: &str, text: &str, at: LocalTime) {
-    match show(documents, window, text, Came::Dropped, at) {
+    match show(documents, window, text, PasteOrigin::Dropped, at) {
         Ok(()) | Err(PasteError::NoText) => {}
         // The notice is the only way to tell the reader about the drop, so a notice that can't be
         // sent leaves nobody to tell.
@@ -197,22 +197,22 @@ pub fn show_dropped_text(documents: &Documents, window: &str, text: &str, at: Lo
     }
 }
 
-/// How the text of a paste came, which names its file.
+/// Where the text of a paste came from, which names its file.
 #[derive(Debug, Clone, Copy)]
-enum Came {
+enum PasteOrigin {
     /// From the clipboard, by Ctrl+V or the menu.
     Pasted,
     /// Dragged from another program and dropped onto the window.
     Dropped,
 }
 
-/// Shows `text`, which `came` as it did, in `window`: written to a new file in the pasted folder
+/// Shows `text`, which came from `origin`, in `window`: written to a new file in the pasted folder
 /// named by `at`, which the window is then given as Open gives it a file.
 fn show(
     documents: &Documents,
     window: &str,
     text: &str,
-    came: Came,
+    origin: PasteOrigin,
     at: LocalTime,
 ) -> Result<(), PasteError> {
     // Only spaces or empty lines would show an empty document (user story 18).
@@ -223,7 +223,7 @@ fn show(
     if !is_text(text.as_bytes()) {
         return Err(PasteError::NotText);
     }
-    let document = documents.pasted_folder().write(text, came, at)?;
+    let document = documents.pasted_folder().write(text, origin, at)?;
     documents
         .give(DocumentAt::new(&document), Target::Window(window))
         .map(|_| ())
@@ -235,23 +235,20 @@ fn show(
 pub enum PasteError {
     /// The clipboard held no text, or only whitespace.
     NoText,
+    /// Another program kept the clipboard open through every try.
     Busy,
+    /// The system has no way to read the clipboard yet.
     NotAvailable,
     /// The clipboard's text would count as a binary file.
     NotText,
     /// The folder or the file couldn't be created or written.
-    Write {
-        file: PathBuf,
-        source: io::Error,
-    },
+    Write { file: PathBuf, source: io::Error },
     Show {
         document: PathBuf,
         source: ShowError,
     },
     /// The background task that reads and writes the paste panicked or was cancelled.
-    Stopped {
-        source: tauri::Error,
-    },
+    TaskFailed { source: tauri::Error },
 }
 
 impl From<PasteError> for Notice {
@@ -271,7 +268,7 @@ impl From<PasteError> for Notice {
                 NamedFile::at(&document),
                 format!(": {source}"),
             ),
-            PasteError::Stopped { source } => format!("Pasting stopped: {source}").into(),
+            PasteError::TaskFailed { source } => format!("Pasting failed: {source}").into(),
         }
     }
 }

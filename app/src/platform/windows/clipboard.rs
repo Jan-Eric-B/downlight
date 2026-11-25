@@ -1,4 +1,4 @@
-//! Reading the clipboard and the local time for Paste (paste-markdown ticket 01). The clipboard is
+//! Reading the clipboard for Paste (paste-markdown ticket 01). The clipboard is
 //! opened and its text's memory locked through guards, so that it is always closed and unlocked
 //! again, also on an early return or a panic: a clipboard left open blocks every other program's
 //! copy and paste until this thread ends.
@@ -6,13 +6,11 @@
 use std::marker::PhantomData;
 use std::time::Duration;
 
-use windows_sys::Win32::Foundation::SYSTEMTIME;
 use windows_sys::Win32::System::DataExchange::{CloseClipboard, GetClipboardData, OpenClipboard};
 use windows_sys::Win32::System::Ole::CF_UNICODETEXT;
-use windows_sys::Win32::System::SystemInformation::GetLocalTime;
 
 use super::global_memory::LockedGlobal;
-use crate::paste::{Clipboard, LocalTime};
+use crate::paste::Clipboard;
 
 /// How many times Paste tries to open the clipboard while another program has it open, and how
 /// long it waits between tries. Programs hold it open only for a moment while they copy or read,
@@ -75,20 +73,5 @@ impl Drop for OpenedClipboard {
         // SAFETY: matches the successful OpenClipboard that made `self`, on the same thread,
         // since `self` isn't `Send`; no handle from the clipboard outlives the borrow of `self`.
         unsafe { CloseClipboard() };
-    }
-}
-
-/// The time now on the computer's clock, which names a pasted file.
-pub fn local_time() -> LocalTime {
-    let mut now = SYSTEMTIME::default();
-    // SAFETY: `now` is a live SYSTEMTIME that GetLocalTime only writes.
-    unsafe { GetLocalTime(&mut now) };
-    LocalTime {
-        year: now.wYear,
-        month: now.wMonth,
-        day: now.wDay,
-        hour: now.wHour,
-        minute: now.wMinute,
-        second: now.wSecond,
     }
 }
