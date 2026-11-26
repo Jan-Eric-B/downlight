@@ -134,6 +134,72 @@ test("the empty window lists no headings", async () => {
   expect(documentHeadings()).toMatchObject({ headings: [], complete: true });
 });
 
+/**
+ * A document of more top-level blocks than the list takes in per task (overview ruler ticket 05),
+ * each an h2 with an id, `heading-0` to `heading-9999`.
+ */
+const LONGER_THAN_A_SLICE = Array.from(
+  { length: 10_000 },
+  (_, line) =>
+    `<h2 id="heading-${String(line)}" data-sourcepos="${String(line + 1)}:1-${String(line + 1)}:12">Heading ${String(line)}</h2>`,
+).join("\n");
+
+/** Resolves once the list is complete, a frame at a time, or fails after many frames. */
+async function untilComplete(): Promise<void> {
+  for (let frame = 0; frame < 1000; frame++) {
+    if (documentHeadings().complete) return;
+    await afterNextFrame();
+  }
+  throw new Error("The list was never complete.");
+}
+
+test("a long document's list grows a slice at a time, in document order, until it is complete", async () => {
+  const heard: [boolean, number][] = [];
+  const stopHearing = whenHeadingsChange(({ complete, headings }) => {
+    heard.push([complete, headings.length]);
+  });
+  showInTurn(LONGER_THAN_A_SLICE);
+  await startShowing();
+  // The first slice is listed after the document's first frame, and the rest is on its way.
+  expect(documentHeadings().complete).toBe(false);
+  expect(listed().length).toBeGreaterThan(0);
+  expect(listed().length).toBeLessThan(10_000);
+  expect(documentHeadings().describesView()).toBe(true);
+
+  await untilComplete();
+  expect(listed().map(([id]) => id)).toEqual(
+    Array.from({ length: 10_000 }, (_, line) => `heading-${String(line)}`),
+  );
+  const lengths = heard.map(([, length]) => length);
+  expect(lengths).toEqual([...lengths].sort((a, b) => a - b));
+  expect(heard.at(-1)).toEqual([true, 10_000]);
+  expect(heard.filter(([complete]) => complete)).toHaveLength(1);
+  stopHearing();
+});
+
+test("another document stops the list of a long document on its way", async () => {
+  showInTurn(LONGER_THAN_A_SLICE);
+  await startShowing();
+  expect(documentHeadings().complete).toBe(false);
+
+  showInTurn(headings);
+  const heard: string[] = [];
+  const stopHearing = whenHeadingsChange((list) => {
+    heard.push(list.headings[0]?.id ?? "none");
+  });
+  const listedNext = nextListed();
+  await giveAnotherDocument();
+  await listedNext;
+  await untilComplete();
+  for (let frame = 0; frame < 5; frame++) await afterNextFrame();
+
+  expect(listed()).toHaveLength(10);
+  expect(listed()[0]).toEqual(["keeping-lamps", 1, "Keeping lamps"]);
+  // Only the new document's lists: first empty, then built.
+  expect(heard).toEqual(["none", "keeping-lamps"]);
+  stopHearing();
+});
+
 test("the list is rebuilt for another document, a reload and Back, and its listeners hear each", async () => {
   const heard: HeadingList[] = [];
   const stopHearing = whenHeadingsChange((list) => {

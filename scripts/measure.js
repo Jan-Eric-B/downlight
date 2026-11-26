@@ -3,9 +3,11 @@
 // on the test documents, reads the app's timing reports from stderr, and gives the median of
 // five runs. One run before each case is discarded, so the first start after a build, when
 // Windows scans the new executable, doesn't count. Beside first paint, it measures a second
-// window, a reload, scrolling, typing in the find bar, and holding F3 after a one-letter search
-// (overview ruler ticket 03). `npm run measure -- large` measures the 1 MB documents and the large
-// ones instead (ticket 31).
+// window, a reload, scrolling, typing in the find bar, holding F3 after a one-letter search
+// (overview ruler ticket 03), and moving the pointer down the overview ruler's strip (overview
+// ruler ticket 05). `npm run measure -- large` measures the 1 MB documents and the large ones
+// instead (ticket 31), and when the overview ruler first shows on them, which it watches for over
+// the debug port.
 
 import { execFileSync, spawn } from "node:child_process";
 import {
@@ -48,8 +50,9 @@ const RELOAD_DOCUMENT = DOCUMENTS.mixed1mb.replace(/\.md$/, "-reload.md");
  * Each of `laterDocuments` is then opened by a further launch, which hands it to the running
  * process (ADR 0001), and the run waits for its window to paint too. `afterPaint`, if given, then
  * acts on the first window over WebView2's debug port (`scrollThrough`, `reloadInTheMiddle`,
- * `typeInFind` or `holdF3`), and the run returns its result as `after`. `prepare` runs before the process
- * starts. A run ends once its processes are gone, so the next one starts on none.
+ * `typeInFind`, `holdF3`, `movePointerAlongStrip` or `rulerShows`), and the run returns its result
+ * as `after`. `prepare` runs before the process starts. A run ends once its processes are gone, so
+ * the next one starts on none.
  */
 async function run(
   documents,
@@ -362,6 +365,95 @@ async function holdF3() {
 }
 
 /**
+ * How far apart the pointer's moves along the overview ruler's strip are (`movePointerAlongStrip`),
+ * in px: under the 4 px a mark reaches, so the pointer comes onto and leaves every mark.
+ */
+const POINTER_STEP_PX = 2;
+
+/** In the page: resolves with the time from `start` to the end of the next frame. */
+const AFTER_FRAME = `(start) => new Promise((done) => {
+  requestAnimationFrame(() => setTimeout(() => done(performance.now() - start), 0));
+})`;
+
+/**
+ * Moves the pointer down the overview ruler's strip, from its top to its bottom, `POINTER_STEP_PX`
+ * at a time, each move once the last one's frame is done (`AFTER_FRAME`): the hand and the hover
+ * label come and go at every heading mark (overview ruler ticket 05). The strip is where the page
+ * puts it, just left of the scroll bar at the scroller's full height, with the ruler on or off.
+ * Returns each move's time from its `mousemove` to then, and when the moving started.
+ */
+async function movePointerAlongStrip() {
+  const { send, evaluate, close } = await connect();
+  try {
+    // The strip's middle: it is 14 px wide (`STRIP_WIDTH` in page/src/overview-ruler-placement.ts).
+    const strip = await evaluate(`(() => {
+      const scroller = ${SCROLLER};
+      const { right, top } = scroller.getBoundingClientRect();
+      const scrollBar = scroller.offsetWidth - scroller.clientWidth;
+      return { x: right - scrollBar - 7, top, height: scroller.clientHeight };
+    })()`);
+    await evaluate(`(() => {
+      window.pointerMoves = [];
+      window.pointerMoved = Promise.resolve();
+      const afterFrame = ${AFTER_FRAME};
+      // Before the page's own listener, which is on the scroller: the window's capture phase
+      // comes first.
+      addEventListener("mousemove", () => {
+        pointerMoved = afterFrame(performance.now()).then((time) => pointerMoves.push(time));
+      }, true);
+    })()`);
+    const started = performance.now();
+    for (
+      let y = strip.top;
+      y < strip.top + strip.height;
+      y += POINTER_STEP_PX
+    ) {
+      await send("Input.dispatchMouseEvent", {
+        type: "mouseMoved",
+        x: strip.x,
+        y,
+      });
+      await evaluate("pointerMoved");
+    }
+    return { moves: await evaluate("pointerMoves"), started };
+  } finally {
+    close();
+  }
+}
+
+/** How long a large document's run waits for the overview ruler to show (`rulerShows`). */
+const RULER_TIMEOUT_MS = 120_000;
+
+/**
+ * Waits until the overview ruler's strip shows, checking once a frame, and returns when it did,
+ * or undefined when it didn't within `RULER_TIMEOUT_MS`, or at once when the window's settings,
+ * which the app puts in the page's URL, have the ruler switched off.
+ */
+async function rulerShows() {
+  const { evaluate, close } = await connect();
+  try {
+    const shown = await evaluate(`new Promise((done) => {
+      const settings = new URLSearchParams(location.search).get("settings");
+      if (settings && JSON.parse(settings).overviewRuler === false) {
+        done(false);
+        return;
+      }
+      const giveUp = performance.now() + ${RULER_TIMEOUT_MS};
+      const check = () => {
+        const strip = document.querySelector(".overview-ruler");
+        if (strip && !strip.hidden) done(true);
+        else if (performance.now() > giveUp) done(false);
+        else requestAnimationFrame(check);
+      };
+      check();
+    })`);
+    return shown ? performance.now() : undefined;
+  } finally {
+    close();
+  }
+}
+
+/**
  * The line number of the first top-level block not wholly above the top of the view, for
  * checking that a reload kept the reading position.
  */
@@ -596,17 +688,21 @@ function firstWindow({ reports, memory }) {
  * Where a large document's time goes (ticket 31): the app's read and render, sending the HTML to
  * the page (from the render's end until the page has it), inserting it, and the frame after, to
  * first paint. The window is shown at first paint, or before it with the wait note when the
- * document takes over half a second to arrive.
+ * document takes over half a second to arrive. The overview ruler shows after first paint
+ * (overview ruler ticket 05): how long after, as the script saw both, and the longest task or
+ * frame from first paint on, the ruler's among them.
  */
-function largeDocument({ reports, memory }) {
+function largeDocument({ reports, memory, after: rulerShown }) {
   const [shown] = reportsOf(reports, "document-0", "window-shown");
   const [paint] = reportsOf(reports, "document-0", "first-paint");
   const [readAndRender] = reportsOf(reports, "document-0", "read-and-render");
-  const longestTask = Math.max(
+  const long = reports.filter(
+    (r) => r.event === "long-task" || r.event === "long-frame",
+  );
+  const longestTask = Math.max(0, ...long.map((r) => r.duration));
+  const longestAfterFirstPaint = Math.max(
     0,
-    ...reports
-      .filter((r) => r.event === "long-task" || r.event === "long-frame")
-      .map((r) => r.duration),
+    ...long.filter((r) => r.at >= paint.at).map((r) => r.duration),
   );
   return {
     read: readAndRender.read,
@@ -623,7 +719,11 @@ function largeDocument({ reports, memory }) {
     frameAfterInsert: paint.at - paint.inserted,
     shown: shown.at,
     firstPaint: paint.at,
+    // NaN when the ruler never showed: switched off, or a document that doesn't scroll.
+    rulerAfterFirstPaint:
+      rulerShown === undefined ? Number.NaN : rulerShown - paint.seen,
     longestTask,
+    longestAfterFirstPaint,
     workingSetMb: memory.workingSet,
     privateMb: memory.privateBytes,
   };
@@ -638,6 +738,7 @@ async function measureLarge() {
   const attempt = async (name, document, runs) => {
     try {
       return await measure(name, [document], largeDocument, {
+        afterPaint: rulerShows,
         timeoutMs: LARGE_RUN_TIMEOUT_MS,
         runs,
       });
@@ -737,6 +838,19 @@ function steppedWithF3({ reports, after: held }) {
   };
 }
 
+/** Moving the pointer along the strip: each move until its frame is done, and the longest task. */
+function pointedAlongStrip({ reports, after: pointed }) {
+  const during = reports
+    .filter((r) => r.event === "long-task" || r.event === "long-frame")
+    .filter((r) => r.seen >= pointed.started)
+    .map((r) => r.duration);
+  return {
+    pointerMoveToFrame: median(pointed.moves),
+    longestPointerMoveToFrame: Math.max(...pointed.moves),
+    longestWhilePointing: Math.max(0, ...during),
+  };
+}
+
 function table(cases) {
   const keys = [...new Set(cases.flatMap((c) => Object.keys(c.runs[0])))];
   const lines = [
@@ -815,6 +929,12 @@ const stepping = await measure(
     afterPaint: holdF3,
   },
 );
+const pointing = await measure(
+  "1 MB mixed",
+  [DOCUMENTS.mixed1mb],
+  pointedAlongStrip,
+  { afterPaint: movePointerAlongStrip },
+);
 console.log(table(cases));
 console.log();
 console.log(table([second]));
@@ -838,3 +958,9 @@ console.log(
 );
 console.log();
 console.log(table([stepping]));
+console.log();
+console.log(
+  `Moving the pointer down the overview ruler's strip, ${POINTER_STEP_PX} px at a time, each move once the last one's frame is done:`,
+);
+console.log();
+console.log(table([pointing]));

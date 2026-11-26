@@ -20,11 +20,12 @@ export interface DocumentHeading {
 /** The shown document's headings as far as they are listed. */
 export interface HeadingList {
   /** In document order. */
+  /** In document order: a new array each time the list is rebuilt or grows. */
   headings: readonly DocumentHeading[];
   /**
-   * Whether every heading is listed. A document's list is empty and incomplete until it is built
-   * after the document's first frame, at once for now; ticket 05 may build a large document's list
-   * in slices, as Find builds its index.
+   * Whether every heading is listed. A document's list is empty and incomplete until its first
+   * slice is listed after the document's first frame, and grows a slice of its blocks per task
+   * until it is complete, as Find builds its index (overview ruler ticket 05).
    */
   complete: boolean;
   /**
@@ -67,16 +68,51 @@ function plainText(element: Element): string {
   return element.textContent.replace(/\s+/g, " ").trim();
 }
 
-/** Lists `view`'s headings, also those in lists, quotes and closed sections. */
-function headingsIn(view: HTMLElement): DocumentHeading[] {
-  return [
-    ...view.querySelectorAll<HTMLHeadingElement>(LISTED_HEADINGS),
-  ].flatMap((element) => {
-    const level = LEVELS.get(element.localName);
-    return level === undefined || element.id === ""
-      ? []
-      : [{ id: element.id, level, text: plainText(element), element }];
-  });
+/** `element` as a listed heading, or none when it isn't one. */
+function headingOf(element: HTMLHeadingElement): DocumentHeading[] {
+  const level = LEVELS.get(element.localName);
+  return level === undefined || element.id === ""
+    ? []
+    : [{ id: element.id, level, text: plainText(element), element }];
+}
+
+/**
+ * How many of a view's top-level blocks the list takes in per task. All of a large document's
+ * headings in one task would hold the page up as Find's index would (ticket 14's Results); this
+ * many blocks take a few milliseconds on the 1 MB test document (overview ruler ticket 05).
+ */
+const SLICE_BLOCKS = 2048;
+
+/**
+ * Lists a view's headings a slice of its top-level blocks at a time, also those in lists, quotes
+ * and closed sections, in document order.
+ */
+class HeadingsBuilder {
+  /** The top-level block the next slice starts at, or null once every block is listed. */
+  private next: Element | null;
+  /** The headings listed so far: a new array for each slice, as a reader tells lists apart by it. */
+  headings: readonly DocumentHeading[] = [];
+
+  constructor(view: HTMLElement) {
+    this.next = view.firstElementChild;
+  }
+
+  /** Lists one slice of blocks, and returns whether every block is listed. */
+  slice(): boolean {
+    const found: DocumentHeading[] = [];
+    for (let left = SLICE_BLOCKS; this.next && left > 0; left--) {
+      const block = this.next;
+      if (block instanceof HTMLHeadingElement) found.push(...headingOf(block));
+      else if (block.firstElementChild)
+        for (const nested of block.querySelectorAll<HTMLHeadingElement>(
+          LISTED_HEADINGS,
+        ))
+          found.push(...headingOf(nested));
+      this.next = block.nextElementSibling;
+    }
+    this.headings = [...this.headings, ...found];
+    return this.next === null;
+  }
 }
 
 /**
@@ -86,7 +122,7 @@ function headingsIn(view: HTMLElement): DocumentHeading[] {
  */
 function listOf(
   view: HTMLElement,
-  headings: DocumentHeading[],
+  headings: readonly DocumentHeading[],
   complete: boolean,
 ): HeadingList {
   const first = view.firstChild;
@@ -128,13 +164,14 @@ function tellListeners(): void {
 /**
  * Keeps the list of the shown document's headings, rebuilt each time the view's content is
  * replaced: a document shown, returned to or reloaded. The list starts empty and incomplete and
- * is built after the frame that shows the document, so the build never holds up first paint
- * (overview ruler spec, "Large documents"), as Find defers its index. Started before the page
- * parts that read it, so that their own `whenDocumentShown` listeners, which run after this one,
- * read the new list. The signal stops it, for the tests.
+ * is built after the frame that shows the document, a slice of its blocks per task, so the build
+ * never holds up first paint or a frame after it (overview ruler spec, "Large documents"), as Find
+ * builds its index. Started before the page parts that read it, so that their own
+ * `whenDocumentShown` listeners, which run after this one, read the new list. The signal stops it,
+ * for the tests.
  */
 export function startHeadings(signal?: AbortSignal): void {
-  /** Counts the rebuilds, so a build after a frame is dropped if another one came meanwhile. */
+  /** Counts the rebuilds, so a slice is dropped if another rebuild came meanwhile. */
   let latestRebuild = 0;
   let stopped = false;
   const stopListening = whenDocumentShown(({ view, document }) => {
@@ -145,12 +182,17 @@ export function startHeadings(signal?: AbortSignal): void {
       return;
     }
     // Asked for before the listeners hear the empty list, so a frame they ask for then comes
-    // after the build.
-    void afterNextFrame().then(() => {
+    // after the first slice. Each slice after it comes in a task of its own, as Find's index's
+    // do, and the listeners hear the list grow.
+    const builder = new HeadingsBuilder(view.view);
+    const slice = () => {
       if (stopped || thisRebuild !== latestRebuild) return;
-      list = listOf(view.view, headingsIn(view.view), true);
+      const complete = builder.slice();
+      list = listOf(view.view, builder.headings, complete);
       tellListeners();
-    });
+      if (!complete) setTimeout(slice, 0);
+    };
+    void afterNextFrame().then(slice);
     list = UNBUILT;
     tellListeners();
   });

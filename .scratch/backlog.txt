@@ -5,7 +5,6 @@ ID = folder/number under .scratch/<folder>/issues/<number>-*.md (v1 = downlight-
 Status: ready = ready-for-agent, triage = needs-triage (grill first), info = needs-info (investigate).
 Move lines to change the order. A new ticket gets a line here; a closed ticket's line is removed.
 
-ruler/05 | Overview ruler: large documents, measured | ready | blocked by ruler/03; may switch the ruler to a canvas; does not wait for v1/39
 outline/01 | Alt+Down and Alt+Up step through the headings | ready | blocked by ruler/01 (the list of headings); adds the view's scroll to a heading without a History step; adds the headings fixture unless ruler/01 did
 outline/02 | The Outline lists the headings and goes to one | ready | blocked by ruler/01; title bar button (first, own group), Ctrl+Shift+O, menu entry after Find; closes and is closed by the settings flyout
 outline/03 | Typing filters the Outline | ready | blocked by outline/02

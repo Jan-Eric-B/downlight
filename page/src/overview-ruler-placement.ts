@@ -79,6 +79,8 @@ export function placeStrip(
   const scrollHeight = scroller.scrollHeight;
   const toStrip = (px: number) => (px * height) / scrollHeight;
   const boxOf = blockMeasurer(shown);
+  // Every redraw, so another render's text nodes are let go as it is first drawn.
+  cacheFor(view);
 
   const headingMarks = markHeadings(view, headings, (block) =>
     Math.floor(toStrip(boxOf(block).top)),
@@ -320,59 +322,73 @@ function placesOf(
 }
 
 /**
+ * How much of its top-level block's text comes before each text node, and each block's text
+ * length, for the render the nodes are of (overview ruler ticket 05): a block's text is walked the
+ * first time a count has a match in it, and every later count of the render looks its matches up
+ * rather than walking the document again. Filled by counts rather than after first paint, so a
+ * document the reader never uses Find on holds no entry per text node. Plain maps rather than weak
+ * ones, dropped once the view's content is replaced: a weak map's entries are ephemerons, which
+ * every full garbage collection has to go through again, and ticket 05's traces found such a
+ * collection in Find's count of a one-letter search.
+ */
+let textBefore = new Map<Text, number>();
+let blockLengths = new Map<Element, number>();
+/** The view's first node when the maps were started, which another render replaces. */
+let cachedFirst: Node | null = null;
+
+/** Drops the maps of another render than the one `view` holds now. */
+function cacheFor(view: HTMLElement): void {
+  if (view.firstChild === cachedFirst) return;
+  cachedFirst = view.firstChild;
+  textBefore = new Map();
+  blockLengths = new Map();
+}
+
+/**
+ * The length of `block`'s text, from one walk that counts each text node's length and notes how
+ * much comes before each, the first time. No string is built, as the block's `textContent` would.
+ */
+function blockLength(block: Element): number {
+  let length = blockLengths.get(block);
+  if (length === undefined) {
+    const text = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+    length = 0;
+    for (let node = text.nextNode(); node; node = text.nextNode()) {
+      textBefore.set(node as Text, length);
+      length += (node as Text).length;
+    }
+    blockLengths.set(block, length);
+  }
+  return length;
+}
+
+/**
  * Where each of `matches` starts in its top-level block of `view`, or undefined for one outside
- * the view's blocks. The matches come in document order, so the matches of one block come
- * together, and one walk through the block's text places them all.
+ * the view's blocks.
  */
 function placeMatches(
   view: HTMLElement,
   matches: readonly FindMatch[],
 ): (MatchPlace | undefined)[] {
-  const blocks = matches.map(({ startContainer }) => {
-    const holder = startContainer.parentElement;
-    return holder ? topLevelBlock(view, holder) : undefined;
-  });
-  const places = new Array<MatchPlace | undefined>(matches.length).fill(
-    undefined,
-  );
-  let first = 0;
-  while (first < matches.length) {
-    const block = blocks[first];
-    let end = first + 1;
-    while (end < matches.length && blocks[end] === block) end++;
-    if (block) placeInBlock(block, matches, first, end, places);
-    first = end;
-  }
-  return places;
-}
-
-/**
- * Places the matches from `first` to before `end`, which all start in `block`, in `places`, from
- * one walk through the block's text that counts each text node's length. No string is built, as
- * the block's `textContent` would build one for every block with a match on every count.
- */
-function placeInBlock(
-  block: Element,
-  matches: readonly FindMatch[],
-  first: number,
-  end: number,
-  places: (MatchPlace | undefined)[],
-): void {
-  const text = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
-  const placed: MatchPlace[] = [];
-  let next = first;
-  /** How much of the block's text comes before the node the walk is at, and then in all. */
-  let before = 0;
-  for (let node = text.nextNode(); node; node = text.nextNode()) {
-    let match = matches[next];
-    while (next < end && match?.startContainer === node) {
-      const place = { block, share: before + match.startOffset };
-      places[next] = place;
-      placed.push(place);
-      match = matches[++next];
+  // Matches often come several to a text node, which then has one block.
+  let lastNode: Text | undefined;
+  let lastBlock: Element | undefined;
+  return matches.map(({ startContainer, startOffset }) => {
+    if (startContainer !== lastNode) {
+      lastNode = startContainer;
+      const holder = startContainer.parentElement;
+      lastBlock = holder ? topLevelBlock(view, holder) : undefined;
     }
-    before += (node as Text).length;
-  }
-  const length = Math.max(1, before);
-  for (const place of placed) place.share /= length;
+    const block = lastBlock;
+    if (!block) return undefined;
+    let length = blockLength(block);
+    let before = textBefore.get(startContainer);
+    if (before === undefined) {
+      // A text node the block didn't have when it was walked: the walk is out of date.
+      blockLengths.delete(block);
+      length = blockLength(block);
+      before = textBefore.get(startContainer) ?? 0;
+    }
+    return { block, share: (before + startOffset) / Math.max(1, length) };
+  });
 }
