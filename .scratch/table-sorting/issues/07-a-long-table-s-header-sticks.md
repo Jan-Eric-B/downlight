@@ -1,8 +1,8 @@
-# 03: A long table's header sticks to the top
+# 07: A long table's header sticks to the top
 
 **What to build:** While the reader scrolls through a long table, its header row stays at the top of the view, so the columns stay named.
 
-Spec: none yet. Grill it first (`/grill-with-docs`). From ticket 01's grilling, which put it on Later.
+Spec: none yet. Grill it first (`/grill-with-docs`). From the Sort grilling (2026-11-19, recorded in the [spec](../spec.md)), which put it on Later.
 
 **Blocked by:** None (can start immediately)
 
@@ -16,4 +16,4 @@ Spec: none yet. Grill it first (`/grill-with-docs`). From ticket 01's grilling, 
 
 ## Comments
 
-**2026-11-20.** From ticket 01's grilling (2026-11-19): "a header that sticks to the top of a long table go[es] on Later."
+**2026-11-20.** From the Sort grilling (2026-11-19): "a header that sticks to the top of a long table go[es] on Later."
