@@ -630,11 +630,20 @@ export function spyOnScrollsToTop(): () => number {
     ).length;
 }
 
-/** The ids of the elements the page scrolled to the top of the view, in turn. */
-export function spyOnHeadingScrolls(): () => string[] {
+/**
+ * The ids of the elements the page scrolled to the top of the view, in turn. `laidOut`, each scroll
+ * also lays the page out as the webview's does, with the element's first line at the top of the
+ * view and `rawHtml` as `layOut` takes it, so the reading position follows the scroll.
+ */
+export function spyOnHeadingScrolls(as?: {
+  laidOut: true;
+  rawHtml?: Record<string, [number, number]>;
+}): () => string[] {
   const scrolls = vi
     .spyOn(Element.prototype, "scrollIntoView")
-    .mockImplementation(() => {});
+    .mockImplementation(function (this: Element) {
+      if (as?.laidOut) layOut(linesOf(this)?.[0] ?? 1, as.rawHtml);
+    });
   return () => scrolls.mock.contexts.map((element) => (element as Element).id);
 }
 

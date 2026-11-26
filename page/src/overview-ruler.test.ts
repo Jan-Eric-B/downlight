@@ -1,150 +1,67 @@
-import { clearMocks, mockWindows } from "@tauri-apps/api/mocks";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import headings from "../../core/tests/fixtures/headings.html?raw";
-import { startCommands } from "./commands";
-import { startFind } from "./find";
-import { startHeadings } from "./headings";
-import { startOverviewRuler } from "./overview-ruler";
-import { afterNextFrame } from "./reading-position";
-import { DEFAULT_SETTINGS, type PageSettings, type WaitNote } from "./app";
-import { startSettings } from "./settings";
+import { DEFAULT_SETTINGS, type PageSettings } from "./app";
+import {
+  clickStrip,
+  closeRulerWindow,
+  currentMarkTop,
+  documentView,
+  drawn,
+  findBar,
+  findMarks,
+  findStatus,
+  LONG,
+  marks,
+  onStrip,
+  openRulerWindow,
+  press,
+  readInTurn,
+  readSentLater,
+  reopenRulerAt,
+  resize,
+  settingsUrl,
+  showInTurn,
+  spyOnScrolls,
+  startShowing,
+  strip,
+  typeInFind,
+} from "./overview-ruler-test-support";
 import {
   deleteTheFile,
-  fakeTheAppReading,
-  fakeTitleBarLayout,
-  forgetForwardAsTheApp,
   giveAnotherDocument,
   goneBar,
   layOut,
-  linesOf,
   messageSample,
   nextShown,
-  openPageAt,
   pageUrlSample,
   saveTheFile,
   shownWaitNote,
-  stepAsTheApp,
-  stopDocumentSample,
+  spyOnHeadingScrolls,
   tell,
-  TITLE_BAR_HEIGHT,
   tellAsSampled,
-  waitNoteAsTheApp,
-  type Read,
 } from "./test-support";
 import {
   canStepThroughHistory,
   DOCUMENT_VIEW_SELECTOR,
   SCROLLER_SELECTOR,
-  startDocumentView,
   stepThroughHistory,
 } from "./view";
 import { WAIT_NOTE_MS } from "./wait-note";
 
 // The overview ruler's strip beside the scroll bar, with a mark for each of the shown document's
-// h1 to h4 headings (overview ruler ticket 01). The layout fake makes each line of the file 20 px
-// high, and the scroller 736 px high (happy-dom's 768 px window, less the title bar).
+// h1 to h4 headings (overview ruler ticket 01), and Find's marks (ticket 03). The layout fake makes
+// each line of the file 20 px high, and the scroller 736 px high (happy-dom's 768 px window, less
+// the title bar).
 
-/** What reading the window's document gives `render_document`, in turn; the last one repeats. */
-let documents: Read[] = [];
+beforeEach(openRulerWindow);
 
-let stop: AbortController;
-
-/** What the fake app's wait note names. */
-const BIG_DOCUMENT: WaitNote = {
-  file: { name: "big.md", path: "C:\\docs\\big.md" },
-  size: "100 MB",
-};
-
-/**
- * Lays the page out anew, as the webview does when sizes change: all of them, or those of the
- * elements given.
- */
-let resize: (...changed: Element[]) => void;
-
-beforeEach(async () => {
-  mockWindows("document-0");
-  documents = [];
-  resize = fakeTitleBarLayout();
-  fakeTheAppReading(() => documents, {
-    wait_note: (args) => waitNoteAsTheApp(args, BIG_DOCUMENT),
-    stop_document: () => stopDocumentSample("stopped"),
-    step_history: stepAsTheApp,
-    forget_forward: forgetForwardAsTheApp,
-  });
-  await startRulerAt(settingsUrl(DEFAULT_SETTINGS));
-});
-
-afterEach(() => {
-  stop.abort();
-  vi.useRealTimers();
-  vi.unstubAllGlobals();
-  vi.restoreAllMocks();
-  clearMocks();
-  openPageAt("");
-  document.body.replaceChildren();
-});
-
-/** The page's URL with `settings` in it, as the app opens a window. */
-function settingsUrl(settings: PageSettings): string {
-  return `?settings=${encodeURIComponent(JSON.stringify(settings))}`;
-}
-
-/**
- * Starts the settings, the commands, Find, the list of headings and the ruler as a new window
- * opened at `url` does, in the page's order.
- */
-async function startRulerAt(url: string): Promise<void> {
-  openPageAt(url);
-  await startSettings();
-  stop = new AbortController();
-  startCommands(stop.signal);
-  startFind(stop.signal);
-  startHeadings(stop.signal);
-  startOverviewRuler(stop.signal);
-}
-
-/** The documents the window is given, in turn, each read as its HTML. */
-function showInTurn(...html: string[]): void {
-  documents = html.map((each) => () => Promise.resolve(each));
-}
+afterEach(closeRulerWindow);
 
 /** The raw HTML of `headings.md` laid out on its file's lines, which the core gives no numbers. */
 const HEADINGS_RAW_HTML: Record<string, [number, number]> = {
   details: [39, 46],
   "h2:not([id])": [48, 48],
 };
-
-/** A read that gives the HTML the test sends through the function it hands `send`. */
-function readSentLater(send: (deliver: (html: string) => void) => void): Read {
-  return () =>
-    new Promise((resolve) => {
-      send(resolve);
-    });
-}
-
-/**
- * A document of 100 lines, 2,000 px, which the 736 px strip shows at 736/2000: its h1 on line 1
- * is in row 0 and its h2 on line 51 in row 368.
- */
-const LONG = [
-  '<h1 id="long" data-sourcepos="1:1-1:5">Long</h1>',
-  '<h2 id="half-way" data-sourcepos="51:1-51:9">Half way</h2>',
-  '<p data-sourcepos="100:1-100:4">End</p>',
-].join("\n");
-
-/** Starts the view and resolves once its first document is in place and the ruler drew it. */
-async function startShowing(): Promise<void> {
-  const shown = nextShown();
-  await startDocumentView(0, stop.signal);
-  await shown;
-  await drawn();
-}
-
-/** Resolves once a redraw the ruler has asked for has been made: after the next frame. */
-async function drawn(): Promise<void> {
-  await afterNextFrame();
-  await afterNextFrame();
-}
 
 /**
  * Lays the page out anew (`resize`) as soon as the view's content is next replaced, before the
@@ -158,25 +75,6 @@ function resizeOnceReplaced(): void {
     resize();
   });
   replaced.observe(view, { childList: true });
-}
-
-function strip(): HTMLElement {
-  const found = document.querySelector<HTMLElement>(".overview-ruler");
-  if (!found) throw new Error("The page has no overview ruler.");
-  return found;
-}
-
-/** What a mark stands for: the heading level it is drawn for. */
-type MarkKind = "h1" | "h2" | "h3" | "h4";
-
-/** The strip's marks, top to bottom, each as its kind and its top in the strip, in px. */
-function marks(): { kind: MarkKind; top: number }[] {
-  return [...strip().querySelectorAll<HTMLElement>(".heading-mark")].map(
-    (mark) => ({
-      kind: `h${mark.dataset.level ?? ""}` as MarkKind,
-      top: Number.parseFloat(mark.style.top),
-    }),
-  );
 }
 
 test("each h1 to h4 heading with an id has a mark at its top-level block's top, scaled to the strip, and h5, h6 and raw headings none", async () => {
@@ -262,7 +160,7 @@ test("the strip is hidden while a wait note shows for another document, and show
   expect(strip().hidden).toBe(false);
 
   let deliver: (html: string) => void = () => {};
-  documents = [readSentLater((send) => (deliver = send))];
+  readInTurn(readSentLater((send) => (deliver = send)));
   await giveAnotherDocument();
   await vi.advanceTimersByTimeAsync(WAIT_NOTE_MS);
   await vi.waitFor(() => {
@@ -288,7 +186,7 @@ test("stopping a document on its way brings back the ruler of the one in view", 
   showInTurn(LONG);
   await startShowing();
 
-  documents = [readSentLater(() => undefined)];
+  readInTurn(readSentLater(() => undefined));
   await giveAnotherDocument();
   await vi.advanceTimersByTimeAsync(WAIT_NOTE_MS);
   await vi.waitFor(() => {
@@ -310,10 +208,10 @@ test("during a reload the old marks stay until the new render replaces the docum
   // Scrolled to the h2, so the reload lands back at it, which takes a frame.
   layOut(51);
   let deliver: (html: string) => void = () => {};
-  documents = [
+  readInTurn(
     () => Promise.resolve(LONG),
     readSentLater((send) => (deliver = send)),
-  ];
+  );
   await startShowing();
 
   await saveTheFile();
@@ -438,8 +336,7 @@ test("switching the ruler off in the settings hides the strip, and switching it 
 });
 
 test("a window opened with the ruler switched off shows no strip until it is switched on", async () => {
-  stop.abort();
-  await startRulerAt(settingsUrl(RULER_OFF));
+  await reopenRulerAt(settingsUrl(RULER_OFF));
   layOut(1);
   showInTurn(LONG);
   await startShowing();
@@ -461,12 +358,7 @@ test("switching the ruler leaves the view where it was", async () => {
   await startShowing();
   const scroller = document.querySelector<HTMLElement>(SCROLLER_SELECTOR);
   const before = scroller?.scrollTop;
-  // A scroll the webview makes puts the element's first line at the top of the view.
-  const scrolled = vi
-    .spyOn(Element.prototype, "scrollIntoView")
-    .mockImplementation(function (this: Element) {
-      layOut(linesOf(this)?.[0] ?? 1);
-    });
+  const scrolledTo = spyOnHeadingScrolls({ laidOut: true });
 
   await tell("settings", RULER_OFF);
   await drawn();
@@ -476,7 +368,7 @@ test("switching the ruler leaves the view where it was", async () => {
   expect(strip().hidden).toBe(false);
 
   expect(scroller?.scrollTop).toBe(before);
-  expect(scrolled).not.toHaveBeenCalled();
+  expect(scrolledTo()).toEqual([]);
 });
 
 test("a settings change that leaves the ruler as it is doesn't move the view", async () => {
@@ -509,8 +401,7 @@ test("the app's settings message switches the ruler off", async () => {
 });
 
 test("a window opened at the app's URL starts with the ruler of its settings", async () => {
-  stop.abort();
-  await startRulerAt(pageUrlSample("allOff"));
+  await reopenRulerAt(pageUrlSample("allOff"));
   layOut(1);
   showInTurn(LONG);
   await startShowing();
@@ -532,95 +423,7 @@ const LAMPS = [
   '<p data-sourcepos="100:1-100:4">End</p>',
 ].join("\n");
 
-function findBar(): HTMLElement {
-  const found = document.querySelector<HTMLElement>(".find-bar");
-  if (!found) throw new Error("The page has no find bar.");
-  return found;
-}
-
-function findBox(): HTMLInputElement {
-  const found = findBar().querySelector("input");
-  if (!found) throw new Error("The find bar has no box.");
-  return found;
-}
-
-/** The find bar's count, such as "3 of 4". */
-function findStatus(): string | null | undefined {
-  return findBar().querySelector('[role="status"]')?.textContent;
-}
-
-/** Presses a key where the focus is, as the reader would. */
-function press(init: KeyboardEventInit): void {
-  (document.activeElement ?? document.body).dispatchEvent(
-    new KeyboardEvent("keydown", { ...init, bubbles: true, cancelable: true }),
-  );
-}
-
-/** Opens the find bar with Ctrl+F, unless it is open, and types `text` into its box. */
-function typeInFind(text: string): void {
-  if (findBar().hidden) press({ ctrlKey: true, key: "f", code: "KeyF" });
-  findBox().value = text;
-  findBox().dispatchEvent(new Event("input", { bubbles: true }));
-}
-
 const ENTER = { key: "Enter", code: "Enter" };
-
-/** What a mark of Find stands for: a match, or the current match. */
-type FindMarkKind = "match" | "current";
-
-/** The strip's marks of Find, top to bottom, the current match's last, each as its top in px. */
-function findMarks(): { kind: FindMarkKind; top: number }[] {
-  return [
-    ...strip().querySelectorAll<HTMLElement>(
-      ".match-mark, .current-match-mark",
-    ),
-  ].map((mark) => ({
-    kind: mark.classList.contains("current-match-mark") ? "current" : "match",
-    top: Number.parseFloat(mark.style.top),
-  }));
-}
-
-/** The top of the current match's mark, in px, or undefined while it has none. */
-function currentMarkTop(): number | undefined {
-  return findMarks().find(({ kind }) => kind === "current")?.top;
-}
-
-function documentView(): Element {
-  const view = document.querySelector(DOCUMENT_VIEW_SELECTOR);
-  if (!view) throw new Error("The page has no document view.");
-  return view;
-}
-
-/** Where a press or click on the strip `row` px below its top lands, in its left or right half. */
-function onStrip(half: "left" | "right", row: number): MouseEventInit {
-  return {
-    bubbles: true,
-    cancelable: true,
-    button: 0,
-    clientX: half === "right" ? 797 : 789,
-    clientY: TITLE_BAR_HEIGHT + row,
-  };
-}
-
-/**
- * Clicks the strip `row` px below its top, in its left half (the heading marks' lane) or its right
- * half (Find's), as the reader does. The layout fake's scroller runs from below the title bar to
- * x = 800, with no scroll bar, so the strip covers x = 786 to 800. The strip takes no pointer, so
- * that the wheel over it scrolls the document, and what is under it, the document view unless the
- * test names another element, gets the press and the click. Returns the press.
- */
-function clickStrip(
-  half: "left" | "right",
-  row: number,
-  under: Element = documentView(),
-): MouseEvent {
-  const at = onStrip(half, row);
-  const pressed = new MouseEvent("mousedown", at);
-  under.dispatchEvent(pressed);
-  under.dispatchEvent(new MouseEvent("mouseup", at));
-  under.dispatchEvent(new MouseEvent("click", at));
-  return pressed;
-}
 
 test("Find's matches get marks as the reader types, and the current match one of its own", async () => {
   layOut(1);
@@ -695,11 +498,11 @@ test("a text with no match leaves Find no marks", async () => {
 
 test("a reload's recount moves Find's marks to where its matches are now", async () => {
   layOut(1);
-  documents = [
+  readInTurn(
     () => Promise.resolve(LAMPS),
     // The paragraph on line 51 moved to line 26: 500 px down the 2,000, row 184.
     () => Promise.resolve(LAMPS.replace("51:1-51:4", "26:1-26:4")),
-  ];
+  );
   await startShowing();
   typeInFind("lamp");
   await drawn();
@@ -723,9 +526,7 @@ test("a click near a match mark makes the nearest match current and scrolls to i
   await startShowing();
   typeInFind("lamp");
   await drawn();
-  const scrolled = vi
-    .spyOn(Element.prototype, "scrollIntoView")
-    .mockImplementation(() => {});
+  const scrolled = spyOnScrolls();
 
   // Row 112 is 1.6 px below the match 110.4 px down the strip, and 38.4 px below the one above it.
   const pressed = clickStrip("right", 112);
@@ -749,9 +550,7 @@ test("a click on the strip near no mark does nothing", async () => {
   await startShowing();
   typeInFind("lamp");
   await drawn();
-  const scrolled = vi
-    .spyOn(Element.prototype, "scrollIntoView")
-    .mockImplementation(() => {});
+  const scrolled = spyOnScrolls();
 
   const pressed = clickStrip("right", 250);
   expect(pressed.defaultPrevented).toBe(false);
@@ -761,24 +560,21 @@ test("a click on the strip near no mark does nothing", async () => {
   expect(currentMarkTop()).toBe(0);
 });
 
-test("a click on the strip while Find is closed does nothing", async () => {
+test("a click where a match of Find had its mark does nothing once Find is closed", async () => {
   layOut(1);
   showInTurn(LAMPS);
   await startShowing();
-  const scrolled = vi
-    .spyOn(Element.prototype, "scrollIntoView")
-    .mockImplementation(() => {});
+  typeInFind("lamp");
+  await drawn();
+  press({ key: "Escape", code: "Escape" });
+  await drawn();
+  const scrolled = spyOnScrolls();
 
-  expect(clickStrip("right", 0).defaultPrevented).toBe(false);
+  // Row 110 had the mark of the paragraph's second "lamp" while Find looked for it, and has no
+  // heading's.
+  expect(clickStrip("right", 110).defaultPrevented).toBe(false);
   expect(scrolled).not.toHaveBeenCalled();
 });
-
-/** Stands in for the webview's scroll to a match, and returns the spy that records it. */
-function spyOnScrolls() {
-  return vi
-    .spyOn(Element.prototype, "scrollIntoView")
-    .mockImplementation(() => {});
-}
 
 test("a selection dragged from the text and let go beside a match mark leaves the current match and the view as they were", async () => {
   layOut(1);
@@ -802,19 +598,6 @@ test("a selection dragged from the text and let go beside a match mark leaves th
   expect(scrolled).not.toHaveBeenCalled();
   await drawn();
   expect(currentMarkTop()).toBe(0);
-});
-
-test("a click in the strip's left half beside a match mark does nothing", async () => {
-  layOut(1);
-  showInTurn(LAMPS);
-  await startShowing();
-  typeInFind("lamp");
-  await drawn();
-  const scrolled = spyOnScrolls();
-
-  expect(clickStrip("left", 112).defaultPrevented).toBe(false);
-  expect(findStatus()).toBe("1 of 4");
-  expect(scrolled).not.toHaveBeenCalled();
 });
 
 test("a right-click on a match mark does nothing", async () => {

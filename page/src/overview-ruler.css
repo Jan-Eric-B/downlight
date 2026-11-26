@@ -2,9 +2,10 @@
    scroller's scroll bar, which the script sets it off by and sizes to the scroller's view, below
    the room kept for the title bar. The same width at any zoom, as only the document view zooms. No
    background of its own, so the backdrop shows through it. It takes no pointer, so the wheel over
-   it still scrolls the document (ticket 01's decision, kept by ticket 03). A click on a mark
-   reaches the scroller's content under it, which the script hears and places by the scroller's
-   box (ticket 03).
+   it still scrolls the document (ticket 01's decision, kept by tickets 03 and 04). A click on a
+   mark, and the pointer over one, reach the scroller's content under it, which the script hears
+   and places by the strip's place as drawn (tickets 03 and 04); the hand over a mark is the
+   scroller's, which the script sets.
 
    It lies in the scroller, after the document, so it is over the document's blocks, also those
    positioned for their copy buttons, and under the "File deleted or moved" bar and the wait note
@@ -36,7 +37,8 @@
 }
 
 /* A heading's mark, from the strip's left edge, shorter for each level below h1, in the muted text
-   color, so the document's structure doesn't compete with the accent color's marks. */
+   color, so the document's structure doesn't compete with the accent color's marks. Its height is
+   HEADING_MARK_HEIGHT in the script too, which finds the mark nearest the pointer by its middle. */
 .heading-mark {
   position: absolute;
   left: 0;
@@ -95,4 +97,20 @@
   .current-match-mark {
     forced-color-adjust: none;
   }
+}
+
+/* The hover label (overview ruler ticket 04): the headings of the mark under the pointer, left of
+   the strip, in the link target label's look, which it shares with .corner-bubble's rule in
+   document.css. It is in the strip, so it takes no pointer, as the strip doesn't, and goes with it;
+   the script sets its top, or its bottom in the strip's lower half, so it stays in the window. */
+.overview-ruler-label {
+  position: absolute;
+  right: calc(100% + 4px);
+  border-radius: 6px;
+}
+
+.overview-ruler-label > div {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }

@@ -358,22 +358,27 @@ article.markdown-body {
 
 /* A small bubble in a bottom corner of the window (corner-bubble.ts), on a solid background, since
    the document scrolls under it, and not zoomed with it. It never takes the pointer, so moving
-   onto it leaves nothing under it, such as a link. Its own class below puts it in its corner. */
-.corner-bubble {
-  position: fixed;
-  bottom: 0;
+   onto it leaves nothing under it, such as a link. Its own class below puts it in its corner.
+   The overview ruler's hover label (overview-ruler.css) has the same look, from this one rule. */
+.corner-bubble,
+.overview-ruler-label {
   max-width: min(640px, 60vw);
   margin: 0;
   padding: 2px 8px;
   overflow: hidden;
   border: 1px solid var(--borderColor-default);
-  border-bottom: none;
   background-color: var(--bgColor-default);
   color: var(--fgColor-muted);
   font-size: 12px;
   white-space: nowrap;
   text-overflow: ellipsis;
   pointer-events: none;
+}
+
+.corner-bubble {
+  position: fixed;
+  bottom: 0;
+  border-bottom: none;
 }
 
 .corner-bubble[hidden] {
