@@ -35,6 +35,7 @@ The rules for Downlight's code that no tool checks. Formatting, lints and strict
 
 - Tests sit at the seams the spec names: the core's public interface and the app's watching (`cargo test`), and the page's document view and Find (Vitest with happy-dom). They drive the public interface, check what a caller can observe, and use the real comrak, ammonia and webview.
 - A test's name states the behavior it checks, such as `reload_with_same_task_count_keeps_ticks`.
+- Tests come first, from the ticket and the spec: decide what to check, write the tests and see them fail, then write the logic. A test written from the code mirrors its logic and passes whatever it does.
 
 ## Dependencies
 
