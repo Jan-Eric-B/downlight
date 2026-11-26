@@ -1,0 +1,68 @@
+/* The overview ruler (overview-ruler.ts, overview ruler ticket 01): a strip just left of the
+   scroller's scroll bar, which the script sets it off by and sizes to the scroller's view, below
+   the room kept for the title bar. The same width at any zoom, as only the document view zooms. No
+   background of its own, so the backdrop shows through it. It takes no pointer, so the wheel over
+   it still scrolls the document (clicks on its marks come in ticket 04).
+
+   It lies in the scroller, after the document, so it is over the document's blocks, also those
+   positioned for their copy buttons, and under the "File deleted or moved" bar and the wait note
+   (z-index 1 in the scroller). The scroller makes the stacking context it lies in, so every bubble,
+   bar and notice the page lays over the scroller (document.css) is over it too.
+
+   The text never runs under it: in a wide window it lies in the margin, and otherwise over the
+   document's right padding, 32px zoomed with the document, which is 16px at the smallest zoom
+   (50%, SMALLEST in app/src/zoom.rs) and so always wider than the strip. A smaller zoom, or a
+   narrower padding, would have the scroller give up the difference as right padding. */
+:root {
+  --overview-ruler-width: 14px;
+}
+
+.overview-ruler {
+  position: fixed;
+  top: var(--title-bar-room);
+  right: 0;
+  z-index: 0;
+  width: var(--overview-ruler-width);
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  pointer-events: none;
+}
+
+.overview-ruler[hidden] {
+  display: none;
+}
+
+/* A heading's mark, from the strip's left edge, shorter for each level below h1, in the muted text
+   color, so the document's structure doesn't compete with the accent color's marks. */
+.heading-mark {
+  position: absolute;
+  left: 0;
+  height: 2px;
+  background-color: var(--fgColor-muted);
+}
+
+.heading-mark[data-level="1"] {
+  width: var(--overview-ruler-width);
+}
+
+.heading-mark[data-level="2"] {
+  width: 11px;
+}
+
+.heading-mark[data-level="3"] {
+  width: 8px;
+}
+
+.heading-mark[data-level="4"] {
+  width: 5px;
+}
+
+/* High contrast: the marks in the reader's text color, which forced colors would otherwise replace
+   with the background color they are drawn with. */
+@media (forced-colors: active) {
+  .heading-mark {
+    forced-color-adjust: none;
+    background-color: CanvasText;
+  }
+}

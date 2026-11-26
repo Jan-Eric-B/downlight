@@ -45,7 +45,11 @@ import type {
 } from "./app";
 import { startSettings } from "./settings";
 import { lineRangeOf, type LineRange } from "./sourcepos";
-import { SCROLLER_SELECTOR, whenDocumentShown } from "./view";
+import {
+  DOCUMENT_VIEW_SELECTOR,
+  SCROLLER_SELECTOR,
+  whenDocumentShown,
+} from "./view";
 import { ZOOM_VARIABLE } from "./zoom";
 
 /**
@@ -649,23 +653,36 @@ export function linesOf(element: Element): LineRange | undefined {
 /**
  * Stands in for happy-dom's `ResizeObserver`, which never reports, until the test's globals are
  * unstubbed. Returns a function that lays the title bar out, as the webview does when the window's
- * size, its DPI or the zoom changes: every observer reports.
+ * size, its DPI or the zoom changes: every observer reports. Given elements whose size changed, as
+ * the "File deleted or moved" bar's does when it shows, only the observers of any of them report.
  */
-export function fakeTitleBarLayout(): () => void {
-  const observers: ResizeObserverCallback[] = [];
+export function fakeTitleBarLayout(): (...changed: Element[]) => void {
+  const observers: {
+    report: ResizeObserverCallback;
+    observed: Set<Element>;
+  }[] = [];
   vi.stubGlobal(
     "ResizeObserver",
     class {
+      readonly observed = new Set<Element>();
       constructor(report: ResizeObserverCallback) {
-        observers.push(report);
+        observers.push({ report, observed: this.observed });
       }
-      observe(): void {}
-      unobserve(): void {}
-      disconnect(): void {}
+      observe(target: Element): void {
+        this.observed.add(target);
+      }
+      unobserve(target: Element): void {
+        this.observed.delete(target);
+      }
+      disconnect(): void {
+        this.observed.clear();
+      }
     },
   );
-  return () => {
-    for (const report of observers) report([], {} as ResizeObserver);
+  return (...changed) => {
+    for (const { report, observed } of observers)
+      if (changed.length === 0 || changed.some((each) => observed.has(each)))
+        report([], {} as ResizeObserver);
   };
 }
 
@@ -870,10 +887,17 @@ export const TITLE_BAR_HEIGHT = 32;
  *
  * The document's raw HTML has no line numbers, so it is laid out on the lines `rawHtml` gives
  * the first element that matches each selector, as the file has it.
+ *
+ * The scroller is scrolled to match, and its content is as high as the document's lines, from the
+ * first line to the end of the document view's last block, so the overview ruler can scale by its
+ * scroll height and client height; no padding comes before the first line or after the last.
+ * `contentTop` px of the scroller's content come before the document view, as the "File deleted
+ * or moved" bar's height does while it shows.
  */
 export function layOut(
   topLine: number,
   rawHtml: Record<string, [number, number]> = {},
+  contentTop = 0,
 ): void {
   const scroller = new DOMRect(
     0,
@@ -881,6 +905,7 @@ export function layOut(
     800,
     innerHeight - TITLE_BAR_HEIGHT,
   );
+  const scrollTop = (topLine - 1) * 20;
   const rawLines = (element: Element) =>
     Object.entries(rawHtml).find(
       ([selector]) => document.querySelector(selector) === element,
@@ -889,7 +914,7 @@ export function layOut(
     if (element?.matches(SCROLLER_SELECTOR)) return scroller;
     const [start, end] = (element &&
       (rawLines(element) ?? linesOf(element))) ?? [topLine, topLine - 1];
-    const top = TITLE_BAR_HEIGHT + (start - topLine) * 20;
+    const top = TITLE_BAR_HEIGHT + contentTop + (start - topLine) * 20;
     return new DOMRect(0, top, 800, (end - start + 1) * 20);
   };
   vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(
@@ -901,5 +926,27 @@ export function layOut(
     function (this: Range) {
       return rectOf(this.startContainer.parentElement);
     },
+  );
+  /** How high the scroller's content is: to the end of the view's last block, or the view's. */
+  const contentHeight = () => {
+    const last = document.querySelector(
+      DOCUMENT_VIEW_SELECTOR,
+    )?.lastElementChild;
+    const end = last ? rectOf(last).bottom - scroller.top + scrollTop : 0;
+    return Math.max(end, scroller.height);
+  };
+  // Read only for the scroller; every other element keeps happy-dom's zero.
+  const ofScroller = (value: () => number) =>
+    function (this: Element): number {
+      return this.matches(SCROLLER_SELECTOR) ? value() : 0;
+    };
+  vi.spyOn(Element.prototype, "scrollTop", "get").mockImplementation(
+    ofScroller(() => scrollTop),
+  );
+  vi.spyOn(Element.prototype, "scrollHeight", "get").mockImplementation(
+    ofScroller(contentHeight),
+  );
+  vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(
+    ofScroller(() => scroller.height),
   );
 }

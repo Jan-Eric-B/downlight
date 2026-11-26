@@ -68,10 +68,31 @@ function createStopButton(onStop: () => void): HTMLButtonElement {
   return button;
 }
 
+type WaitNoteListener = (shows: boolean) => void;
+
+const listeners = new Set<WaitNoteListener>();
+
+/**
+ * Runs `listener` each time the wait note shows or hides, with whether it shows: while it does,
+ * the window waits for a document it doesn't show yet (ticket 31), and the overview ruler hides
+ * rather than mark the one it is leaving. Returns a function that removes the listener.
+ */
+export function whenWaitNoteChanges(listener: WaitNoteListener): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+function tellListeners(shows: boolean): void {
+  for (const listener of listeners) listener(shows);
+}
+
 /**
  * The wait note, whose Stop (an "x" at its right end) calls `onStop` (ticket 38). It says how
  * many whole seconds the document has been on its way, counted from the request, from the first
- * on, and a later request for the same file, as after a save, goes on counting.
+ * on, and a later request for the same file, as after a save, goes on counting. The
+ * `whenWaitNoteChanges` listeners hear each time it shows or hides.
  */
 export function createWaitNote(onStop: () => void): WaitNote {
   const element = document.createElement("div");
@@ -128,9 +149,11 @@ export function createWaitNote(onStop: () => void): WaitNote {
     layingOut = false;
     fill(text, note, seconds);
     element.append(stop);
+    const wasHidden = element.hidden;
     element.hidden = false;
     count();
     firstShown();
+    if (wasHidden) tellListeners(true);
   };
 
   return {
@@ -162,7 +185,9 @@ export function createWaitNote(onStop: () => void): WaitNote {
       named = null;
       layingOut = false;
       stopCounting();
+      const wasShown = !element.hidden;
       element.hidden = true;
+      if (wasShown) tellListeners(false);
     },
   };
 }

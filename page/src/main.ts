@@ -1,6 +1,7 @@
 import "github-markdown-css/github-markdown.css";
 import "./accent.css";
 import "./document.css";
+import "./overview-ruler.css";
 import "./title-bar.css";
 import "./settings-flyout.css";
 import { startAccent } from "./accent";
@@ -11,9 +12,11 @@ import { startSelectionCounts } from "./counts";
 import { startTaggingDrags } from "./drags";
 import { startFind } from "./find";
 import { startFullScreen } from "./full-screen";
+import { startHeadings } from "./headings";
 import { startKeepOnTop } from "./keep-on-top";
 import { startLayout } from "./layout";
 import { startLinks } from "./links";
+import { startOverviewRuler } from "./overview-ruler";
 import { startSettings } from "./settings";
 import { startSettingsFlyout } from "./settings-flyout";
 import { epochMs, watchLongTasks } from "./timing";
@@ -39,6 +42,10 @@ startTaggingDrags();
 startLinks();
 startSelectionCounts();
 startFind();
+// Before the page parts that read the list of headings: the overview ruler, and later the Outline.
+startHeadings();
+// After Find, whose matches it is to mark too (overview ruler ticket 03).
+startOverviewRuler();
 // Before the document view starts, so the first paint is at the zoom level and width already.
 startLayout();
 // The document view asks for its document only once the page hears the settings: the app holds a

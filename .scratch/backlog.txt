@@ -5,14 +5,12 @@ ID = folder/number under .scratch/<folder>/issues/<number>-*.md (v1 = downlight-
 Status: ready = ready-for-agent, triage = needs-triage (grill first), info = needs-info (investigate).
 Move lines to change the order. A new ticket gets a line here; a closed ticket's line is removed.
 
-wd/10 | Counts (lines and words in the file name tooltip, selection bubble bottom right) | ready | not blocked; its bubble owns the bottom right corner
 outline/01 | Alt+Down and Alt+Up step through the headings | ready | blocked by ruler/01 (the list of headings); adds the view's scroll to a heading without a History step; adds the headings fixture unless ruler/01 did
 outline/02 | The Outline lists the headings and goes to one | ready | blocked by ruler/01; title bar button (first, own group), Ctrl+Shift+O, menu entry after Find; closes and is closed by the settings flyout
 outline/03 | Typing filters the Outline | ready | blocked by outline/02
 outline/04 | The Outline across reloads, other documents and the empty window | ready | blocked by outline/03
 outline/05 | The Outline in full screen, and its place in Esc's order | ready | blocked by outline/02; joins image-lightbox/01's one Esc list if that is done, else defers as the settings flyout does (whichever lands second adapts)
 outline/06 | Outline: large documents, measured | ready | blocked by outline/01, 03 and 04; does not wait for v1/39
-ruler/01 | Overview ruler: heading marks beside the scroll bar | ready | not blocked; builds the list of headings (h1 to h4) that outline/01 to 06 reuse
 ruler/02 | Overview ruler: the switch in the settings (flyout "View" group) | ready | blocked by ruler/01; creates the flyout's "View" group that reader-settings and remote-images may use
 ruler/03 | Overview ruler: Find's marks, and clicking them | ready | blocked by ruler/01; extends Find's interface (find-options and tables/01 must keep it working)
 ruler/04 | Overview ruler: clicking and hovering heading marks | ready | blocked by ruler/01
@@ -57,3 +55,4 @@ wd/15 | The backdrops against Windows' own | info | blocked by wd/16
 right-to-left/01 | Right-to-left text (dir="auto" on blocks, as GitHub) | triage, small | not blocked; changes every rendered fixture, so avoid running it beside another rendering change (mermaid-and-math, other-formats); as it rewrites the fixtures anyway, a good time for the core to write a code block's code lines on its pre (see mermaid-and-math/01)
 tables/02 | Filter a table's rows | triage | blocked by tables/01; may become a Find option instead (find-options/01)
 copy-as-markdown/05 | A document's own heading anchor markup is lost to both copies | ready | not blocked; rendering change (fixtures), avoid running it beside right-to-left/01 or another rendering change
+v1/40 | Find's count of a large search stays under 100 ms | triage | not blocked; found by ruler/01's measurement (one-letter search on 1 MB mixed, 80 to 125 ms without the ruler); slices or near-view highlighting; ruler/03's Find marks read the same matches
