@@ -1,6 +1,8 @@
 import { clearMocks, mockWindows } from "@tauri-apps/api/mocks";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import headings from "../../core/tests/fixtures/headings.html?raw";
+import { startCommands } from "./commands";
+import { startFind } from "./find";
 import { startHeadings } from "./headings";
 import { startOverviewRuler } from "./overview-ruler";
 import { afterNextFrame } from "./reading-position";
@@ -24,11 +26,13 @@ import {
   stepAsTheApp,
   stopDocumentSample,
   tell,
+  TITLE_BAR_HEIGHT,
   tellAsSampled,
   waitNoteAsTheApp,
   type Read,
 } from "./test-support";
 import {
+  canStepThroughHistory,
   DOCUMENT_VIEW_SELECTOR,
   SCROLLER_SELECTOR,
   startDocumentView,
@@ -85,11 +89,16 @@ function settingsUrl(settings: PageSettings): string {
   return `?settings=${encodeURIComponent(JSON.stringify(settings))}`;
 }
 
-/** Starts the settings, the list of headings and the ruler as a new window opened at `url` does. */
+/**
+ * Starts the settings, the commands, Find, the list of headings and the ruler as a new window
+ * opened at `url` does, in the page's order.
+ */
 async function startRulerAt(url: string): Promise<void> {
   openPageAt(url);
   await startSettings();
   stop = new AbortController();
+  startCommands(stop.signal);
+  startFind(stop.signal);
   startHeadings(stop.signal);
   startOverviewRuler(stop.signal);
 }
@@ -507,4 +516,429 @@ test("a window opened at the app's URL starts with the ruler of its settings", a
   await startShowing();
 
   expect(strip().hidden).toBe(true);
+});
+
+// Find's marks, and clicking them (overview ruler ticket 03).
+
+/**
+ * A document of 100 lines, 2,000 px, shown at 736/2000 as `LONG` is, with "lamp" four times: in
+ * the h1 on line 1, row 0; at the start and halfway through the text of the paragraph on lines 11
+ * to 20, 200 px and 300 px down, rows 73 and 110; and in the paragraph on line 51, row 368.
+ */
+const LAMPS = [
+  '<h1 id="lamps" data-sourcepos="1:1-1:5">Lamps</h1>',
+  '<p data-sourcepos="11:1-20:20">lamp wick lamp glass</p>',
+  '<p data-sourcepos="51:1-51:4">lamp</p>',
+  '<p data-sourcepos="100:1-100:4">End</p>',
+].join("\n");
+
+function findBar(): HTMLElement {
+  const found = document.querySelector<HTMLElement>(".find-bar");
+  if (!found) throw new Error("The page has no find bar.");
+  return found;
+}
+
+function findBox(): HTMLInputElement {
+  const found = findBar().querySelector("input");
+  if (!found) throw new Error("The find bar has no box.");
+  return found;
+}
+
+/** The find bar's count, such as "3 of 4". */
+function findStatus(): string | null | undefined {
+  return findBar().querySelector('[role="status"]')?.textContent;
+}
+
+/** Presses a key where the focus is, as the reader would. */
+function press(init: KeyboardEventInit): void {
+  (document.activeElement ?? document.body).dispatchEvent(
+    new KeyboardEvent("keydown", { ...init, bubbles: true, cancelable: true }),
+  );
+}
+
+/** Opens the find bar with Ctrl+F, unless it is open, and types `text` into its box. */
+function typeInFind(text: string): void {
+  if (findBar().hidden) press({ ctrlKey: true, key: "f", code: "KeyF" });
+  findBox().value = text;
+  findBox().dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+const ENTER = { key: "Enter", code: "Enter" };
+
+/** What a mark of Find stands for: a match, or the current match. */
+type FindMarkKind = "match" | "current";
+
+/** The strip's marks of Find, top to bottom, the current match's last, each as its top in px. */
+function findMarks(): { kind: FindMarkKind; top: number }[] {
+  return [
+    ...strip().querySelectorAll<HTMLElement>(
+      ".match-mark, .current-match-mark",
+    ),
+  ].map((mark) => ({
+    kind: mark.classList.contains("current-match-mark") ? "current" : "match",
+    top: Number.parseFloat(mark.style.top),
+  }));
+}
+
+/** The top of the current match's mark, in px, or undefined while it has none. */
+function currentMarkTop(): number | undefined {
+  return findMarks().find(({ kind }) => kind === "current")?.top;
+}
+
+function documentView(): Element {
+  const view = document.querySelector(DOCUMENT_VIEW_SELECTOR);
+  if (!view) throw new Error("The page has no document view.");
+  return view;
+}
+
+/** Where a press or click on the strip `row` px below its top lands, in its left or right half. */
+function onStrip(half: "left" | "right", row: number): MouseEventInit {
+  return {
+    bubbles: true,
+    cancelable: true,
+    button: 0,
+    clientX: half === "right" ? 797 : 789,
+    clientY: TITLE_BAR_HEIGHT + row,
+  };
+}
+
+/**
+ * Clicks the strip `row` px below its top, in its left half (the heading marks' lane) or its right
+ * half (Find's), as the reader does. The layout fake's scroller runs from below the title bar to
+ * x = 800, with no scroll bar, so the strip covers x = 786 to 800. The strip takes no pointer, so
+ * that the wheel over it scrolls the document, and what is under it, the document view unless the
+ * test names another element, gets the press and the click. Returns the press.
+ */
+function clickStrip(
+  half: "left" | "right",
+  row: number,
+  under: Element = documentView(),
+): MouseEvent {
+  const at = onStrip(half, row);
+  const pressed = new MouseEvent("mousedown", at);
+  under.dispatchEvent(pressed);
+  under.dispatchEvent(new MouseEvent("mouseup", at));
+  under.dispatchEvent(new MouseEvent("click", at));
+  return pressed;
+}
+
+test("Find's matches get marks as the reader types, and the current match one of its own", async () => {
+  layOut(1);
+  showInTurn(LAMPS);
+  await startShowing();
+  expect(findMarks()).toEqual([]);
+
+  typeInFind("lamp");
+  await drawn();
+  expect(findMarks()).toEqual([
+    { kind: "match", top: 0 },
+    { kind: "match", top: 73 },
+    { kind: "match", top: 110 },
+    { kind: "match", top: 368 },
+    { kind: "current", top: 0 },
+  ]);
+  // The h1's mark shares row 0 with its match's, and both show.
+  expect(marks()).toEqual([{ kind: "h1", top: 0 }]);
+
+  typeInFind("lamp g");
+  await drawn();
+  expect(findMarks()).toEqual([
+    { kind: "match", top: 110 },
+    { kind: "current", top: 110 },
+  ]);
+});
+
+test("the current match's mark follows Enter, F3 and Shift+Enter", async () => {
+  layOut(1);
+  showInTurn(LAMPS);
+  await startShowing();
+  typeInFind("lamp");
+
+  press(ENTER);
+  await drawn();
+  expect(currentMarkTop()).toBe(73);
+  press({ key: "F3", code: "F3" });
+  await drawn();
+  expect(currentMarkTop()).toBe(110);
+  press({ ...ENTER, shiftKey: true });
+  await drawn();
+  expect(currentMarkTop()).toBe(73);
+  expect(findMarks().filter(({ kind }) => kind === "match")).toHaveLength(4);
+});
+
+test("closing Find takes its marks away, and the heading marks stay", async () => {
+  layOut(1);
+  showInTurn(LAMPS);
+  await startShowing();
+  typeInFind("lamp");
+  await drawn();
+
+  press({ key: "Escape", code: "Escape" });
+  await drawn();
+  expect(findBar().hidden).toBe(true);
+  expect(findMarks()).toEqual([]);
+  expect(marks()).toEqual([{ kind: "h1", top: 0 }]);
+});
+
+test("a text with no match leaves Find no marks", async () => {
+  layOut(1);
+  showInTurn(LAMPS);
+  await startShowing();
+  typeInFind("lamp");
+  await drawn();
+
+  typeInFind("lantern");
+  await drawn();
+  expect(findStatus()).toBe("No results");
+  expect(findMarks()).toEqual([]);
+});
+
+test("a reload's recount moves Find's marks to where its matches are now", async () => {
+  layOut(1);
+  documents = [
+    () => Promise.resolve(LAMPS),
+    // The paragraph on line 51 moved to line 26: 500 px down the 2,000, row 184.
+    () => Promise.resolve(LAMPS.replace("51:1-51:4", "26:1-26:4")),
+  ];
+  await startShowing();
+  typeInFind("lamp");
+  await drawn();
+
+  const shown = nextShown();
+  await saveTheFile();
+  await shown;
+  await drawn();
+  expect(findMarks()).toEqual([
+    { kind: "match", top: 0 },
+    { kind: "match", top: 73 },
+    { kind: "match", top: 110 },
+    { kind: "match", top: 184 },
+    { kind: "current", top: 0 },
+  ]);
+});
+
+test("a click near a match mark makes the nearest match current and scrolls to it, as F3 does, and Back doesn't return from it", async () => {
+  layOut(1);
+  showInTurn(LAMPS);
+  await startShowing();
+  typeInFind("lamp");
+  await drawn();
+  const scrolled = vi
+    .spyOn(Element.prototype, "scrollIntoView")
+    .mockImplementation(() => {});
+
+  // Row 112 is 1.6 px below the match 110.4 px down the strip, and 38.4 px below the one above it.
+  const pressed = clickStrip("right", 112);
+  expect(findStatus()).toBe("3 of 4");
+  expect(scrolled.mock.contexts.at(-1)).toBe(
+    document.querySelector('[data-sourcepos="11:1-20:20"]'),
+  );
+  expect(scrolled.mock.calls.at(-1)).toEqual([{ block: "center" }]);
+  // The press doesn't move the focus out of the find box, nor start a selection.
+  expect(pressed.defaultPrevented).toBe(true);
+  await drawn();
+  expect(currentMarkTop()).toBe(110);
+
+  // Find's steps stay out of History: there is nowhere to go back to.
+  expect(canStepThroughHistory("back")).toBe(false);
+});
+
+test("a click on the strip near no mark does nothing", async () => {
+  layOut(1);
+  showInTurn(LAMPS);
+  await startShowing();
+  typeInFind("lamp");
+  await drawn();
+  const scrolled = vi
+    .spyOn(Element.prototype, "scrollIntoView")
+    .mockImplementation(() => {});
+
+  const pressed = clickStrip("right", 250);
+  expect(pressed.defaultPrevented).toBe(false);
+  expect(findStatus()).toBe("1 of 4");
+  expect(scrolled).not.toHaveBeenCalled();
+  await drawn();
+  expect(currentMarkTop()).toBe(0);
+});
+
+test("a click on the strip while Find is closed does nothing", async () => {
+  layOut(1);
+  showInTurn(LAMPS);
+  await startShowing();
+  const scrolled = vi
+    .spyOn(Element.prototype, "scrollIntoView")
+    .mockImplementation(() => {});
+
+  expect(clickStrip("right", 0).defaultPrevented).toBe(false);
+  expect(scrolled).not.toHaveBeenCalled();
+});
+
+/** Stands in for the webview's scroll to a match, and returns the spy that records it. */
+function spyOnScrolls() {
+  return vi
+    .spyOn(Element.prototype, "scrollIntoView")
+    .mockImplementation(() => {});
+}
+
+test("a selection dragged from the text and let go beside a match mark leaves the current match and the view as they were", async () => {
+  layOut(1);
+  showInTurn(LAMPS);
+  await startShowing();
+  typeInFind("lamp");
+  await drawn();
+  const scrolled = spyOnScrolls();
+
+  // Pressed in the paragraph's text and let go in the right padding, 1.6 px below the match 110.4
+  // px down the strip: the webview gives the click to the view, which holds both.
+  const paragraph = document.querySelector('[data-sourcepos="11:1-20:20"]');
+  paragraph?.dispatchEvent(
+    new MouseEvent("mousedown", { ...onStrip("right", 100), clientX: 400 }),
+  );
+  documentView().dispatchEvent(
+    new MouseEvent("mouseup", onStrip("right", 112)),
+  );
+  documentView().dispatchEvent(new MouseEvent("click", onStrip("right", 112)));
+  expect(findStatus()).toBe("1 of 4");
+  expect(scrolled).not.toHaveBeenCalled();
+  await drawn();
+  expect(currentMarkTop()).toBe(0);
+});
+
+test("a click in the strip's left half beside a match mark does nothing", async () => {
+  layOut(1);
+  showInTurn(LAMPS);
+  await startShowing();
+  typeInFind("lamp");
+  await drawn();
+  const scrolled = spyOnScrolls();
+
+  expect(clickStrip("left", 112).defaultPrevented).toBe(false);
+  expect(findStatus()).toBe("1 of 4");
+  expect(scrolled).not.toHaveBeenCalled();
+});
+
+test("a right-click on a match mark does nothing", async () => {
+  layOut(1);
+  showInTurn(LAMPS);
+  await startShowing();
+  typeInFind("lamp");
+  await drawn();
+  const scrolled = spyOnScrolls();
+
+  const at = { ...onStrip("right", 112), button: 2 };
+  const pressed = new MouseEvent("mousedown", at);
+  documentView().dispatchEvent(pressed);
+  documentView().dispatchEvent(new MouseEvent("mouseup", at));
+  documentView().dispatchEvent(new MouseEvent("contextmenu", at));
+  expect(pressed.defaultPrevented).toBe(false);
+  expect(findStatus()).toBe("1 of 4");
+  expect(scrolled).not.toHaveBeenCalled();
+});
+
+test("a click on the 'File deleted or moved' bar over a match mark does nothing", async () => {
+  layOut(1);
+  showInTurn(LAMPS);
+  await startShowing();
+  typeInFind("lamp");
+  await deleteTheFile();
+  const bar = goneBar();
+  if (!bar) throw new Error("The page has no 'File deleted or moved' bar.");
+  // The bar's 41 px come before the document, 2,041 px in all: the h1's match is 41 px down, 14.8
+  // px down the strip, under the bar.
+  layOut(1, {}, 41);
+  resize(bar);
+  await drawn();
+  expect(currentMarkTop()).toBe(14);
+  const scrolled = spyOnScrolls();
+
+  expect(clickStrip("right", 15, bar).defaultPrevented).toBe(false);
+  expect(scrolled).not.toHaveBeenCalled();
+});
+
+test("a click in the frame between a count and the strip's redraw of it does nothing", async () => {
+  layOut(1);
+  showInTurn(LAMPS);
+  await startShowing();
+  typeInFind("lamp");
+  await drawn();
+
+  // Row 0 still shows the mark of the h1's match, which "lamp g" doesn't have.
+  typeInFind("lamp g");
+  const scrolled = spyOnScrolls();
+  expect(clickStrip("right", 0).defaultPrevented).toBe(false);
+  expect(findStatus()).toBe("1 of 1");
+  expect(scrolled).not.toHaveBeenCalled();
+});
+
+/**
+ * "ab" three times in a paragraph on lines 26 to 50, 500 px down and 500 px high, rows 184 to 368
+ * of the strip: its 368 characters are half a pixel each, so the matches at 1, 7 and 11 are 184.5,
+ * 187.5 and 189.5 px down the strip.
+ */
+const NEAR = [
+  '<h1 id="near" data-sourcepos="1:1-1:4">Near</h1>',
+  `<p data-sourcepos="26:1-50:10">xabxxxxabxxab${"x".repeat(355)}</p>`,
+  '<p data-sourcepos="100:1-100:3">End</p>',
+].join("\n");
+
+/** The strip's pixel rows that marks of Find's matches, not the current one, cover. */
+function matchMarkRows(): number[] {
+  return [...strip().querySelectorAll<HTMLElement>(".match-mark")].flatMap(
+    (mark) => {
+      const top = Number.parseFloat(mark.style.top);
+      const height = Number.parseFloat(mark.style.height);
+      return Array.from({ length: height }, (_, row) => top + row);
+    },
+  );
+}
+
+test("each match's mark is 2 px high from its row, and marks in rows close together run into one another", async () => {
+  layOut(1);
+  showInTurn(NEAR);
+  await startShowing();
+  typeInFind("ab");
+  await drawn();
+
+  expect(matchMarkRows()).toEqual([184, 185, 187, 188, 189, 190]);
+});
+
+test("a click between two match marks makes the nearer match current", async () => {
+  layOut(1);
+  showInTurn(NEAR);
+  await startShowing();
+  typeInFind("ab");
+  await drawn();
+  spyOnScrolls();
+
+  // 2.5 px below the first match and 0.5 px above the second.
+  clickStrip("right", 187);
+  expect(findStatus()).toBe("2 of 3");
+  await drawn();
+  expect(currentMarkTop()).toBe(187);
+});
+
+test("Back with Find open counts the document returned to and moves Find's marks to its matches", async () => {
+  layOut(1);
+  // The paragraph on line 51 is on line 26 in the other document: 500 px down the 2,000, row 184.
+  showInTurn(LAMPS, LAMPS.replace("51:1-51:4", "26:1-26:4"));
+  await startShowing();
+  typeInFind("lamp");
+  let shown = nextShown();
+  await giveAnotherDocument();
+  await shown;
+  await drawn();
+  expect(findMarks().at(3)).toEqual({ kind: "match", top: 184 });
+
+  showInTurn(LAMPS);
+  shown = nextShown();
+  stepThroughHistory("back");
+  await shown;
+  await drawn();
+  expect(findMarks()).toEqual([
+    { kind: "match", top: 0 },
+    { kind: "match", top: 73 },
+    { kind: "match", top: 110 },
+    { kind: "match", top: 368 },
+    { kind: "current", top: 0 },
+  ]);
 });

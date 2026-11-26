@@ -2,8 +2,10 @@
 // (ticket 02): run `npm run tauri build`, then `npm run measure`. Each case starts a new process
 // on the test documents, reads the app's timing reports from stderr, and gives the median of
 // five runs. One run before each case is discarded, so the first start after a build, when
-// Windows scans the new executable, doesn't count. `npm run measure -- large` measures the 1 MB
-// documents and the large ones instead (ticket 31).
+// Windows scans the new executable, doesn't count. Beside first paint, it measures a second
+// window, a reload, scrolling, typing in the find bar, and holding F3 after a one-letter search
+// (overview ruler ticket 03). `npm run measure -- large` measures the 1 MB documents and the large
+// ones instead (ticket 31).
 
 import { execFileSync, spawn } from "node:child_process";
 import {
@@ -45,8 +47,8 @@ const RELOAD_DOCUMENT = DOCUMENTS.mixed1mb.replace(/\.md$/, "-reload.md");
  * Starts Downlight with the timing switch on and collects its reports until its windows painted.
  * Each of `laterDocuments` is then opened by a further launch, which hands it to the running
  * process (ADR 0001), and the run waits for its window to paint too. `afterPaint`, if given, then
- * acts on the first window over WebView2's debug port (`scrollThrough`, `reloadInTheMiddle` or
- * `typeInFind`), and the run returns its result as `after`. `prepare` runs before the process
+ * acts on the first window over WebView2's debug port (`scrollThrough`, `reloadInTheMiddle`,
+ * `typeInFind` or `holdF3`), and the run returns its result as `after`. `prepare` runs before the process
  * starts. A run ends once its processes are gone, so the next one starts on none.
  */
 async function run(
@@ -287,6 +289,73 @@ async function typeInFind() {
     // The last keystroke's count is shown by now, as the wait after it was.
     const keystrokes = await evaluate("findKeystrokes");
     return { keystrokes, started, ended: performance.now() };
+  } finally {
+    close();
+  }
+}
+
+/** How many steps a held F3 takes (`holdF3`): about two seconds of the key's repeat. */
+const F3_STEPS = 60;
+
+/**
+ * In the page: resolves with the time from `start` to the end of the second frame after it. A step
+ * shows its count in the first; a redraw that waits for a frame, as the overview ruler's did for a
+ * step (overview ruler ticket 03), is shown in the second.
+ */
+const AFTER_TWO_FRAMES = `(start) => new Promise((done) => {
+  const frame = (then) => requestAnimationFrame(() => setTimeout(then, 0));
+  frame(() => frame(() => done(performance.now() - start)));
+})`;
+
+/**
+ * Opens the find bar with Ctrl+F, types "e", the commonest letter, and once its count is shown
+ * holds F3 down for `F3_STEPS` steps, each repeat once the last step's two frames are done
+ * (`AFTER_TWO_FRAMES`). Returns each step's time from its `keydown` to then, and when the
+ * stepping started.
+ */
+async function holdF3() {
+  const { send, evaluate, close } = await connect();
+  try {
+    await evaluate(`(() => {
+      window.findCounted = Promise.resolve();
+      window.findSteps = [];
+      window.findStepped = Promise.resolve();
+      const afterCount = ${AFTER_COUNT};
+      const afterTwoFrames = ${AFTER_TWO_FRAMES};
+      addEventListener("input", () => {
+        findCounted = afterCount(performance.now());
+      }, true);
+      // Before the page's own listener for the command: the window's capture phase comes first.
+      addEventListener("keydown", (event) => {
+        if (event.key !== "F3") return;
+        findStepped = afterTwoFrames(performance.now()).then((time) => findSteps.push(time));
+      }, true);
+    })()`);
+    const ctrlF = {
+      modifiers: 2,
+      key: "f",
+      code: "KeyF",
+      windowsVirtualKeyCode: 70,
+    };
+    await send("Input.dispatchKeyEvent", { type: "rawKeyDown", ...ctrlF });
+    await send("Input.dispatchKeyEvent", { type: "keyUp", ...ctrlF });
+    await evaluate(NEXT_FRAME);
+    await send("Input.insertText", { text: "e" });
+    await evaluate("findCounted");
+    // The ruler's redraw for the count, and anything else the count set off, is done by now.
+    await sleep(1_000);
+    const f3 = { key: "F3", code: "F3", windowsVirtualKeyCode: 114 };
+    const started = performance.now();
+    for (let step = 0; step < F3_STEPS; step++) {
+      await send("Input.dispatchKeyEvent", {
+        type: "rawKeyDown",
+        autoRepeat: step > 0,
+        ...f3,
+      });
+      await evaluate("findStepped");
+    }
+    await send("Input.dispatchKeyEvent", { type: "keyUp", ...f3 });
+    return { steps: await evaluate("findSteps"), started };
   } finally {
     close();
   }
@@ -655,6 +724,19 @@ function typed({ reports, after: found }) {
   };
 }
 
+/** Holding F3: each step until its second frame is done, and the longest task while stepping. */
+function steppedWithF3({ reports, after: held }) {
+  const during = reports
+    .filter((r) => r.event === "long-task" || r.event === "long-frame")
+    .filter((r) => r.seen >= held.started)
+    .map((r) => r.duration);
+  return {
+    f3ToTwoFrames: median(held.steps),
+    longestF3ToTwoFrames: Math.max(...held.steps),
+    longestWhileStepping: Math.max(0, ...during),
+  };
+}
+
 function table(cases) {
   const keys = [...new Set(cases.flatMap((c) => Object.keys(c.runs[0])))];
   const lines = [
@@ -725,6 +807,14 @@ const finding = [
     afterPaint: typeInFind,
   }),
 ];
+const stepping = await measure(
+  "1 MB mixed",
+  [DOCUMENTS.mixed1mb],
+  steppedWithF3,
+  {
+    afterPaint: holdF3,
+  },
+);
 console.log(table(cases));
 console.log();
 console.log(table([second]));
@@ -742,3 +832,9 @@ console.log(
 );
 console.log();
 console.log(table(finding));
+console.log();
+console.log(
+  `Holding F3 for ${F3_STEPS} steps after a search for "e", each repeat once the last step's second frame is done:`,
+);
+console.log();
+console.log(table([stepping]));

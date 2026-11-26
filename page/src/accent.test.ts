@@ -216,6 +216,9 @@ const ROLE_USES: Record<string, string> = {
   "::selection / background-color": "selection",
   "::highlight(find-match) / background-color": "find-match",
   "::highlight(find-current) / background-color": "find-current",
+  // The overview ruler's marks of Find's matches and its current match (overview ruler ticket 03).
+  ".match-mark / background-color": "find-match",
+  ".current-match-mark / background-color": "find-current",
   '.markdown-body input[type="checkbox"] / accent-color': "emphasis",
   // github-markdown-css's own focus rings, on links and checkboxes.
   ".markdown-body / --focus-outlineColor": "emphasis",

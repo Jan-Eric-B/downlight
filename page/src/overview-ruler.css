@@ -2,7 +2,9 @@
    scroller's scroll bar, which the script sets it off by and sizes to the scroller's view, below
    the room kept for the title bar. The same width at any zoom, as only the document view zooms. No
    background of its own, so the backdrop shows through it. It takes no pointer, so the wheel over
-   it still scrolls the document (clicks on its marks come in ticket 04).
+   it still scrolls the document (ticket 01's decision, kept by ticket 03). A click on a mark
+   reaches the scroller's content under it, which the script hears and places by the scroller's
+   box (ticket 03).
 
    It lies in the scroller, after the document, so it is over the document's blocks, also those
    positioned for their copy buttons, and under the "File deleted or moved" bar and the wait note
@@ -12,10 +14,10 @@
    The text never runs under it: in a wide window it lies in the margin, and otherwise over the
    document's right padding, 32px zoomed with the document, which is 16px at the smallest zoom
    (50%, SMALLEST in app/src/zoom.rs) and so always wider than the strip. A smaller zoom, or a
-   narrower padding, would have the scroller give up the difference as right padding. */
-:root {
-  --overview-ruler-width: 14px;
-}
+   narrower padding, would have the scroller give up the difference as right padding.
+
+   The strip's width, --overview-ruler-width, is set on the strip by the script (STRIP_WIDTH),
+   which places clicks by it. */
 
 .overview-ruler {
   position: fixed;
@@ -58,11 +60,39 @@
   width: 5px;
 }
 
-/* High contrast: the marks in the reader's text color, which forced colors would otherwise replace
-   with the background color they are drawn with. */
+/* Find's marks (overview ruler ticket 03), in the accent's Find roles, as the highlights they stand
+   for: a match's short, in the strip's right half, so a heading's mark in the same row shows
+   beside it, and the current match's the full width and a little thicker, over them. A match's
+   mark stands for a run of rows whose marks touch, and the script sets its height. */
+.match-mark,
+.current-match-mark {
+  position: absolute;
+}
+
+.match-mark {
+  right: 0;
+  width: calc(var(--overview-ruler-width) / 2);
+  background-color: var(--accent-find-match);
+}
+
+.current-match-mark {
+  left: 0;
+  width: var(--overview-ruler-width);
+  height: 3px;
+  background-color: var(--accent-find-current);
+}
+
+/* High contrast: the marks in the reader's text color and the system's highlight colors, which
+   the Find roles take there (accent.css), and which forced colors would otherwise replace with
+   the background color they are drawn with. */
 @media (forced-colors: active) {
   .heading-mark {
     forced-color-adjust: none;
     background-color: CanvasText;
+  }
+
+  .match-mark,
+  .current-match-mark {
+    forced-color-adjust: none;
   }
 }

@@ -24,6 +24,20 @@ export interface FindMatch {
   endOffset: number;
 }
 
+/**
+ * Find's matches in the shown document, in document order, and which one is current. `matches` is
+ * the same array until the next count, so a reader can tell a step, which only moves the current
+ * match, from a count.
+ */
+export interface FoundMatches {
+  readonly matches: readonly FindMatch[];
+  readonly current: number | undefined;
+}
+
+type MatchesListener = (found: FoundMatches) => void;
+
+const matchesListeners = new Set<MatchesListener>();
+
 /** A match and where it starts in the index, to keep the current match while the reader types. */
 interface IndexedMatch extends FindMatch {
   at: number;
@@ -370,10 +384,18 @@ class Find {
   step(by: 1 | -1): void {
     if (this.current === undefined) return;
     const count = this.matches.length;
-    this.current = (this.current + by + count) % count;
+    this.goTo((this.current + by + count) % count);
+  }
+
+  /** Makes the match at `match` current and goes to it; a match Find doesn't have does nothing. */
+  goTo(match: number): void {
+    if (!Number.isInteger(match) || !this.matches[match]) return;
+    this.current = match;
     this.paintCurrent();
     this.showCount();
     void this.goToCurrent();
+    // After the scroll has started, so that a listener that throws can't keep the step from it.
+    this.tellListeners();
   }
 
   /** F3 and Shift+F3: a step while the bar is open, and otherwise Find. */
@@ -383,10 +405,22 @@ class Find {
   }
 
   private show(matches: IndexedMatch[], current: number | undefined): void {
-    this.matches = matches;
+    // Each keystroke while nothing matches counts none again, which changes nothing to hear of,
+    // and keeps the array, which stays the same until a count changes it.
+    const unchanged = matches.length === 0 && this.matches.length === 0;
+    if (!unchanged) this.matches = matches;
     this.current = current;
     this.paint();
     this.showCount();
+    if (!unchanged) this.tellListeners();
+  }
+
+  private tellListeners(): void {
+    const found: FoundMatches = {
+      matches: this.matches,
+      current: this.current,
+    };
+    for (const listener of matchesListeners) listener(found);
   }
 
   /** Shows "N of M" or "No results", and whether the arrow buttons have a match to step to. */
@@ -477,11 +511,29 @@ export function findPrevious(): void {
 }
 
 /** The matches of the box's text in the shown document, in order, and which one is current. */
-export function findMatches(): {
-  matches: readonly FindMatch[];
-  current: number | undefined;
-} {
+export function findMatches(): FoundMatches {
   return { matches: find?.matches ?? [], current: find?.current };
+}
+
+/**
+ * Runs `listener` with the matches and the current match each time either changes: a count as the
+ * reader types or a reload's or another document's count, a step (Enter, F3, the arrow buttons or
+ * `goToMatch`), and the bar closing, which leaves none. Returns a function that removes the
+ * listener.
+ */
+export function whenMatchesChange(listener: MatchesListener): () => void {
+  matchesListeners.add(listener);
+  return () => {
+    matchesListeners.delete(listener);
+  };
+}
+
+/**
+ * Makes the match at `match` in `findMatches()` current and scrolls it into view, as a step does,
+ * so it never joins History. An index Find has no match at does nothing.
+ */
+export function goToMatch(match: number): void {
+  find?.goTo(match);
 }
 
 /**

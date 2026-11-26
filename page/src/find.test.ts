@@ -195,6 +195,14 @@ test("nothing matching shows No results", () => {
   expect(findMatches()).toEqual({ matches: [], current: undefined });
 });
 
+test("typing on while nothing matches keeps the same matches, as no count found any", () => {
+  type("lantern");
+  const none = findMatches().matches;
+  type("lanterns");
+  expect(status()).toBe("No results");
+  expect(findMatches().matches).toBe(none);
+});
+
 test("a word-final sigma matches any other sigma", async () => {
   // In lower case a sigma at the end of a word is "ς", and anywhere else "σ".
   await show(`<p data-sourcepos="1:1-1:10">ΟΔΟΣ, οδος</p>`);
