@@ -297,9 +297,12 @@ test("the app's answer that the window shows no document offers to open one", as
   expect(emptyWindow()?.hidden).toBe(false);
 });
 
-test.each(["showAtTop", "unreadShow"])(
-  "the app's %s answer names the document's file in the title bar",
-  async (name) => {
+test.each([
+  ["showAtTop", "C:\\docs\\a.md\n3 lines, 4 words"],
+  ["unreadShow", "C:\\docs\\a.md"],
+])(
+  "the app's %s answer names the document's file in the title bar, with its counts on hover if it has any",
+  async (name, tooltip) => {
     fakeTitleBarLayout();
     openPageWith("titleBar");
     answerWithSamples(name);
@@ -309,7 +312,7 @@ test.each(["showAtTop", "unreadShow"])(
 
     const sample = renderDocumentSample(name);
     expect(titleBarFileName().textContent).toBe(sample?.file.name);
-    expect(titleBarFileName().title).toBe(sample?.file.path);
+    expect(titleBarFileName().title).toBe(tooltip);
   },
 );
 

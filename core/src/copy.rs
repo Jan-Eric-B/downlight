@@ -6,6 +6,7 @@
 use std::fmt;
 
 use crate::decode::decode;
+use crate::lines::lines;
 
 /// A piece of a document's file to copy. A range of whole lines copies a run of blocks, and also
 /// the part of a code block a selection touches (ticket 02): its opening fence line, the code
@@ -82,7 +83,7 @@ impl std::error::Error for CopyError {}
 /// lines are joined with `\n`, and the copy ends without one.
 pub fn markdown_of(bytes: &[u8], pieces: &[Piece]) -> Result<String, CopyError> {
     let text = decode(bytes);
-    let lines = lines_of(&text);
+    let lines = lines(&text).collect::<Vec<_>>();
     if pieces.is_empty() {
         return Ok(lines.join("\n"));
     }
@@ -116,28 +117,6 @@ fn is_blank(line: &str) -> bool {
 
 /// What Markdown counts as indentation.
 const INDENTATION: [char; 2] = [' ', '\t'];
-
-/// The lines of `text`, without their line endings, as comrak splits them: at `\n`, `\r\n` and a
-/// lone `\r`. A line ending at the end of the text starts no line of its own. Render counts an
-/// unclosed fence's code lines with it too, so both agree on where a line ends.
-pub(crate) fn lines_of(text: &str) -> Vec<&str> {
-    let mut lines = Vec::new();
-    let mut rest = text;
-    while !rest.is_empty() {
-        let Some(end) = rest.find(['\r', '\n']) else {
-            lines.push(rest);
-            break;
-        };
-        lines.push(&rest[..end]);
-        let ending = if rest[end..].starts_with("\r\n") {
-            2
-        } else {
-            1
-        };
-        rest = &rest[end + ending..];
-    }
-    lines
-}
 
 /// The lines from `first` to `last` among `lines`, which `piece` names.
 fn lines_in<'a, 'text>(

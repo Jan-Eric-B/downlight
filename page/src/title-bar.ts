@@ -25,24 +25,24 @@ import minimizeGlyph from "@fluentui/svg-icons/icons/subtract_16_regular.svg?raw
 // Inlined rather than loaded: the content security policy's img-src has no 'self' (window design
 // spec). Its ids are prefixed for sharing the page's namespace.
 import logo from "../../app/icons/icon.svg?raw";
-import {
-  askApp,
-  DEFAULT_SETTINGS,
-  listenToApp,
-  pageFlags,
-  type DocumentFile,
-} from "./app";
+import { askApp, DEFAULT_SETTINGS, listenToApp, pageFlags } from "./app";
 import {
   commandButton,
   runCommand,
   tooltipOf,
   type CommandId,
 } from "./commands";
+import { documentCountsText } from "./counts";
 import { isFullScreen, whenFullScreenChanges } from "./full-screen";
 import { showingWhy } from "./notice";
 import { settingsNow, whenSettingsChange } from "./settings";
 import { whenSettingsFlyoutToggles } from "./settings-flyout";
-import { keepReadingPosition, showsDocument, whenDocumentShown } from "./view";
+import {
+  keepReadingPosition,
+  showsDocument,
+  whenDocumentShown,
+  type ShownDocument,
+} from "./view";
 
 /**
  * The room the page keeps for the bar at the top (title-bar.css), which the page sets itself only
@@ -306,13 +306,14 @@ function createAppName(): HTMLSpanElement {
 }
 
 /**
- * The shown document's file name, with its full path as the tooltip, which reveals the file in
- * its folder. Only the name shows, so the bar stays short; the window's OS title keeps its folder
- * for Alt+Tab and the taskbar (v1 story 10).
+ * The shown document's file name, with its full path and, on the next line, its counts as the
+ * tooltip (window design ticket 10), which reveals the file in its folder. Only the name shows, so
+ * the bar stays short; the window's OS title keeps its folder for Alt+Tab and the taskbar (v1
+ * story 10). A document that can't be read has no counts, so its path is alone.
  */
 function createFileName(): {
   element: HTMLButtonElement;
-  show(file: DocumentFile | null): void;
+  show(shown: ShownDocument | null): void;
 } {
   const element = barItem("file-name", "");
   // A child of its own, which the stylesheet cuts with an ellipsis before it pushes the buttons.
@@ -325,10 +326,16 @@ function createFileName(): {
   });
   return {
     element,
-    show(file) {
-      element.hidden = file === null;
-      name.textContent = file?.name ?? "";
-      element.title = file?.path ?? "";
+    show(shown) {
+      element.hidden = shown === null;
+      name.textContent = shown?.file.name ?? "";
+      let tooltip = shown?.file.path ?? "";
+      if (shown?.counts) tooltip += `\n${documentCountsText(shown.counts)}`;
+      element.title = tooltip;
+      // The path and counts are the button's accessible description (ticket 10), set as such
+      // rather than left to how a screen reader treats a tooltip.
+      if (tooltip === "") element.removeAttribute("aria-description");
+      else element.setAttribute("aria-description", tooltip);
     },
   };
 }
@@ -440,9 +447,9 @@ export function startTitleBar(signal?: AbortSignal): void {
 
   // The name follows whatever the window shows: a link, Open, a drop, and Back and Forward
   // (v1 ticket 12) all go through the document view.
-  const stopNaming = whenDocumentShown(({ file }) => {
-    appName.hidden = file !== null;
-    fileName.show(file);
+  const stopNaming = whenDocumentShown((shown) => {
+    appName.hidden = shown.document !== null;
+    fileName.show(shown.document);
     zoomLevel.refresh();
   });
   signal?.addEventListener("abort", stopNaming);

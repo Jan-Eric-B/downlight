@@ -25,6 +25,7 @@ import type {
   ArgsOf,
   ButtonRect,
   Command,
+  DocumentCounts,
   DocumentFile,
   DocumentToShow,
   EditorChoices,
@@ -60,6 +61,12 @@ export const WINDOWS_GREEN: AccentScale = {
   "dark-2": "#176317",
   "dark-3": "#0c3f0c",
 };
+
+/**
+ * The counts the fake app gives a document whose test names none: the core counts them, and the
+ * fake app is no core.
+ */
+export const FAKE_COUNTS: DocumentCounts = { lines: 12, words: 34 };
 
 /** A document shown at a heading, as the app hands it over for a link like `a.md#install`. */
 export interface AtHeading {
@@ -474,13 +481,15 @@ export async function answerAsTheApp(
     return { ...handedOver, ...placeAt(null), error: why };
   }
   if (content === null) return null;
-  return typeof content === "string"
-    ? { ...handedOver, ...placeAt(null), document: content }
-    : {
-        ...handedOver,
-        ...placeAt(content.heading),
-        document: content.document,
-      };
+  const { document: html, heading } =
+    typeof content === "string"
+      ? { document: content, heading: null }
+      : content;
+  return {
+    ...handedOver,
+    ...placeAt(heading),
+    document: { html, counts: FAKE_COUNTS },
+  };
 }
 
 /**
@@ -703,13 +712,16 @@ export function closeTitleBarWindow(): void {
 }
 
 /**
- * The app's answer for a window that shows `file`, its `showing`th document, rendered as
- * `rendered`, or as a heading with a link to `guide.md` by default.
+ * The app's answer for a window that shows `file`: by default its first showing, rendered as a
+ * heading with a link to `guide.md`, with the fake app's counts.
  */
 export function shownFrom(
   file: DocumentFile,
-  showing = 0,
-  rendered = `<h1>${file.name}</h1>\n<p><a href="guide.md">The guide</a></p>\n`,
+  {
+    showing = 0,
+    rendered = `<h1>${file.name}</h1>\n<p><a href="guide.md">The guide</a></p>\n`,
+    counts = FAKE_COUNTS,
+  }: { showing?: number; rendered?: string; counts?: DocumentCounts } = {},
 ): DocumentToShow {
   return {
     showing,
@@ -718,7 +730,7 @@ export function shownFrom(
     steps: { back: false, forward: false },
     place: "show",
     heading: null,
-    document: rendered,
+    document: { html: rendered, counts },
   };
 }
 

@@ -312,12 +312,13 @@ article.markdown-body {
 }
 
 /* A short message at the bottom of the window, such as why a dropped file didn't open. It sits on
-   a solid background, since the document may be under it. */
+   a solid background, since the document may be under it, and over the selection's counts. */
 .notice {
   position: fixed;
   right: 24px;
   bottom: 24px;
   left: 24px;
+  z-index: 2;
   width: fit-content;
   max-width: 640px;
   margin: 0 auto;
@@ -355,23 +356,18 @@ article.markdown-body {
   border-radius: 2px;
 }
 
-/* A link's target while the pointer is over the link or it has the focus (links.ts), at the bottom
-   left as a browser's status bar shows it. WebView2's own status bar is off, and the target shows
-   before a click, so the reader knows where a link goes. It never takes the pointer, so moving
-   onto it doesn't leave the link. */
-.link-target {
+/* A small bubble in a bottom corner of the window (corner-bubble.ts), on a solid background, since
+   the document scrolls under it, and not zoomed with it. It never takes the pointer, so moving
+   onto it leaves nothing under it, such as a link. Its own class below puts it in its corner. */
+.corner-bubble {
   position: fixed;
   bottom: 0;
-  left: 0;
-  z-index: 2;
   max-width: min(640px, 60vw);
   margin: 0;
   padding: 2px 8px;
   overflow: hidden;
   border: 1px solid var(--borderColor-default);
   border-bottom: none;
-  border-left: none;
-  border-top-right-radius: 6px;
   background-color: var(--bgColor-default);
   color: var(--fgColor-muted);
   font-size: 12px;
@@ -380,8 +376,28 @@ article.markdown-body {
   pointer-events: none;
 }
 
-.link-target[hidden] {
+.corner-bubble[hidden] {
   display: none;
+}
+
+/* A link's target while the pointer is over the link or it has the focus (links.ts), at the bottom
+   left as a browser's status bar shows it. WebView2's own status bar is off, and the target shows
+   before a click, so the reader knows where a link goes. */
+.link-target {
+  left: 0;
+  z-index: 2;
+  border-left: none;
+  border-top-right-radius: 6px;
+}
+
+/* The selection's counts (counts.ts, window design ticket 10), at the bottom right while text in
+   the document is selected, beside the scroll bar, which counts.ts sets it off by. Under the link
+   target bubble and notices, where a narrow window makes them meet. */
+.selection-counts {
+  right: 0;
+  z-index: 1;
+  border-right: none;
+  border-top-left-radius: 6px;
 }
 
 /* The find bar (find.ts), at the top right over the document, below the room kept for the title

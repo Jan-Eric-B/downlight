@@ -14,26 +14,20 @@ use crate::highlight::is_highlight_class;
 use crate::image::ImageSources;
 use crate::links::goes_to_the_system;
 
-/// The elements GitHub allows in a document, and the ones rendering writes besides: `section`
-/// around the footnotes and `input` for task list checkboxes.
-const TAGS: &[&str] = &[
-    "a",
-    "abbr",
-    "b",
-    "bdo",
+// The elements GitHub allows in a document, and the ones rendering writes besides: `section`
+// around the footnotes and `input` for task list checkboxes. They are the block tags and the
+// inline tags together.
+
+/// The block elements a document can hold: each starts on a line of its own, so the text before
+/// it and after it never runs together, as the document's words count it (`counts.rs`).
+pub(crate) const BLOCK_TAGS: &[&str] = &[
     "blockquote",
-    "br",
     "caption",
-    "cite",
-    "code",
     "dd",
-    "del",
     "details",
-    "dfn",
     "div",
     "dl",
     "dt",
-    "em",
     "figcaption",
     "figure",
     "h1",
@@ -43,44 +37,27 @@ const TAGS: &[&str] = &[
     "h5",
     "h6",
     "hr",
-    "i",
-    "img",
-    "input",
-    "ins",
-    "kbd",
     "li",
-    "mark",
     "ol",
     "p",
-    "picture",
     "pre",
-    "q",
-    "rp",
-    "rt",
-    "ruby",
-    "s",
-    "samp",
     "section",
-    "small",
-    "source",
-    "span",
-    "strike",
-    "strong",
-    "sub",
     "summary",
-    "sup",
     "table",
     "tbody",
     "td",
     "tfoot",
     "th",
     "thead",
-    "time",
     "tr",
-    "tt",
     "ul",
-    "var",
-    "wbr",
+];
+
+/// The inline elements a document can hold, which sit within a line of text.
+const INLINE_TAGS: &[&str] = &[
+    "a", "abbr", "b", "bdo", "br", "cite", "code", "del", "dfn", "em", "i", "img", "input", "ins",
+    "kbd", "mark", "picture", "q", "rp", "rt", "ruby", "s", "samp", "small", "source", "span",
+    "strike", "strong", "sub", "sup", "time", "tt", "var", "wbr",
 ];
 
 /// Attributes allowed on every element: GitHub's presentational ones, and the ids, classes and
@@ -477,7 +454,7 @@ pub(crate) fn sanitize<F: FileSystem + Send + Sync + 'static>(
         .map(|(tag, attributes)| (*tag, attributes.iter().copied().collect()))
         .collect::<HashMap<_, HashSet<_>>>();
     Builder::empty()
-        .tags(TAGS.iter().copied().collect())
+        .tags(BLOCK_TAGS.iter().chain(INLINE_TAGS).copied().collect())
         .generic_attributes(GENERIC_ATTRIBUTES.iter().copied().collect())
         .tag_attributes(tag_attributes)
         .url_schemes(SCHEMES_TO_FILTER.iter().copied().collect())

@@ -7,21 +7,24 @@ use comrak::nodes::{Node, NodeCodeBlock, NodeValue};
 use comrak::options::Plugins;
 use comrak::{Arena, Options, format_html_with_plugins, parse_document};
 
-use crate::copy::lines_of;
+use crate::counts::{Counts, counts_of};
 use crate::decode::decode;
 use crate::files::FileSystem;
 use crate::format::is_text;
 use crate::highlight::{GithubHighlighter, HIGHLIGHT_LIMIT, HighlightLimit};
 use crate::image::ImageSources;
+use crate::lines::lines;
 use crate::sanitize::{drop_from_raw_html, sanitize};
 
-/// A document rendered to HTML by [`render`].
+/// A document rendered to HTML by [`render`], with its [`Counts`].
 ///
 /// Only `render` makes one, so HTML that reaches the page has always passed through the core's
-/// sanitizing. It serializes as the plain HTML string the page shows.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// sanitizing. It serializes as the HTML the page shows and the counts its title bar shows:
+/// `{"html": "...", "counts": {"lines": 2, "words": 5}}`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct RenderedDocument {
     html: String,
+    counts: Counts,
 }
 
 impl RenderedDocument {
@@ -29,11 +32,10 @@ impl RenderedDocument {
     pub fn as_str(&self) -> &str {
         &self.html
     }
-}
 
-impl serde::Serialize for RenderedDocument {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&self.html)
+    /// The document's lines and words (window design ticket 10).
+    pub fn counts(&self) -> Counts {
+        self.counts
     }
 }
 
@@ -60,8 +62,9 @@ impl std::error::Error for RenderError {}
 
 /// Tells a render that nobody waits for it any more, as when the reader stops a document still on
 /// its way or goes elsewhere (ticket 38), so that it gives up soon instead of running on for
-/// seconds. A clone tells the same render. The render looks at it between its stages and while it
-/// writes the HTML; only comrak's parse runs to its end once started.
+/// seconds. A clone tells the same render. The render looks at it between its stages, while it
+/// writes the HTML and while it counts the words; only comrak's parse runs to its end once
+/// started.
 #[derive(Debug, Clone, Default)]
 pub struct Leave(Arc<AtomicBool>);
 
@@ -119,6 +122,9 @@ impl fmt::Write for UnlessLeft<'_> {
 /// with a line too long, and every block after the document's code used up the limit, shows as
 /// plain code (ticket 31).
 ///
+/// The rendered document carries its [`Counts`]: the file's lines and the words of the text the
+/// HTML shows (window design ticket 10).
+///
 /// Once `leave` says nobody waits for the render any more, it gives up at its next look with
 /// [`RenderError::Left`] and no HTML (ticket 38).
 pub fn render(
@@ -175,9 +181,11 @@ pub(crate) fn render_within(
     // Sanitizing runs to its end once started, so it is skipped rather than its result dropped.
     unless_left()?;
     let images = ImageSources::new(path, image_origin, files);
-    Ok(RenderedDocument {
-        html: sanitize(&html.html, images),
-    })
+    let html = sanitize(&html.html, images);
+    unless_left()?;
+    // From the sanitized HTML, so only the text the reader sees counts.
+    let counts = counts_of(&text, &html, leave).ok_or(RenderError::Left)?;
+    Ok(RenderedDocument { html, counts })
 }
 
 const FRONT_MATTER_DELIMITER: &str = "---";
@@ -245,13 +253,13 @@ fn end_unclosed_fences_on_their_last_code_line<'a>(root: Node<'a>, text: &str) {
         if !block.fenced || block.closed {
             continue;
         }
-        let code_lines = lines_of(&block.literal).len();
+        let code_lines = lines(&block.literal).count();
         if code_lines == 0 {
             continue;
         }
         let last = data.sourcepos.start.line + code_lines;
         let length = file_lines
-            .get_or_insert_with(|| lines_of(text))
+            .get_or_insert_with(|| lines(text).collect::<Vec<_>>())
             .get(last - 1)
             .map_or(0, |line: &&str| line.len());
         data.sourcepos.end = (last, length.max(1)).into();

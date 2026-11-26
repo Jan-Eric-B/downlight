@@ -3,6 +3,7 @@
 import nextGlyph from "@fluentui/svg-icons/icons/arrow_down_16_regular.svg?raw";
 import previousGlyph from "@fluentui/svg-icons/icons/arrow_up_16_regular.svg?raw";
 import closeGlyph from "@fluentui/svg-icons/icons/dismiss_16_regular.svg?raw";
+import { isInline, TextWalk, type TextReader } from "./document-text";
 import { iconButton } from "./icon-button";
 import {
   atOrAfterReadingPosition,
@@ -100,48 +101,6 @@ function searchable(text: string, keepsLines: boolean): string {
 }
 
 /**
- * The block elements of those a document can hold (`TAGS` in `core/src/sanitize.rs`), the `div`
- * the page wraps code blocks in among them. Every other element is inline.
- */
-const BLOCK_ELEMENTS = new Set([
-  "BLOCKQUOTE",
-  "CAPTION",
-  "DD",
-  "DETAILS",
-  "DIV",
-  "DL",
-  "DT",
-  "FIGCAPTION",
-  "FIGURE",
-  "H1",
-  "H2",
-  "H3",
-  "H4",
-  "H5",
-  "H6",
-  "HR",
-  "LI",
-  "OL",
-  "P",
-  "PRE",
-  "SECTION",
-  "SUMMARY",
-  "TABLE",
-  "TBODY",
-  "TD",
-  "TFOOT",
-  "TH",
-  "THEAD",
-  "TR",
-  "UL",
-]);
-
-/** Whether `node` is inline content: text, or an element that isn't a block. */
-function isInline(node: Node | null): boolean {
-  return node !== null && !BLOCK_ELEMENTS.has(node.nodeName);
-}
-
-/**
  * Whether `text` is a gap between blocks: only line breaks and spaces, next to a block or at the
  * edge of its parent. The same text between two inline elements, such as `**bold**` and `*italic*`
  * on two lines of one paragraph, is a space the reader sees. Its neighbours tell which, rather
@@ -157,60 +116,31 @@ function isGapBetweenBlocks(text: Text): boolean {
 }
 
 /**
- * How much of the document's text the index takes in per task. Building the whole index of a 1 MB
- * test document in one task held the page up for over 100 ms; a slice of this size takes a few
- * milliseconds there (ticket 14's Results).
+ * Builds the index of a view's text a slice at a time, from all of its text, also a closed
+ * section's, which Find opens to show a match in.
  */
-const SLICE_CHARACTERS = 64 * 1024;
-
-/** Builds the index of a view's text a slice at a time, walking its nodes once, in order. */
-class IndexBuilder {
+class IndexBuilder implements TextReader {
   private readonly parts: string[] = [];
   private readonly nodes: IndexedNode[] = [];
   private length = 0;
-  /** The node the walk visits next, or null once it is done. */
-  private next: Node | null;
-  /** How many `<pre>` elements `next` is in: text in one is code, which keeps its lines. */
-  private preDepth = 0;
+  private readonly walk: TextWalk;
 
-  constructor(private readonly view: HTMLElement) {
-    this.next = view.firstChild;
+  constructor(view: HTMLElement) {
+    this.walk = new TextWalk(view, this);
   }
 
-  /** Takes in about one slice of text, and returns the index once the walk is done. */
+  /** Takes in one slice of text, and returns the index once the walk is done. */
   slice(): TextIndex | undefined {
-    const end = this.length + SLICE_CHARACTERS;
-    while (this.next && this.length < end) this.visit(this.next);
-    if (this.next) return undefined;
+    if (!this.walk.slice()) return undefined;
     return { text: this.parts.join(""), nodes: this.nodes };
   }
 
-  private visit(node: Node): void {
-    if (node.nodeType === Node.TEXT_NODE) {
-      const text = node as Text;
-      if (text.data.length > 0) {
-        this.nodes.push({ node: text, start: this.length });
-        this.parts.push(
-          searchable(text.data, this.preDepth > 0 || isGapBetweenBlocks(text)),
-        );
-        this.length += text.data.length;
-      }
-    } else if (node.nodeType === Node.ELEMENT_NODE && node.firstChild) {
-      if (node.nodeName === "PRE") this.preDepth++;
-      this.next = node.firstChild;
-      return;
-    }
-    this.next = this.after(node);
-  }
-
-  /** The node after `node` and everything in it, or null at the end of the view. */
-  private after(node: Node): Node | null {
-    for (let at: Node | null = node; at && at !== this.view;) {
-      if (at.nextSibling) return at.nextSibling;
-      at = at.parentNode;
-      if (at?.nodeName === "PRE") this.preDepth--;
-    }
-    return null;
+  text(node: Text, text: string, code: boolean): void {
+    // A text longer than a slice comes in parts: its node starts where the first one does.
+    if (this.nodes.at(-1)?.node !== node)
+      this.nodes.push({ node, start: this.length });
+    this.parts.push(searchable(text, code || isGapBetweenBlocks(node)));
+    this.length += text.length;
   }
 }
 

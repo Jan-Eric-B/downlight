@@ -7,6 +7,7 @@ import { startAccent } from "./accent";
 import { startBackdrop } from "./backdrop";
 import { startCleanCopy } from "./clean-copy";
 import { startCommands } from "./commands";
+import { startSelectionCounts } from "./counts";
 import { startTaggingDrags } from "./drags";
 import { startFind } from "./find";
 import { startFullScreen } from "./full-screen";
@@ -36,6 +37,7 @@ startCommands();
 startCleanCopy();
 startTaggingDrags();
 startLinks();
+startSelectionCounts();
 startFind();
 // Before the document view starts, so the first paint is at the zoom level and width already.
 startLayout();

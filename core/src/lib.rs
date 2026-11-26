@@ -5,17 +5,20 @@
 #![forbid(unsafe_code)]
 
 mod copy;
+mod counts;
 mod decode;
 mod file_url;
 mod files;
 mod format;
 mod highlight;
 mod image;
+mod lines;
 mod links;
 mod render;
 mod sanitize;
 
 pub use copy::{CopyError, Piece, markdown_of};
+pub use counts::Counts;
 pub use files::{FileSystem, PathKind};
 pub use format::{MARKDOWN_EXTENSIONS, TEXT_CHECK_LENGTH, is_markdown, is_text};
 pub use image::{LocalImage, local_image};

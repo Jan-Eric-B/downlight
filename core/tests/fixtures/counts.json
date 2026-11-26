@@ -1,0 +1,38 @@
+{
+  "code-in-text.md": {
+    "lines": 26,
+    "words": 38
+  },
+  "code-unclosed.md": {
+    "lines": 14,
+    "words": 35
+  },
+  "code.md": {
+    "lines": 52,
+    "words": 91
+  },
+  "find.md": {
+    "lines": 29,
+    "words": 70
+  },
+  "github.md": {
+    "lines": 69,
+    "words": 165
+  },
+  "images-and-links.md": {
+    "lines": 11,
+    "words": 40
+  },
+  "notes.md": {
+    "lines": 3,
+    "words": 16
+  },
+  "readme.md": {
+    "lines": 32,
+    "words": 82
+  },
+  "tables.md": {
+    "lines": 12,
+    "words": 45
+  }
+}

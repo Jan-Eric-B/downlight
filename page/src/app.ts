@@ -95,11 +95,24 @@ export function isNotice(value: unknown): value is Notice {
 }
 
 /**
+ * A document's lines and words (`Counts` in `core/src/counts.rs`, window design ticket 10), which
+ * the core counts while it renders: the file's lines, as line numbers count them, and the words of
+ * the text the reader sees.
+ */
+export type DocumentCounts = { lines: number; words: number };
+
+/**
+ * A document as the core rendered it (`RenderedDocument` in `core/src/render.rs`): its sanitized
+ * HTML, and its counts, which the title bar's file name tooltip shows.
+ */
+export type RenderedDocument = { html: string; counts: DocumentCounts };
+
+/**
  * The app's answer when the page asks for its document (`DocumentToShow` in
  * `app/src/documents.rs`), or null while the window shows no document: the showing the window is
  * at, for the next request, the document's file, what to do with the render, the rendered
- * document as its HTML or why it can't be read, a notice the app held until the page first
- * asked, or null, and whether the window has a document to go back or forward to.
+ * document or why it can't be read, a notice the app held until the page first asked, or null,
+ * and whether the window has a document to go back or forward to.
  */
 export type DocumentToShow =
   | ({
@@ -108,7 +121,7 @@ export type DocumentToShow =
       notice: Notice | null;
       steps: Steps;
     } & Place &
-      ({ document: string } | { error: Notice }))
+      ({ document: RenderedDocument } | { error: Notice }))
   | null;
 
 /** What `follow_link` leaves for the page to do (`Followed` in `app/src/links.rs`). */

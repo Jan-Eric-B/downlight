@@ -4,8 +4,10 @@ import {
   DEFAULT_SETTINGS,
   type AnswerOf,
   type ArgsOf,
+  type DocumentCounts,
   type DocumentFile,
   type DocumentToShow,
+  type WaitNote,
 } from "./app";
 import { startCommands } from "./commands";
 import { startLinks } from "./links";
@@ -21,6 +23,7 @@ import {
   openWithTitleBar,
   settle,
   shownFrom,
+  shownWaitNote,
   tell,
   titleBarButton,
   titleBarAppName,
@@ -32,12 +35,19 @@ import {
 import { startSettings } from "./settings";
 import { startTitleBar } from "./title-bar";
 import { startDocumentView } from "./view";
+import { WAIT_NOTE_MS } from "./wait-note";
 
 /** Each `place_maximize_button` request's arguments, in turn. */
 let placed: ArgsOf<"place_maximize_button">[];
 
-/** The app's answers to `render_document`, in turn; the last one repeats. */
-let answers: DocumentToShow[];
+/**
+ * The app's answers to `render_document`, in turn, or one that comes only once it resolves; the
+ * last one repeats.
+ */
+let answers: (DocumentToShow | Promise<DocumentToShow>)[];
+
+/** What the app's `wait_note` names. */
+let waitedFor: WaitNote | null;
 
 /** How the app answers `reveal_document`. */
 let reveal: () => Promise<AnswerOf<"reveal_document">>;
@@ -49,9 +59,11 @@ let stop: AbortController;
 
 beforeEach(async () => {
   answers = [];
+  waitedFor = null;
   reveal = () => Promise.resolve(null);
   ({ placed, layOut: layOutTitleBar } = await openWithTitleBar({
     render_document: () => nextInTurn(answers) ?? null,
+    wait_note: () => waitedFor,
     reveal_document: () => reveal(),
     // A link shows another document in this window: the app tells the page, which asks for it.
     follow_link: async () => {
@@ -64,6 +76,7 @@ beforeEach(async () => {
 
 afterEach(() => {
   stop.abort();
+  vi.useRealTimers();
   closeTitleBarWindow();
 });
 
@@ -235,17 +248,147 @@ test("a click on the logo asks the app for the window menu", async () => {
   expect(askedOfTheApp()).toEqual(["show_window_menu"]);
 });
 
-test("the title bar names the shown document's file, with its full path on hover", async () => {
-  answers = [shownFrom(README)];
+/** The app's answer that the window shows `file`'s new render, counted as `counts`, at once. */
+function reloadedFrom(
+  file: DocumentFile,
+  counts: DocumentCounts,
+): DocumentToShow {
+  return {
+    showing: 0,
+    file,
+    notice: null,
+    steps: { back: false, forward: false },
+    place: "reload",
+    document: { html: `<h1>${file.name}</h1>\n<p>Changed.</p>\n`, counts },
+  };
+}
+
+/** The app's answer that `file` can't be read. */
+function unreadFrom(file: DocumentFile): DocumentToShow {
+  return {
+    showing: 0,
+    file,
+    notice: null,
+    steps: { back: false, forward: false },
+    place: "show",
+    heading: null,
+    error: `Can't read ${file.path}: entity not found`,
+  };
+}
+
+test("the title bar names the shown document's file, with its full path and its counts on hover", async () => {
+  answers = [shownFrom(README, { counts: { lines: 1234, words: 5678 } })];
   await startWithTheDocumentView();
 
   expect(titleBarFileName().hidden).toBe(false);
   expect(titleBarFileName().textContent).toBe("README.md");
+  expect(titleBarFileName().title).toBe(
+    "C:\\work\\docs\\README.md\n1,234 lines, 5,678 words",
+  );
+});
+
+test("a document of one line and one word is counted in the singular", async () => {
+  answers = [
+    shownFrom(README, {
+      rendered: "<p>Hi</p>\n",
+      counts: { lines: 1, words: 1 },
+    }),
+  ];
+  await startWithTheDocumentView();
+
+  expect(titleBarFileName().title).toBe(
+    "C:\\work\\docs\\README.md\n1 line, 1 word",
+  );
+});
+
+test("an empty document is counted as none of either", async () => {
+  answers = [
+    shownFrom(README, { rendered: "", counts: { lines: 0, words: 0 } }),
+  ];
+  await startWithTheDocumentView();
+
+  expect(titleBarFileName().title).toBe(
+    "C:\\work\\docs\\README.md\n0 lines, 0 words",
+  );
+});
+
+test("the file name's accessible description has its path and counts", async () => {
+  answers = [shownFrom(README, { counts: { lines: 30, words: 1000 } })];
+  await startWithTheDocumentView();
+
+  expect(titleBarFileName().getAttribute("aria-description")).toBe(
+    "C:\\work\\docs\\README.md\n30 lines, 1,000 words",
+  );
+});
+
+test("a reload updates the counts", async () => {
+  answers = [
+    shownFrom(README, { counts: { lines: 3, words: 4 } }),
+    reloadedFrom(README, { lines: 5, words: 9 }),
+  ];
+  await startWithTheDocumentView();
+
+  const shown = nextShown();
+  await tell("ask-for-document", null);
+  await shown;
+  expect(titleBarFileName().title).toBe(
+    "C:\\work\\docs\\README.md\n5 lines, 9 words",
+  );
+  expect(titleBarFileName().getAttribute("aria-description")).toBe(
+    "C:\\work\\docs\\README.md\n5 lines, 9 words",
+  );
+});
+
+test("a document that can't be read has its path alone on hover", async () => {
+  answers = [unreadFrom(README)];
+  await startWithTheDocumentView();
+
+  expect(titleBarFileName().hidden).toBe(false);
   expect(titleBarFileName().title).toBe("C:\\work\\docs\\README.md");
+  expect(titleBarFileName().getAttribute("aria-description")).toBe(
+    "C:\\work\\docs\\README.md",
+  );
+});
+
+test("while the next document is on its way, the tooltip keeps the shown document's path and counts", async () => {
+  answers = [
+    shownFrom(README, { counts: { lines: 3, words: 4 } }),
+    new Promise<never>(() => undefined),
+  ];
+  waitedFor = { file: GUIDE, size: "100 MB" };
+  await startWithTheDocumentView();
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+
+  await giveAnotherDocument();
+  await vi.advanceTimersByTimeAsync(WAIT_NOTE_MS);
+  await vi.waitFor(() => {
+    expect(shownWaitNote()?.textContent).toBe("Showing guide.md (100 MB) ...");
+  });
+  expect(titleBarFileName().textContent).toBe("README.md");
+  expect(titleBarFileName().title).toBe(
+    "C:\\work\\docs\\README.md\n3 lines, 4 words",
+  );
+});
+
+test("the empty window has no tooltip of counts", async () => {
+  answers = [shownFrom(README), null];
+  await startWithTheDocumentView();
+
+  const shown = nextShown();
+  await giveAnotherDocument();
+  await shown;
+  expect(titleBarAppName().hidden).toBe(false);
+  expect(titleBarAppName().title).toBe("");
+  expect(titleBarFileName().hidden).toBe(true);
+  expect(titleBarFileName().title).toBe("");
+  expect(titleBarFileName().hasAttribute("aria-description")).toBe(false);
 });
 
 test("the name follows the document a link shows", async () => {
-  answers = [shownFrom(README, 0), shownFrom(GUIDE, 1)];
+  answers = [
+    shownFrom(README),
+    shownFrom(GUIDE, { showing: 1, counts: { lines: 2, words: 7 } }),
+  ];
   startLinks(stop.signal);
   await startWithTheDocumentView();
   await settle();
@@ -254,7 +397,9 @@ test("the name follows the document a link shows", async () => {
   document.querySelector<HTMLAnchorElement>('a[href="guide.md"]')?.click();
   await shown;
   expect(titleBarFileName().textContent).toBe("guide.md");
-  expect(titleBarFileName().title).toBe("C:\\work\\docs\\guide.md");
+  expect(titleBarFileName().title).toBe(
+    "C:\\work\\docs\\guide.md\n2 lines, 7 words",
+  );
 });
 
 // The app's name in the empty window (window design ticket 14).
@@ -271,7 +416,7 @@ test("the empty window shows Downlight beside the logo, in the file name's place
 });
 
 test("showing a document replaces the app's name with the file name, and an empty window brings it back", async () => {
-  answers = [null, shownFrom(README, 1), null];
+  answers = [null, shownFrom(README, { showing: 1 }), null];
   await startWithTheDocumentView();
 
   let shown = nextShown();
@@ -401,7 +546,7 @@ test("Edit is disabled in a window without a document, and Open isn't", async ()
 });
 
 test("Edit is enabled once the window shows a document, and disabled again without one", async () => {
-  answers = [null, shownFrom(README, 1), null];
+  answers = [null, shownFrom(README, { showing: 1 }), null];
   startCommands(stop.signal);
   await startWithTheDocumentView();
 

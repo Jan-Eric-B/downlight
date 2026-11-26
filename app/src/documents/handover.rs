@@ -243,7 +243,7 @@ pub struct DocumentToShow {
     steps: Steps,
 }
 
-/// The rendered document, which goes as its HTML, or why it can't be read.
+/// The rendered document, which goes as its HTML and its counts, or why it can't be read.
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 enum Content {
@@ -335,10 +335,10 @@ pub fn wait_note_samples() -> serde_json::Result<serde_json::Value> {
 }
 
 /// A sample of each answer [`render_document`] gives, by name, which the page's tests read
-/// (`app/src/contract.rs`, ticket 27): the rendered document goes as its HTML, the heading only
-/// with a show, a read that fails as why, the document's file with each, a held notice with the
-/// first (ticket 26), and whether there is somewhere to go back or forward to with each, which is
-/// nowhere but after a return (ticket 12).
+/// (`app/src/contract.rs`, ticket 27): the rendered document goes as its HTML and its counts
+/// (window design ticket 10), the heading only with a show, a read that fails as why, the
+/// document's file with each, a held notice with the first (ticket 26), and whether there is
+/// somewhere to go back or forward to with each, which is nowhere but after a return (ticket 12).
 #[cfg(test)]
 pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
     use serde::ser::Error as _;

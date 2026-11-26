@@ -180,7 +180,7 @@ test("a full screen the app couldn't switch leaves the title bar and its room as
 });
 
 test("going full screen and leaving keep the reading position, with the room for the bar already changed", async () => {
-  answers = [shownFrom(SHOWN_FILE, 0, readme)];
+  answers = [shownFrom(SHOWN_FILE, { rendered: readme })];
   startTitleBar(stop.signal);
   await startDocumentView(0);
   startCommands(stop.signal);

@@ -1,4 +1,5 @@
 import { askApp } from "./app";
+import { createCornerBubble } from "./corner-bubble";
 import { showingWhy } from "./notice";
 import { DOCUMENT_VIEW_SELECTOR, showingInView, visitHeading } from "./view";
 
@@ -41,18 +42,6 @@ function shownTarget(target: string): string {
   return url && NORMALIZED_SCHEMES.has(url.protocol) ? url.href : target;
 }
 
-/** The bubble at the bottom left that shows a link's target, as a browser's status bar does. */
-function createTargetBubble(): HTMLElement {
-  const bubble = document.createElement("div");
-  // A markdown-body, for github-markdown-css's font and its light or dark colors.
-  bubble.className = "link-target markdown-body";
-  // A screen reader reads the link's target from the link itself.
-  bubble.setAttribute("aria-hidden", "true");
-  bubble.hidden = true;
-  document.body.append(bubble);
-  return bubble;
-}
-
 /**
  * Follows the links in the shown document when they are clicked, and shows a link's target while
  * the pointer is over it or it has the keyboard's focus. The webview never follows a link itself:
@@ -61,7 +50,9 @@ function createTargetBubble(): HTMLElement {
  * clicked. The signal removes the listeners again, for the tests.
  */
 export function startLinks(signal?: AbortSignal): void {
-  const bubble = createTargetBubble();
+  // At the bottom left, as a browser's status bar shows a link's target. A screen reader reads
+  // the target from the link itself.
+  const bubble = createCornerBubble("link-target");
 
   addEventListener(
     "click",

@@ -853,8 +853,10 @@ dependencies = [
  "encoding_rs",
  "percent-encoding",
  "serde",
+ "serde_json",
  "syntect",
  "two-face",
+ "unicode-segmentation",
  "url",
 ]
 

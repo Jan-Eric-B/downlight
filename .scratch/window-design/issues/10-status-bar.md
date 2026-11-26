@@ -8,11 +8,11 @@ Spec: [Window design](../spec.md)
 
 **Status:** ready-for-agent
 
-- [ ] The core counts the document's lines and words while it renders, and the rendered document carries them to the page.
-- [ ] The file name's tooltip reads the path, then "1,234 lines, 5,678 words" on the next line; the file name button's accessible description has the counts too.
-- [ ] The selection bubble shows "12 words, 68 characters" while the document's text is selected, and hides when the selection collapses or the document changes.
-- [ ] Core tests, app contract samples and page tests (seams below), written first.
-- [ ] Measured on the 1 MB test document with the timing switch: render time before and after, recorded here.
+- [x] The core counts the document's lines and words while it renders, and the rendered document carries them to the page.
+- [x] The file name's tooltip reads the path, then "1,234 lines, 5,678 words" on the next line; the file name button's accessible description has the counts too.
+- [x] The selection bubble shows "12 words, 68 characters" while the document's text is selected, and hides when the selection collapses or the document changes.
+- [x] Core tests, app contract samples and page tests (seams below), written first.
+- [x] Measured on the 1 MB test document with the timing switch: render time before and after, recorded here.
 - [ ] The hand checks below, recorded here.
 
 ## Decisions
@@ -58,6 +58,34 @@ On the release build (`npm run tauri build`), to record here:
 2. The 1 MB test document (`npm run documents`): the tooltip's counts are there once it shows; with `DOWNLIGHT_TIMING` set, no page task or frame over 100 ms from the counts, and select-all shows the bubble without one either.
 3. A selection across a code block and a table counts what the selection holds.
 4. A narrow window: the link target bubble and a notice draw above the selection bubble.
+
+Still to do: all four need a person at the release build; none is recorded yet.
+
+## Results
+
+**2026-11-26, measured** on the work machine with `npm run measure` (the release build, median of 5 runs, each in a new process after one discarded run), first on the clean tree before the core counted anything, then with this ticket's change. The machine was in everyday use, so the numbers move by tens of ms between sessions.
+
+| Read and render (`readAndRender`, ms) | 100 KB | 1 MB mixed | 1 MB prose |
+| --- | ---: | ---: | ---: |
+| Before | 507.3 | 958.5 | 48.1 |
+| After | 465.3 | 854.7 | 54.8 |
+
+| Reload, 1 MB mixed (ms) | render | shownSinceSave | longestAfterReload |
+| --- | ---: | ---: | ---: |
+| Before | 949.1 | 1681.9 | 204.3 (worst 256.2) |
+| After | 507.3 | 920.9 | 0.0 (worst 108.0) |
+
+- **The counting's cost is within the measurement's noise on the 1 MB documents.** The 1 MB prose document, the one whose render isn't mostly highlighting, went from 48.1 to 54.8 ms, but two end-to-end sessions on a machine in use don't tell a few ms of counting from the machine. The 100 KB and 1 MB mixed renders are mostly code highlighted within the highlight limit's time, which varies more between runs than the counting costs, so they came out faster after; that is the machine, not the change, and so is the reload's halving: the before session's reload runs got slower run by run (render 542 to 1145 ms), as a loaded machine does.
+- The words are counted from the sanitized HTML, one run of text between two blocks at a time, so each run of ASCII text takes `unicode_words`' ASCII path even in a document with other letters elsewhere. The lines are counted without holding them.
+- **After the review:** the counting looks at the render's `Leave` after each run of text, so a Stop while a 100 MB document is counted gives up at the next block instead of counting to the end (ticket 38). Which tags end a run is sanitizing's `BLOCK_TAGS` (and `br`), not a copy of it, and the file's lines are split by one rule (`core/src/lines.rs`) for copy, render and counts. Tests through `render` now cover raw HTML blocks, table cells and line breaks that touch, which comrak's own blocks never do. Not measured again. In the page, Find's index and the selection's counts read the view's text through one sliced walk (`page/src/document-text.ts`), which also splits a text node longer than a slice; a burst of selection changes makes one count, and the two bubbles share one creator and one CSS rule (`page/src/corner-bubble.ts`, `.corner-bubble`).
+- No page task or frame over 100 ms after the document arrived in any run, before or after (`longestAfterDocument`). The selection's counts take in 64 KB of text per task, as Find's index does; that select-all of the 1 MB document shows the bubble without a long task is hand check 2.
+
+**Decided on the way:**
+
+- The title bar names the document in view, as before, so while the next one is on its way under the wait note the tooltip keeps the shown document's path and counts; a document that can't be read has its path alone. The first window of a large document shows no file name until it arrives, so it has no tooltip to show "the path alone" in.
+- The selection's count skips what the reader can't see in it: a closed section's content (but its summary) and the copy buttons. The core counts a closed section's text, as the text of HTML that survives sanitizing, so select-all of `find.md` counts 7 words fewer than its tooltip says. `unicode_words` also counts a superscript digit such as the "²" of "g/m²" as a word, which `Intl.Segmenter` doesn't (`github.md`: one word apart). Both are in the page's tests.
+- The notice now has a `z-index` (2) of its own, so it draws above the selection's bubble (1); the link target bubble (2) was there already. The bubble sits beside the scroll bar, set off by its width when it shows.
+- `cargo audit`: no advisory for `unicode-segmentation` (1.13.3); the 7 allowed warnings are the GTK and zbus crates' of before.
 
 ## Comments
 

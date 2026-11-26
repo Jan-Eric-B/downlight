@@ -1,10 +1,12 @@
 import {
   askApp,
   listenToApp,
+  type DocumentCounts,
   type DocumentFile,
   type DocumentToShow,
   type Messages,
   type Notice,
+  type RenderedDocument,
   type Step,
   type Steps,
 } from "./app";
@@ -132,16 +134,22 @@ function scrollDocumentToTop(): void {
  */
 export type ShownReason = "shown" | "reload" | "return";
 
+/** The document a window shows, also one whose file can't be read. */
+export interface ShownDocument {
+  file: DocumentFile;
+  /** Its counts, as the core counted them while it rendered, or null when it can't be read. */
+  counts: DocumentCounts | null;
+}
+
 /** What the `whenDocumentShown` listeners hear each time the view's content was replaced. */
 interface Shown {
   /** The view and its scroller. */
   view: ScrolledView;
   reason: ShownReason;
   /**
-   * The file of the document the window shows: null while it shows none, or when the app couldn't
-   * be asked.
+   * The document the window shows: null while it shows none, or when the app couldn't be asked.
    */
-  file: DocumentFile | null;
+  document: ShownDocument | null;
 }
 
 type ShownListener = (shown: Shown) => void;
@@ -149,14 +157,13 @@ type ShownListener = (shown: Shown) => void;
 const shownListeners = new Set<ShownListener>();
 
 /**
- * Runs `listener` with the view and its scroller, why the view's content changed, and the file of
- * the document the window shows, each time the view's content has been replaced: when the window shows its document or another
- * one, after a reload once the view is back at the reading position, and when the window shows no
- * document or why it can't show one. A request that replaced the content but was then overtaken
- * leaves the call to the request that overtook it, which makes it even if it fails, so a replaced
- * view is always heard of, once the last request ends. This is the one hook for that, so Find
- * recounts here (ticket 14) and the title bar names the file (window design ticket 04). Returns a
- * function that removes the listener.
+ * Runs `listener` with the view and its scroller, why the view's content changed, and the
+ * document the window shows, each time the view's content has been replaced: when the window
+ * shows its document or another one, after a reload once the view is back at the reading
+ * position, and when the window shows no document or why it can't show one. A request that
+ * replaced the content but was then overtaken leaves the call to the request that overtook it,
+ * which makes it even if it fails, so a replaced view is always heard of, once the last request
+ * ends. This is the one hook for that. Returns a function that removes the listener.
  */
 export function whenDocumentShown(listener: ShownListener): () => void {
   shownListeners.add(listener);
@@ -169,7 +176,7 @@ export function whenDocumentShown(listener: ShownListener): () => void {
 interface StartedView {
   request: () => Promise<void>;
   showing: () => number | null;
-  file: () => DocumentFile | null;
+  document: () => ShownDocument | null;
   lineToEdit: () => number | undefined;
   step: (step: Step) => void;
   canStep: (step: Step) => boolean;
@@ -204,7 +211,7 @@ export function showingInView(): number | null {
  * ticket 05); false while it shows none or hasn't started.
  */
 export function showsDocument(): boolean {
-  return (theView?.file() ?? null) !== null;
+  return (theView?.document() ?? null) !== null;
 }
 
 /**
@@ -335,10 +342,10 @@ interface Placement {
    */
   answered: number | null;
   /**
-   * The file of the document the window shows, also when it can't be read, or null for the
-   * empty state or when the app couldn't be asked.
+   * The document the window shows, also when it can't be read, or null for the empty state or
+   * when the app couldn't be asked.
    */
-  file: DocumentFile | null;
+  document: ShownDocument | null;
   /** The core's rendered HTML, why the document can't be shown, or null for the empty state. */
   content: { html: string } | { why: Notice } | null;
   /**
@@ -384,12 +391,20 @@ function placeError(
     reason,
     showing: null,
     answered,
-    file,
+    document: file === null ? null : { file, counts: null },
     content: { why },
     ticks: NO_TICKS,
     land: atTop,
     steps,
   };
+}
+
+/** What the core's render of `file` puts in the view, and the document it shows there. */
+function rendered(
+  file: DocumentFile,
+  { html, counts }: RenderedDocument,
+): Pick<Placement, "document" | "content"> {
+  return { document: { file, counts }, content: { html } };
 }
 
 /**
@@ -406,7 +421,7 @@ function placementFor(
       reason: "shown",
       showing: null,
       answered: null,
-      file: null,
+      document: null,
       content: null,
       ticks: NO_TICKS,
       land: atTop,
@@ -420,8 +435,7 @@ function placementFor(
         reason: "reload",
         showing,
         answered: showing,
-        file,
-        content: { html: answer.document },
+        ...rendered(file, answer.document),
         ticks: "keep",
         land: atReadingPosition,
         steps,
@@ -433,8 +447,7 @@ function placementFor(
         reason: "return",
         showing,
         answered: showing,
-        file,
-        content: { html: answer.document },
+        ...rendered(file, answer.document),
         // As a reload does, the ticks are dropped if the file's number of task items changed
         // since the view left it, so a tick never lands on the wrong item.
         ticks: history.ticksOf(showing),
@@ -448,8 +461,7 @@ function placementFor(
         reason: "shown",
         showing,
         answered: showing,
-        file,
-        content: { html: answer.document },
+        ...rendered(file, answer.document),
         ticks: NO_TICKS,
         land: atHeading(answer.heading),
         steps,
@@ -567,8 +579,8 @@ export async function startDocumentView(
    * from a reload; null while it shows the empty state, an error or nothing yet.
    */
   let showing: number | null = null;
-  /** The file of the document the view shows, for the `whenDocumentShown` listeners. */
-  let file: DocumentFile | null = null;
+  /** The document the view shows, for the `whenDocumentShown` listeners. */
+  let shownDocument: ShownDocument | null = null;
   /**
    * The showing of the last answer the view placed, as the app named it: the showing in view, or
    * the one whose answer said why its document can't be shown, which the view's `showing` doesn't
@@ -650,7 +662,7 @@ export async function startDocumentView(
     if (placement.steps) history.appCanStep(placement.steps);
     showing = placement.showing;
     answered = placement.answered;
-    file = placement.file;
+    shownDocument = placement.document;
     view.hidden = content === null;
     empty.hidden = content !== null;
     showGoneBar();
@@ -785,7 +797,7 @@ export async function startDocumentView(
     const reason = unannounced;
     unannounced = undefined;
     for (const listener of shownListeners)
-      listener({ view: shown, reason, file });
+      listener({ view: shown, reason, document: shownDocument });
   };
 
   /**
@@ -880,7 +892,7 @@ export async function startDocumentView(
   theView = {
     request,
     showing: () => showing,
-    file: () => file,
+    document: () => shownDocument,
     lineToEdit: () => lineToEditAt(shown),
     step,
     canStep: (to) => history.canStep(showing, to),
