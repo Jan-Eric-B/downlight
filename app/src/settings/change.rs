@@ -35,6 +35,9 @@ pub enum SettingChange {
     /// The accent color the reader picked in the settings flyout (window design tickets 08 and
     /// 09).
     AccentColor { accent_color: AccentColor },
+    /// The overview ruler as the reader checked or unchecked it in the settings flyout (overview
+    /// ruler ticket 02), set rather than switched like the flyout's other choices.
+    OverviewRuler { overview_ruler: bool },
     /// "Default" under Edit with in the settings flyout (window design ticket 08): Edit forgets
     /// the chosen editor and opens the text file program again, or Notepad. Choosing an editor stays a command
     /// of its own (`choose_editor`), since it opens a dialog.
@@ -50,6 +53,7 @@ impl SettingChange {
             Self::Theme { theme } => settings.theme = theme,
             Self::Backdrop { backdrop } => settings.backdrop = backdrop,
             Self::AccentColor { accent_color } => settings.accent_color = accent_color,
+            Self::OverviewRuler { overview_ruler } => settings.overview_ruler = overview_ruler,
             Self::ClearEditor => settings.editor = None,
         }
     }
@@ -62,6 +66,7 @@ impl SettingChange {
             Self::Theme { .. } => "The theme",
             Self::Backdrop { .. } => "The backdrop",
             Self::AccentColor { .. } => "The accent color",
+            Self::OverviewRuler { .. } => "The overview ruler",
             Self::ClearEditor => "Edit with Default",
         }
     }
@@ -87,8 +92,13 @@ pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
         | SettingChange::AccentColor {
             accent_color: AccentColor::Amber | AccentColor::Windows,
         }
+        | SettingChange::OverviewRuler {
+            overview_ruler: true | false,
+        }
         | SettingChange::ClearEditor => {}
     };
+    let overview_ruler =
+        |overview_ruler| serde_json::to_value(SettingChange::OverviewRuler { overview_ruler });
     let zoom = |change| serde_json::to_value(SettingChange::Zoom { change });
     let theme = |theme| serde_json::to_value(SettingChange::Theme { theme });
     let backdrop = |backdrop| serde_json::to_value(SettingChange::Backdrop { backdrop });
@@ -108,6 +118,8 @@ pub fn contract_samples() -> serde_json::Result<serde_json::Value> {
         "backdropNone": backdrop(Backdrop::None)?,
         "accentColorAmber": accent_color(AccentColor::Amber)?,
         "accentColorWindows": accent_color(AccentColor::Windows)?,
+        "overviewRulerOn": overview_ruler(true)?,
+        "overviewRulerOff": overview_ruler(false)?,
         "clearEditor": serde_json::to_value(SettingChange::ClearEditor)?,
     }))
 }
@@ -195,6 +207,46 @@ mod tests {
         // A set, not a switch: picking it again keeps it.
         let again = changed(picked.clone(), SettingChange::Theme { theme: Theme::Dark });
         assert_eq!(again, picked);
+    }
+
+    #[test]
+    fn the_overview_ruler_is_set_to_what_the_reader_checked_and_leaves_the_rest() {
+        let off = changed(
+            Settings::default(),
+            SettingChange::OverviewRuler {
+                overview_ruler: false,
+            },
+        );
+        assert_eq!(
+            off,
+            Settings {
+                overview_ruler: false,
+                ..Settings::default()
+            }
+        );
+        // A set, not a switch: unchecked again, it stays off.
+        let again = changed(
+            off.clone(),
+            SettingChange::OverviewRuler {
+                overview_ruler: false,
+            },
+        );
+        assert_eq!(again, off);
+        let on = changed(
+            off,
+            SettingChange::OverviewRuler {
+                overview_ruler: true,
+            },
+        );
+        assert_eq!(on, Settings::default());
+    }
+
+    #[test]
+    fn overview_ruler_change_is_the_one_the_page_sends() {
+        let change: SettingChange =
+            serde_json::from_str(r#"{ "setting": "overviewRuler", "overviewRuler": false }"#)
+                .unwrap();
+        assert!(!changed(Settings::default(), change).overview_ruler);
     }
 
     #[test]

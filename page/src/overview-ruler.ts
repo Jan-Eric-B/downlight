@@ -10,6 +10,7 @@ import {
   type HeadingLevel,
 } from "./headings";
 import { afterNextFrame, type ScrolledView } from "./reading-position";
+import { whenSettingChanges } from "./settings";
 import { showsDocument, whenDocumentShown } from "./view";
 import { whenWaitNoteChanges } from "./wait-note";
 
@@ -91,9 +92,10 @@ function markElement({ level, row }: PlacedMark): HTMLElement {
 }
 
 /**
- * Starts the overview ruler, after Find: its strip, hidden until a document that scrolls is shown,
- * and redrawn, at most once per frame, whenever the document, its headings or the size of the
- * scroller or anything in it changes. The signal stops it, for the tests.
+ * Starts the overview ruler, after Find and `startSettings`: its strip, hidden while the settings
+ * have it off and until a document that scrolls is shown, and redrawn, at most once per frame,
+ * whenever the document, its headings or the size of the scroller or anything in it changes. The
+ * signal stops it, for the tests.
  */
 export function startOverviewRuler(signal?: AbortSignal): void {
   const strip = document.createElement("div");
@@ -105,6 +107,8 @@ export function startOverviewRuler(signal?: AbortSignal): void {
 
   /** The view and its scroller, once the ruler has heard of them. */
   let shown: ScrolledView | undefined;
+  /** Whether the reader has the ruler on in the settings (ticket 02), set as the ruler starts. */
+  let switchedOn = false;
   /** Whether the wait note shows, for a document that isn't in view yet. */
   let waiting = false;
   let stopped = false;
@@ -117,7 +121,7 @@ export function startOverviewRuler(signal?: AbortSignal): void {
    * marks it has, as during a reload, for a redraw that waits to come once the list does.
    */
   const redraw = (): boolean => {
-    if (!shown || !showsDocument() || waiting) {
+    if (!switchedOn || !shown || !showsDocument() || waiting) {
       strip.hidden = true;
       return true;
     }
@@ -182,6 +186,13 @@ export function startOverviewRuler(signal?: AbortSignal): void {
     }
     redrawSoon();
   });
+  // Hears only snapshots that change the switch. The strip takes no layout, so switching it moves
+  // nothing and lands nowhere (spec, "Placement"): a landing would snap a view part way through a
+  // block to its top.
+  const stopHearingSwitch = whenSettingChanges("overviewRuler", (on) => {
+    switchedOn = on;
+    redrawNow();
+  });
   const stopHearingHeadings = whenHeadingsChange(redrawSoon);
   const stopHearingWaits = whenWaitNoteChanges((shows) => {
     waiting = shows;
@@ -190,6 +201,7 @@ export function startOverviewRuler(signal?: AbortSignal): void {
   signal?.addEventListener("abort", () => {
     stopped = true;
     stopHearingShown();
+    stopHearingSwitch();
     stopHearingHeadings();
     stopHearingWaits();
     sizes?.disconnect();

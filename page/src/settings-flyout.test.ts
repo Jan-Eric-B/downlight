@@ -138,6 +138,13 @@ function checkedIn(legend: string): string | undefined {
   return checked?.closest("label")?.textContent;
 }
 
+/** View's Overview ruler checkbox. */
+function overviewRuler(): HTMLInputElement {
+  const box = choice("View", "Overview ruler");
+  expect(box.type).toBe("checkbox");
+  return box;
+}
+
 function chooseButton(): HTMLButtonElement {
   const found = [...group("Edit with").querySelectorAll("button")].find(
     (button) => button.textContent === "Choose...",
@@ -180,7 +187,7 @@ test("Settings joins Full width and Keep on top in the title bar, before the win
   expect(gear().title).toBe("Settings (Ctrl+,)");
 });
 
-test("the gear opens the flyout with Theme, Backdrop, Accent color and Edit with, above the document rather than in the title bar", async () => {
+test("the gear opens the flyout with Theme, Backdrop, Accent color, View and Edit with, above the document rather than in the title bar", async () => {
   await startPage();
   expect(isOpen()).toBe(false);
   expect(gear().getAttribute("aria-expanded")).toBe("false");
@@ -193,7 +200,7 @@ test("the gear opens the flyout with Theme, Backdrop, Accent color and Edit with
     [...flyout().querySelectorAll("legend")].map(
       (legend) => legend.textContent,
     ),
-  ).toEqual(["Theme", "Backdrop", "Accent color", "Edit with"]);
+  ).toEqual(["Theme", "Backdrop", "Accent color", "View", "Edit with"]);
   expect(choicesIn("Theme")).toEqual(["System", "Light", "Dark"]);
   expect(choicesIn("Backdrop")).toEqual([
     "Mica",
@@ -211,7 +218,7 @@ test("where the OS has no accent color of its own, the flyout offers no choice o
     [...flyout().querySelectorAll("legend")].map(
       (legend) => legend.textContent,
     ),
-  ).toEqual(["Theme", "Backdrop", "Edit with"]);
+  ).toEqual(["Theme", "Backdrop", "View", "Edit with"]);
 });
 
 test("the gear again closes the flyout, and the focus returns to the gear", async () => {
@@ -262,11 +269,13 @@ test("opening puts the focus on the reader's theme, and Tab moves through the co
   const theme = choice("Theme", "Dark");
   expect(document.activeElement).toBe(theme);
 
-  // One stop per group, at its checked choice, as the browser's own Tab does with radio buttons.
+  // One stop per group, at its checked choice, as the browser's own Tab does with radio buttons,
+  // and one at each checkbox.
   const stops = [
     theme,
     choice("Backdrop", "Acrylic"),
     choice("Accent color", "Amber"),
+    overviewRuler(),
     choice("Edit with", "Notepad++"),
     chooseButton(),
   ];
@@ -313,6 +322,41 @@ test("the flyout shows the settings as they are, and follows a change from any w
     checkedIn("Backdrop"),
     checkedIn("Accent color"),
   ]).toEqual(["Dark", "Mica", "Windows"]);
+});
+
+test("View's Overview ruler is checked while the settings show the ruler, and follows a change from any window", async () => {
+  await startPage();
+  await openWithTheGear();
+  expect(choicesIn("View")).toEqual(["Overview ruler"]);
+  expect(overviewRuler().checked).toBe(true);
+
+  await tell("settings", { ...ON_WINDOWS, overviewRuler: false });
+  expect(overviewRuler().checked).toBe(false);
+  await tell("settings", { ...ON_WINDOWS, overviewRuler: true });
+  expect(overviewRuler().checked).toBe(true);
+});
+
+test("a window opened with the ruler switched off shows Overview ruler unchecked", async () => {
+  await startPage({ ...ON_WINDOWS, overviewRuler: false });
+  await openWithTheGear();
+  expect(overviewRuler().checked).toBe(false);
+});
+
+test("toggling Overview ruler asks the app to set the ruler to what the box shows for every window", async () => {
+  await startPage();
+  await openWithTheGear();
+  overviewRuler().click();
+  await settle();
+  expect(changes).toEqual([{ setting: "overviewRuler", overviewRuler: false }]);
+
+  // The app sends the new settings, which every window shows; then it is checked again.
+  await tell("settings", { ...ON_WINDOWS, overviewRuler: false });
+  overviewRuler().click();
+  await settle();
+  expect(changes).toEqual([
+    { setting: "overviewRuler", overviewRuler: false },
+    { setting: "overviewRuler", overviewRuler: true },
+  ]);
 });
 
 test("where the OS shows no backdrop, Backdrop is disabled and says why", async () => {

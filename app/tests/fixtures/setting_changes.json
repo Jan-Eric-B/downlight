@@ -29,6 +29,14 @@
   "fullWidth": {
     "setting": "switchFullWidth"
   },
+  "overviewRulerOff": {
+    "overviewRuler": false,
+    "setting": "overviewRuler"
+  },
+  "overviewRulerOn": {
+    "overviewRuler": true,
+    "setting": "overviewRuler"
+  },
   "resetZoom": {
     "change": "reset",
     "setting": "zoom"

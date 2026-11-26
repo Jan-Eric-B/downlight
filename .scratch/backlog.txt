@@ -5,16 +5,15 @@ ID = folder/number under .scratch/<folder>/issues/<number>-*.md (v1 = downlight-
 Status: ready = ready-for-agent, triage = needs-triage (grill first), info = needs-info (investigate).
 Move lines to change the order. A new ticket gets a line here; a closed ticket's line is removed.
 
+ruler/03 | Overview ruler: Find's marks, and clicking them | ready | blocked by ruler/01; extends Find's interface (find-options and tables/01 must keep it working)
+ruler/04 | Overview ruler: clicking and hovering heading marks | ready | blocked by ruler/01
+ruler/05 | Overview ruler: large documents, measured | ready | blocked by ruler/03; may switch the ruler to a canvas; does not wait for v1/39
 outline/01 | Alt+Down and Alt+Up step through the headings | ready | blocked by ruler/01 (the list of headings); adds the view's scroll to a heading without a History step; adds the headings fixture unless ruler/01 did
 outline/02 | The Outline lists the headings and goes to one | ready | blocked by ruler/01; title bar button (first, own group), Ctrl+Shift+O, menu entry after Find; closes and is closed by the settings flyout
 outline/03 | Typing filters the Outline | ready | blocked by outline/02
 outline/04 | The Outline across reloads, other documents and the empty window | ready | blocked by outline/03
 outline/05 | The Outline in full screen, and its place in Esc's order | ready | blocked by outline/02; joins image-lightbox/01's one Esc list if that is done, else defers as the settings flyout does (whichever lands second adapts)
 outline/06 | Outline: large documents, measured | ready | blocked by outline/01, 03 and 04; does not wait for v1/39
-ruler/02 | Overview ruler: the switch in the settings (flyout "View" group) | ready | blocked by ruler/01; creates the flyout's "View" group that reader-settings and remote-images may use
-ruler/03 | Overview ruler: Find's marks, and clicking them | ready | blocked by ruler/01; extends Find's interface (find-options and tables/01 must keep it working)
-ruler/04 | Overview ruler: clicking and hovering heading marks | ready | blocked by ruler/01
-ruler/05 | Overview ruler: large documents, measured | ready | blocked by ruler/03; may switch the ruler to a canvas; does not wait for v1/39
 image-lightbox/01 | One place owns Esc's order | ready | not blocked; prefactor, no visible change; touches the Esc listeners of the settings flyout, Find, Stop and full-screen/02
 image-lightbox/02 | A click on an image shows it in the lightbox | ready | blocked by image-lightbox/01; Esc after the flyout, before Find, Stop and full screen
 image-lightbox/03 | Step through the document's images | ready | blocked by image-lightbox/02

@@ -293,6 +293,8 @@ export type PageSettings = {
   zoom: number;
   /** Whether the document fills the window's width (window design ticket 06). */
   fullWidth: boolean;
+  /** Whether the page shows the overview ruler beside the scroll bar (overview ruler ticket 02). */
+  overviewRuler: boolean;
   /**
    * The reader's theme, which the settings flyout shows. The app sets it on the window, which
    * gives the page its `prefers-color-scheme`, so nothing else in the page reads it.
@@ -317,6 +319,7 @@ export type PageSettings = {
 export const DEFAULT_SETTINGS: PageSettings = {
   zoom: 100,
   fullWidth: false,
+  overviewRuler: true,
   theme: "system",
   backdrop: "mica",
   accentColor: "amber",
@@ -341,6 +344,8 @@ function isPageSettings(value: unknown): value is PageSettings {
     value.zoom > 0 &&
     "fullWidth" in value &&
     typeof value.fullWidth === "boolean" &&
+    "overviewRuler" in value &&
+    typeof value.overviewRuler === "boolean" &&
     "theme" in value &&
     isOneOf(THEMES, value.theme) &&
     "backdrop" in value &&
@@ -398,6 +403,7 @@ export type SettingChange =
   | { setting: "theme"; theme: Theme }
   | { setting: "backdrop"; backdrop: Backdrop }
   | { setting: "accentColor"; accentColor: AccentColor }
+  | { setting: "overviewRuler"; overviewRuler: boolean }
   | { setting: "clearEditor" };
 
 /**

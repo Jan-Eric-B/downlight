@@ -28,8 +28,9 @@ const BAD_FILE_NAME: &str = "settings.json.bad";
 
 /// The reader's choices, as the settings file holds them. A value the file leaves out takes its
 /// default, and so does one it holds that doesn't parse, such as a theme a hand edit misspelled,
-/// while the others keep theirs (window design ticket 08). Every field takes [`or_default`].
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// while the others keep theirs (window design ticket 08). Every field takes [`or_default`], or
+/// [`or_on`] for a switch that is on by default.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
     /// The program Edit opens a document in, as Choose editor... picked it; None for the text
@@ -48,6 +49,10 @@ pub struct Settings {
     /// design ticket 06); off for a reader who never switched it.
     #[serde(deserialize_with = "or_default")]
     pub full_width: bool,
+    /// Whether every window shows the overview ruler beside its scroll bar (overview ruler ticket
+    /// 02); on for a reader who never switched it off, so it is found without looking for it.
+    #[serde(deserialize_with = "or_on")]
+    pub overview_ruler: bool,
     /// Light or dark, or as Windows has it (window design ticket 08).
     #[serde(deserialize_with = "or_default")]
     pub theme: Theme,
@@ -57,6 +62,23 @@ pub struct Settings {
     /// The color scale of what Downlight adds to a document (window design tickets 08 and 09).
     #[serde(deserialize_with = "or_default")]
     pub accent_color: AccentColor,
+}
+
+/// The settings of a reader who changed none: each value's default, but for the overview ruler,
+/// which is on. Also what `#[serde(default)]` takes a value the file leaves out from.
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            editor: None,
+            zoom: Zoom::default(),
+            window_size: None,
+            full_width: false,
+            overview_ruler: true,
+            theme: Theme::default(),
+            backdrop: Backdrop::default(),
+            accent_color: AccentColor::default(),
+        }
+    }
 }
 
 /// A field's value from the settings file, or the field's default when the value is there but
@@ -71,6 +93,16 @@ where
     Ok(T::deserialize(value).unwrap_or_default())
 }
 
+/// A switch's value from the settings file, as [`or_default`] reads one, but on when the value
+/// doesn't parse: for a switch that is on by default, where `bool`'s own default is off.
+fn or_on<'de, D>(deserializer: D) -> Result<bool, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(bool::deserialize(value).unwrap_or(true))
+}
+
 impl Settings {
     /// What of the settings the pages show, as every page gets it: in its URL when its window
     /// opens, and in a `settings` message whenever it changes (window design ticket 12), with
@@ -80,6 +112,7 @@ impl Settings {
         PageSettings {
             zoom: self.zoom,
             full_width: self.full_width,
+            overview_ruler: self.overview_ruler,
             theme: self.theme,
             backdrop: self.backdrop,
             accent_color: self.accent_color,
@@ -107,6 +140,8 @@ pub struct PageSettings {
     pub zoom: Zoom,
     /// Whether the document fills the window's width (window design ticket 06).
     pub full_width: bool,
+    /// Whether the page shows the overview ruler (overview ruler ticket 02).
+    pub overview_ruler: bool,
     /// The settings flyout shows the reader's theme; the app sets it on the window, which gives
     /// the page its `prefers-color-scheme` (window design ticket 08).
     pub theme: Theme,
@@ -140,6 +175,7 @@ impl PageSettings {
         Self {
             zoom: Zoom::from(125),
             full_width: true,
+            overview_ruler: false,
             theme: Theme::Dark,
             backdrop: Backdrop::None,
             accent_color: AccentColor::Windows,
@@ -584,6 +620,33 @@ mod tests {
     }
 
     #[test]
+    fn overview_ruler_defaults_to_on() {
+        let without_any = Folder::new("ruler-without-file");
+        let (store, _) = without_any.load();
+        assert!(store.get().page(None).overview_ruler);
+        let without_it = Folder::with_file("ruler-default", r#"{ "zoom": 125 }"#);
+        let (store, error) = without_it.load();
+        assert!(error.is_none(), "{error:?}");
+        assert!(store.get().overview_ruler);
+        assert!(store.get().page(None).overview_ruler);
+    }
+
+    #[test]
+    fn overview_ruler_switched_off_stays_off_after_a_restart() {
+        let folder = Folder::new("ruler-restart");
+        folder
+            .load()
+            .0
+            .change(|settings| settings.overview_ruler = false)
+            .saved
+            .unwrap();
+        let (restarted, error) = folder.load();
+        assert!(error.is_none(), "{error:?}");
+        assert!(!restarted.get().overview_ruler);
+        assert!(!restarted.get().page(None).overview_ruler);
+    }
+
+    #[test]
     fn update_gives_the_settings_after_the_change() {
         let (store, _) = SettingsStore::load(None);
         let updated = store.change(|settings| settings.zoom = Zoom::from(150));
@@ -652,7 +715,8 @@ mod tests {
         let folder = Folder::with_file(
             "broken-value",
             r#"{ "theme": "purple", "backdrop": 3, "zoom": 125, "fullWidth": "yes",
-                 "editor": "C:\\Tools\\edit.exe", "windowSize": { "width": "wide" } }"#,
+                 "overviewRuler": "off", "editor": "C:\\Tools\\edit.exe",
+                 "windowSize": { "width": "wide" } }"#,
         );
         let (store, error) = folder.load();
         assert!(error.is_none(), "{error:?}");
@@ -660,6 +724,7 @@ mod tests {
         assert_eq!(settings.theme, Theme::System);
         assert_eq!(settings.backdrop, Backdrop::Mica);
         assert!(!settings.full_width);
+        assert!(settings.overview_ruler);
         assert_eq!(settings.window_size, None);
         assert_eq!(u16::from(settings.zoom), 125);
         assert_eq!(settings.editor, Some(PathBuf::from(r"C:\Tools\edit.exe")));

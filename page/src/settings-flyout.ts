@@ -1,8 +1,9 @@
-// The settings flyout (window design ticket 08): the reader's Theme, Backdrop, Accent color and
-// Edit with, under the title bar's gear, above the document rather than over the whole window, so
-// each choice shows on the document at once. A choice is a `SettingChange`, which the app keeps
-// in the settings and sends every window; the flyout shows the settings as every window hears
-// them (`whenSettingsChange`), so a change from another window shows here too.
+// The settings flyout (window design ticket 08): the reader's Theme, Backdrop, Accent color, View
+// (overview ruler ticket 02) and Edit with, under the title bar's gear, above the document rather
+// than over the whole window, so each choice shows on the document at once. A choice is a
+// `SettingChange`, which the app keeps in the settings and sends every window; the flyout shows
+// the settings as every window hears them (`whenSettingsChange`), so a change from another window
+// shows here too.
 //
 // The gear is the `settings` command's button (commands.ts), which only toggles the flyout. Its
 // open state, `aria-expanded`, is the flyout's, set here on the button found by its command, so
@@ -105,6 +106,37 @@ function choiceGroup<V extends string>(
     element,
     show(value) {
       for (const input of inputs) input.checked = input.value === value;
+    },
+  };
+}
+
+/**
+ * View: the Overview ruler checkbox (overview ruler ticket 02), which sets the ruler to what the
+ * box shows once the reader toggles it, and `show`s what the settings hold.
+ */
+function viewGroup(): {
+  element: HTMLFieldSetElement;
+  show(on: boolean): void;
+} {
+  const element = fieldset("View");
+  const choices = document.createElement("div");
+  choices.className = "choices";
+  const input = document.createElement("input");
+  input.type = "checkbox";
+  input.addEventListener("change", () => {
+    void changeSetting({
+      setting: "overviewRuler",
+      overviewRuler: input.checked,
+    });
+  });
+  const label = document.createElement("label");
+  label.append(input, "Overview ruler");
+  choices.append(label);
+  element.append(choices);
+  return {
+    element,
+    show(on) {
+      input.checked = on;
     },
   };
 }
@@ -269,18 +301,20 @@ export function startSettingsFlyout(signal?: AbortSignal): void {
       void changeSetting({ setting: "accentColor", accentColor: value });
     },
   );
+  const view = viewGroup();
   const editWith = editWithGroup();
   element.append(theme.element, backdrop.element);
   // Where the OS has no accent color of its own, Amber is the one choice left, and a group of one
   // choice is none (window design ticket 09).
   if (settingsNow().windowsAccent !== null) element.append(accentColor.element);
-  element.append(editWith.element);
+  element.append(view.element, editWith.element);
   document.body.append(element);
 
   const show = (settings: PageSettings) => {
     theme.show(settings.theme);
     backdrop.show(settings.backdrop);
     accentColor.show(settings.accentColor);
+    view.show(settings.overviewRuler);
   };
   const stopFollowing = whenSettingsChange(show);
 

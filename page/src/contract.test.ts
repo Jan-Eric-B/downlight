@@ -887,6 +887,9 @@ test("the page's changes of the settings are each one the app takes, with its ke
     "Windows",
   ])
     flyoutChoice(label).click();
+  // The sampled settings have the overview ruler off: checked, then unchecked again.
+  flyoutChoice("Overview ruler").click();
+  flyoutChoice("Overview ruler").click();
   flyoutChoice("Default").click();
   await settle();
   expect(sent.map(inKeyOrder).toSorted()).toEqual(

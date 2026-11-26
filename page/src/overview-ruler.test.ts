@@ -4,7 +4,8 @@ import headings from "../../core/tests/fixtures/headings.html?raw";
 import { startHeadings } from "./headings";
 import { startOverviewRuler } from "./overview-ruler";
 import { afterNextFrame } from "./reading-position";
-import type { WaitNote } from "./app";
+import { DEFAULT_SETTINGS, type PageSettings, type WaitNote } from "./app";
+import { startSettings } from "./settings";
 import {
   deleteTheFile,
   fakeTheAppReading,
@@ -13,16 +14,23 @@ import {
   giveAnotherDocument,
   goneBar,
   layOut,
+  linesOf,
+  messageSample,
   nextShown,
+  openPageAt,
+  pageUrlSample,
   saveTheFile,
   shownWaitNote,
   stepAsTheApp,
   stopDocumentSample,
+  tell,
+  tellAsSampled,
   waitNoteAsTheApp,
   type Read,
 } from "./test-support";
 import {
   DOCUMENT_VIEW_SELECTOR,
+  SCROLLER_SELECTOR,
   startDocumentView,
   stepThroughHistory,
 } from "./view";
@@ -49,7 +57,7 @@ const BIG_DOCUMENT: WaitNote = {
  */
 let resize: (...changed: Element[]) => void;
 
-beforeEach(() => {
+beforeEach(async () => {
   mockWindows("document-0");
   documents = [];
   resize = fakeTitleBarLayout();
@@ -59,9 +67,7 @@ beforeEach(() => {
     step_history: stepAsTheApp,
     forget_forward: forgetForwardAsTheApp,
   });
-  stop = new AbortController();
-  startHeadings(stop.signal);
-  startOverviewRuler(stop.signal);
+  await startRulerAt(settingsUrl(DEFAULT_SETTINGS));
 });
 
 afterEach(() => {
@@ -70,8 +76,23 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   clearMocks();
+  openPageAt("");
   document.body.replaceChildren();
 });
+
+/** The page's URL with `settings` in it, as the app opens a window. */
+function settingsUrl(settings: PageSettings): string {
+  return `?settings=${encodeURIComponent(JSON.stringify(settings))}`;
+}
+
+/** Starts the settings, the list of headings and the ruler as a new window opened at `url` does. */
+async function startRulerAt(url: string): Promise<void> {
+  openPageAt(url);
+  await startSettings();
+  stop = new AbortController();
+  startHeadings(stop.signal);
+  startOverviewRuler(stop.signal);
+}
 
 /** The documents the window is given, in turn, each read as its HTML. */
 function showInTurn(...html: string[]): void {
@@ -382,4 +403,108 @@ test("the marks stay where they are while the view scrolls, as the scroll bar's 
     { kind: "h1", top: 0 },
     { kind: "h2", top: 368 },
   ]);
+});
+
+// The ruler's switch in the settings (overview ruler ticket 02).
+
+const RULER_OFF: PageSettings = { ...DEFAULT_SETTINGS, overviewRuler: false };
+
+test("switching the ruler off in the settings hides the strip, and switching it on shows its marks again", async () => {
+  layOut(1);
+  showInTurn(LONG);
+  await startShowing();
+  expect(strip().hidden).toBe(false);
+
+  await tell("settings", RULER_OFF);
+  await drawn();
+  expect(strip().hidden).toBe(true);
+
+  await tell("settings", DEFAULT_SETTINGS);
+  await drawn();
+  expect(strip().hidden).toBe(false);
+  expect(marks()).toEqual([
+    { kind: "h1", top: 0 },
+    { kind: "h2", top: 368 },
+  ]);
+});
+
+test("a window opened with the ruler switched off shows no strip until it is switched on", async () => {
+  stop.abort();
+  await startRulerAt(settingsUrl(RULER_OFF));
+  layOut(1);
+  showInTurn(LONG);
+  await startShowing();
+  expect(strip().hidden).toBe(true);
+
+  await tell("settings", DEFAULT_SETTINGS);
+  await drawn();
+  expect(strip().hidden).toBe(false);
+  expect(marks()).toEqual([
+    { kind: "h1", top: 0 },
+    { kind: "h2", top: 368 },
+  ]);
+});
+
+test("switching the ruler leaves the view where it was", async () => {
+  // Halfway down the h2's line, 51, part way into its block.
+  layOut(51.5);
+  showInTurn(LONG);
+  await startShowing();
+  const scroller = document.querySelector<HTMLElement>(SCROLLER_SELECTOR);
+  const before = scroller?.scrollTop;
+  // A scroll the webview makes puts the element's first line at the top of the view.
+  const scrolled = vi
+    .spyOn(Element.prototype, "scrollIntoView")
+    .mockImplementation(function (this: Element) {
+      layOut(linesOf(this)?.[0] ?? 1);
+    });
+
+  await tell("settings", RULER_OFF);
+  await drawn();
+  expect(strip().hidden).toBe(true);
+  await tell("settings", DEFAULT_SETTINGS);
+  await drawn();
+  expect(strip().hidden).toBe(false);
+
+  expect(scroller?.scrollTop).toBe(before);
+  expect(scrolled).not.toHaveBeenCalled();
+});
+
+test("a settings change that leaves the ruler as it is doesn't move the view", async () => {
+  layOut(51);
+  showInTurn(LONG);
+  await startShowing();
+  const scrolled = vi.spyOn(Element.prototype, "scrollIntoView");
+
+  await tell("settings", { ...DEFAULT_SETTINGS, theme: "dark" });
+  await drawn();
+  expect(scrolled).not.toHaveBeenCalled();
+  expect(strip().hidden).toBe(false);
+});
+
+// The app's samples of the snapshot (`messages.json` and `page_url.json`), whose ruler is off.
+
+test("the app's settings message switches the ruler off", async () => {
+  layOut(1);
+  showInTurn(LONG);
+  await startShowing();
+  expect(strip().hidden).toBe(false);
+
+  const sample = messageSample("settings");
+  expect(sample.event === "settings" && sample.payload.overviewRuler).toBe(
+    false,
+  );
+  await tellAsSampled(sample);
+  await drawn();
+  expect(strip().hidden).toBe(true);
+});
+
+test("a window opened at the app's URL starts with the ruler of its settings", async () => {
+  stop.abort();
+  await startRulerAt(pageUrlSample("allOff"));
+  layOut(1);
+  showInTurn(LONG);
+  await startShowing();
+
+  expect(strip().hidden).toBe(true);
 });

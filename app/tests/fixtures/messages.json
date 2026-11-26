@@ -60,6 +60,7 @@
       "accentColor": "windows",
       "backdrop": "none",
       "fullWidth": true,
+      "overviewRuler": false,
       "theme": "dark",
       "windowsAccent": {
         "base": "#0078d4",
